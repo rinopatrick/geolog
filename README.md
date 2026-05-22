@@ -2,7 +2,7 @@
 
 Open-source, production-style well log viewer for petroleum geophysicists and petrophysicists. Built with FastAPI + SQLite backend and Canvas-based frontend.
 
-![GeoLog](https://img.shields.io/badge/Domain-Oil%20%26%20Gas-blue) ![License](https://img.shields.io/badge/License-MIT-green)
+![GeoLog Screenshot](screenshot.png)
 
 ## Features
 
