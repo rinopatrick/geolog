@@ -151,6 +151,18 @@ Interpretation panels use **family fallback** — selecting "RT" will also searc
 
 MIT License — see [LICENSE](LICENSE).
 
+## Testing
+
+```bash
+# Parser tests (no server needed)
+python tests/test_parser.py
+
+# Full suite (parser + API — server must be running)
+python tests/test_parser.py
+```
+
+16 tests: 10 parser (always) + 6 API (needs server).
+
 ## Contributing
 
 1. Fork the repo
