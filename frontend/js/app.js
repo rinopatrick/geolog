@@ -1,6 +1,74 @@
 /**
  * GeoLog — Oil & Gas Well Log Viewer Application
  */
+
+// ─── UI Utilities ────────────────────────────────────────────
+const GeoModal = {
+    _resolve: null,
+    _confirmed: false,
+    show({ title, fields, onConfirm }) {
+        return new Promise(resolve => {
+            this._resolve = resolve;
+            this._confirmed = false;
+            document.getElementById('modalTitle').textContent = title;
+            const body = document.getElementById('modalBody');
+            body.innerHTML = fields.map(f => {
+                if (f.type === 'select') {
+                    const opts = f.options.map(o => `<option value="${o.value}" ${o.value === f.value ? 'selected' : ''}>${o.label}</option>`).join('');
+                    return `<label>${f.label}</label><select id="m_${f.id}">${opts}</select>`;
+                }
+                return `<label>${f.label}</label><input id="m_${f.id}" type="${f.type || 'text'}" value="${f.value ?? ''}" placeholder="${f.placeholder || ''}"${f.step ? ` step="${f.step}"` : ''}${f.type === 'color' ? ' style="height:36px;padding:2px 4px"' : ''}>`;
+            }).join('');
+            const footer = document.getElementById('modalFooter');
+            footer.innerHTML = `<button onclick="GeoModal.close()">Cancel</button><button class="btn-primary" id="modalConfirm">OK</button>`;
+            document.getElementById('modalConfirm').onclick = () => {
+                const result = {};
+                fields.forEach(f => { result[f.id] = document.getElementById(`m_${f.id}`).value; });
+                this._confirmed = true;
+                this._hide();
+                if (onConfirm) onConfirm(result);
+                resolve(result);
+            };
+            document.getElementById('modalOverlay').style.display = 'flex';
+            setTimeout(() => { const first = body.querySelector('input, select'); if (first) first.focus(); }, 100);
+        });
+    },
+    _hide() {
+        document.getElementById('modalOverlay').style.display = 'none';
+        this._resolve = null;
+    },
+    close() {
+        if (this._resolve) { const r = this._resolve; this._resolve = null; r(null); }
+        this._hide();
+    }
+};
+
+const GeoToast = {
+    show(message, type = 'info', duration = 3000) {
+        const container = document.getElementById('toastContainer');
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        const icons = { success: '✓', error: '✕', info: 'ℹ', warn: '⚠' };
+        toast.innerHTML = `<span>${icons[type] || ''}</span><span>${message}</span>`;
+        container.appendChild(toast);
+        setTimeout(() => { toast.classList.add('fade-out'); setTimeout(() => toast.remove(), 300); }, duration);
+    },
+    success(msg) { this.show(msg, 'success'); },
+    error(msg) { this.show(msg, 'error', 5000); },
+    info(msg) { this.show(msg, 'info'); },
+    warn(msg) { this.show(msg, 'warn', 4000); }
+};
+
+const GeoLoading = {
+    show(text = 'Loading...') {
+        document.getElementById('loadingText').textContent = text;
+        document.getElementById('loadingOverlay').style.display = 'flex';
+    },
+    hide() {
+        document.getElementById('loadingOverlay').style.display = 'none';
+    }
+};
+
 class GeoLogApp {
     constructor() {
         this.renderer = null;
@@ -21,7 +89,7 @@ class GeoLogApp {
         this._bindUI();
         await this.loadCurveConfig();
         await this.loadProjects();
-        lucide.createIcons();
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
     _bindUI() {
@@ -149,6 +217,7 @@ class GeoLogApp {
 
     async selectWell(wellId) {
         try {
+            GeoLoading.show('Loading well data...');
             const well = await this._api(`/wells/${wellId}`);
             this.currentWell = well;
 
@@ -168,6 +237,7 @@ class GeoLogApp {
 
             this._renderWellHeader(well);
         } catch (e) { console.error('Failed to select well:', e); }
+            finally { GeoLoading.hide(); }
     }
 
     async selectLogRun(logRunId) {
@@ -276,7 +346,7 @@ class GeoLogApp {
                 <div class="well-list" id="wells-${p.id}"></div>
             </div>
         `).join('');
-        lucide.createIcons();
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
     _renderWellList() {
@@ -704,79 +774,95 @@ class GeoLogApp {
                 </button>
             </div>
         `).join('');
-        lucide.createIcons();
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
     // ─── Actions ─────────────────────────────────────────────
     async createProject() {
-        const name = prompt('Project name:');
-        if (!name) return;
+        const r = await GeoModal.show({ title: 'New Project', fields: [
+            { id: 'name', label: 'Project Name', placeholder: 'e.g. North Sea Study' },
+        ]});
+        if (!r?.name) return;
         try {
             await this._api('/projects/', {
                 method: 'POST',
-                body: JSON.stringify({ name, field_name: '', operator: '', country: '' }),
+                body: JSON.stringify({ name: r.name, field_name: '', operator: '', country: '' }),
             });
             await this.loadProjects();
-        } catch (e) { alert('Failed to create project: ' + e.message); }
+            GeoToast.success('Project created');
+        } catch (e) { GeoToast.error('Failed to create project: ' + e.message); }
     }
 
     async deleteProject(id) {
-        if (!confirm('Delete project and all wells?')) return;
+        const r = await GeoModal.show({ title: 'Delete Project?', fields: [
+            { id: 'confirm', label: 'This will delete all wells and data. Type DELETE to confirm:', placeholder: 'DELETE' },
+        ]});
+        if (r?.confirm !== 'DELETE') return;
         try {
             await this._api(`/projects/${id}`, { method: 'DELETE' });
             await this.loadProjects();
-        } catch (e) { alert('Failed to delete project: ' + e.message); }
+            GeoToast.success('Project deleted');
+        } catch (e) { GeoToast.error('Failed to delete project: ' + e.message); }
     }
 
     async addWell() {
         if (!this.projects.length) return this.createProject();
-        const name = prompt('Well name:');
-        if (!name) return;
-        const uwi = prompt('UWI (optional):') || '';
+        const r = await GeoModal.show({ title: 'Add Well', fields: [
+            { id: 'name', label: 'Well Name', placeholder: 'e.g. MELANIE-1' },
+            { id: 'uwi', label: 'UWI / API Number (optional)', placeholder: '42-123-45678' },
+        ]});
+        if (!r?.name) return;
         try {
             await this._api('/wells/', {
                 method: 'POST',
-                body: JSON.stringify({ name, uwi, project_id: this.projects[0].id }),
+                body: JSON.stringify({ name: r.name, uwi: r.uwi || '', project_id: this.projects[0].id }),
             });
             await this.loadWells(this.projects[0].id);
-        } catch (e) { alert('Failed to add well: ' + e.message); }
+            GeoToast.success('Well added');
+        } catch (e) { GeoToast.error('Failed to add well: ' + e.message); }
     }
 
     async deleteWell(id) {
-        if (!confirm('Delete well and all log data?')) return;
+        const r = await GeoModal.show({ title: 'Delete Well?', fields: [
+            { id: 'confirm', label: 'This will delete all log data. Type DELETE to confirm:', placeholder: 'DELETE' },
+        ]});
+        if (r?.confirm !== 'DELETE') return;
         try {
             await this._api(`/wells/${id}`, { method: 'DELETE' });
             if (this.projects.length > 0) await this.loadWells(this.projects[0].id);
-        } catch (e) { alert('Failed to delete well: ' + e.message); }
+            GeoToast.success('Well deleted');
+        } catch (e) { GeoToast.error('Failed to delete well: ' + e.message); }
     }
 
     async deleteTop(id) {
         try {
             await this._api(`/tops/${id}`, { method: 'DELETE' });
             await this._loadFormationTops();
-        } catch (e) { alert('Failed to delete top: ' + e.message); }
+        } catch (e) { GeoToast.error('Failed to delete top: ' + e.message); }
     }
 
     async addFormationTop() {
         if (!this.currentWell) return;
-        const name = prompt('Formation name:');
-        if (!name) return;
-        const depth = parseFloat(prompt('Depth:'));
-        if (isNaN(depth)) return;
-        const color = prompt('Color (hex):', '#f0883e') || '#f0883e';
-        const lithology = prompt('Lithology:', '') || '';
+        const r = await GeoModal.show({ title: 'Add Formation Top', fields: [
+            { id: 'name', label: 'Formation Name', placeholder: 'e.g. Top Reservoir' },
+            { id: 'depth', label: 'Depth (ft)', type: 'number', step: '0.1', placeholder: '5000.0' },
+            { id: 'color', label: 'Color', type: 'color', value: '#f0883e' },
+            { id: 'lithology', label: 'Lithology (optional)', placeholder: 'e.g. Sandstone' },
+        ]});
+        if (!r?.name || isNaN(parseFloat(r.depth))) return;
+        const name = r.name, depth = parseFloat(r.depth), color = r.color || '#f0883e', lithology = r.lithology || '';
         try {
             await this._api(`/wells/${this.currentWell.id}/tops`, {
                 method: 'POST',
                 body: JSON.stringify({ formation_name: name, depth, color, lithology, depth_unit: 'FT' }),
             });
             await this._loadFormationTops();
-        } catch (e) { alert('Failed to add top: ' + e.message); }
+        } catch (e) { GeoToast.error('Failed to add top: ' + e.message); }
     }
 
     async uploadLAS() {
         if (!this.currentWell) {
-            alert('Select or create a well first.');
+            GeoToast.warn('Select or create a well first.');
             return;
         }
         const input = document.createElement('input');
@@ -794,9 +880,9 @@ class GeoLogApp {
                 });
                 if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
                 const result = await resp.json();
-                alert(`✅ Uploaded ${result.filename}\n${result.curves.length} curves, ${result.num_points} points`);
+                GeoToast.success(`Uploaded ${result.filename} — ${result.curves.length} curves, ${result.num_points} points`);
                 await this.loadWells(this.projects[0].id);
-            } catch (e) { alert('Upload failed: ' + e.message); }
+            } catch (e) { GeoToast.error('Upload failed: ' + e.message); }
         };
         input.click();
     }
@@ -817,19 +903,19 @@ class GeoLogApp {
                 });
                 if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
                 const result = await resp.json();
-                alert(`✅ Uploaded ${result.filename}\n${result.curves.length} curves, ${result.num_points} points`);
+                GeoToast.success(`Uploaded ${result.filename} — ${result.curves.length} curves, ${result.num_points} points`);
                 if (this.projects.length > 0) await this.loadWells(this.projects[0].id);
-            } catch (e) { alert('Upload failed: ' + e.message); }
+            } catch (e) { GeoToast.error('Upload failed: ' + e.message); }
         };
         input.click();
     }
 
     // ─── Export ──────────────────────────────────────────────
     _exportLAS() {
-        if (!this.currentLogRun) { alert('No log run selected.'); return; }
+        if (!this.currentLogRun) { GeoToast.warn('No log run selected.'); return; }
         // Generate LAS content from current data
         const depth = this.renderer?.depthData;
-        if (!depth || depth.length === 0) { alert('No data loaded.'); return; }
+        if (!depth || depth.length === 0) { GeoToast.warn('No data loaded.'); return; }
 
         let las = `~Version Information\n`;
         las += `VERS.   2.0 : CWLS Log ASCII Standard - VERSION 2.0\n`;
@@ -937,14 +1023,15 @@ class GeoLogApp {
     }
 
     // ─── Zone Picking ────────────────────────────────────────
-    addZone() {
+    async addZone() {
         if (!this.renderer) return;
-        const name = prompt('Zone name (e.g., Pay Zone A):');
-        if (!name) return;
-        const top = parseFloat(prompt('Top depth:'));
-        if (isNaN(top)) return;
-        const bottom = parseFloat(prompt('Bottom depth:'));
-        if (isNaN(bottom)) return;
+        const r = await GeoModal.show({ title: 'Add Zone', fields: [
+            { id: 'name', label: 'Zone Name', placeholder: 'e.g. Pay Zone A' },
+            { id: 'top', label: 'Top Depth (ft)', type: 'number', step: '0.1', placeholder: '5000.0' },
+            { id: 'bottom', label: 'Bottom Depth (ft)', type: 'number', step: '0.1', placeholder: '5100.0' },
+        ]});
+        if (!r?.name || isNaN(parseFloat(r.top)) || isNaN(parseFloat(r.bottom))) return;
+        const name = r.name, top = parseFloat(r.top), bottom = parseFloat(r.bottom);
         const zones = [...(this.renderer.zones || []), { name, top, bottom }];
         this.renderer.setZones(zones);
         this._renderZonesList();
@@ -972,7 +1059,7 @@ class GeoLogApp {
                 </button>
             </div>
         `).join('');
-        lucide.createIcons();
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
     _getCurveByFamily(family) {

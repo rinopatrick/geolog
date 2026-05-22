@@ -621,6 +621,85 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
+/* ─── Modal Dialog ────────────────────────────────────── */
+.modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 9999; backdrop-filter: blur(4px);
+}
+.modal-dialog {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; width: 420px; max-width: 90vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    animation: modalIn 0.2s ease-out;
+}
+@keyframes modalIn { from { opacity: 0; transform: translateY(-20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+}
+.modal-header h3 { margin: 0; font-size: 16px; color: var(--text); }
+.modal-close {
+    background: none; border: none; color: var(--text-muted);
+    font-size: 22px; cursor: pointer; padding: 0 4px; line-height: 1;
+}
+.modal-close:hover { color: var(--text); }
+.modal-body { padding: 20px; }
+.modal-body label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; margin-top: 12px; }
+.modal-body label:first-child { margin-top: 0; }
+.modal-body input, .modal-body select {
+    width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-size: 13px; box-sizing: border-box;
+}
+.modal-body input:focus, .modal-body select:focus { border-color: var(--accent); outline: none; }
+.modal-footer {
+    display: flex; gap: 8px; justify-content: flex-end;
+    padding: 12px 20px; border-top: 1px solid var(--border);
+}
+.modal-footer button {
+    padding: 8px 18px; border-radius: 6px; font-size: 13px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    transition: all 0.15s;
+}
+.modal-footer button:hover { background: var(--border); }
+.modal-footer .btn-primary {
+    background: var(--accent); color: #fff; border-color: var(--accent);
+}
+.modal-footer .btn-primary:hover { background: #4a9eff; }
+
+/* ─── Toast Notifications ────────────────────────────── */
+.toast-container {
+    position: fixed; top: 16px; right: 16px; z-index: 10000;
+    display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+}
+.toast {
+    padding: 12px 20px; border-radius: 8px; font-size: 13px;
+    color: #fff; pointer-events: auto; min-width: 200px; max-width: 400px;
+    animation: toastIn 0.3s ease-out; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    display: flex; align-items: center; gap: 8px;
+}
+.toast.fade-out { animation: toastOut 0.3s ease-in forwards; }
+@keyframes toastIn { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes toastOut { from { opacity: 1; } to { opacity: 0; transform: translateX(40px); } }
+.toast-success { background: #238636; }
+.toast-error { background: #da3633; }
+.toast-info { background: #1f6feb; }
+.toast-warn { background: #9e6a03; }
+
+/* ─── Loading Overlay ────────────────────────────────── */
+.loading-overlay {
+    position: fixed; inset: 0; background: rgba(13,17,23,0.7);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 9998; backdrop-filter: blur(2px);
+}
+.loading-spinner {
+    width: 40px; height: 40px; border: 3px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text { color: var(--text-muted); margin-top: 12px; font-size: 13px; }
+
 /* ─── Responsive ───────────────────────────────────────── */
 @media (max-width: 1200px) {
     .bottom-panels { grid-template-columns: 1fr; }
