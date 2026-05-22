@@ -1,5 +1,8 @@
 """GeoLog — Oil & Gas Well Log Viewer."""
+import logging
+import traceback
 from fastapi import FastAPI, Request, UploadFile, File, Depends, HTTPException
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -18,6 +21,13 @@ except ImportError:
     from backend.las_parser import LASParser, CURVE_TRACKS
 
 # Create tables
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("geolog")
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="GeoLog", version="2.0.0", description="Oil & Gas Well Log Viewer")
@@ -29,6 +39,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class ErrorLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        try:
+            response = await call_next(request)
+            return response
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Unhandled error on {request.method} {request.url.path}: {e}")
+            logger.debug(traceback.format_exc())
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error", "error": str(e)},
+            )
+
+app.add_middleware(ErrorLoggingMiddleware)
 
 
 # ─── Auto-seed demo data on first startup ───────────────────

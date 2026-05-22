@@ -179,13 +179,26 @@ class GeoLogApp {
 
     // ─── API ─────────────────────────────────────────────────
     async _api(path, opts = {}) {
-        const resp = await fetch('/api' + path, {
-            headers: { 'Content-Type': 'application/json', ...opts.headers },
-            ...opts,
-        });
-        if (!resp.ok) throw new Error(`API error: ${resp.status}`);
-        if (resp.status === 204) return null;
-        return resp.json();
+        try {
+            const resp = await fetch('/api' + path, {
+                headers: { 'Content-Type': 'application/json', ...opts.headers },
+                ...opts,
+            });
+            if (!resp.ok) {
+                let detail = `API error: ${resp.status}`;
+                try { const j = await resp.json(); if (j.detail) detail = j.detail; } catch {}
+                throw new Error(detail);
+            }
+            if (resp.status === 204) return null;
+            return resp.json();
+        } catch (e) {
+            if (e.message !== 'Failed to fetch') {
+                GeoToast.error(e.message || 'Network error');
+            } else {
+                GeoToast.error('Cannot reach server — is it running?');
+            }
+            throw e;
+        }
     }
 
     async loadCurveConfig() {
@@ -1656,3 +1669,74 @@ class GeoLogApp {
 
 // Initialize
 const app = new GeoLogApp();
+
+// ─── Keyboard Shortcuts ────────────────────────────────────────
+document.addEventListener('keydown', (e) => {
+    // Don't trigger if typing in input/textarea
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+
+    const views = ['viewer', 'crossplot', 'pickett', 'mnplot', 'petrophysics', 'qc', 'correlation', 'statistics'];
+
+    switch (e.key) {
+        case '1': case '2': case '3': case '4':
+        case '5': case '6': case '7': case '8':
+            e.preventDefault();
+            app.switchView(views[parseInt(e.key) - 1]);
+            break;
+        case 'ArrowUp':
+            if (!app.renderer) return;
+            e.preventDefault();
+            {
+                const range = app.renderer.viewStop - app.renderer.viewStart;
+                const shift = range * 0.25;
+                app.renderer.setView(app.renderer.viewStart - shift, app.renderer.viewStop - shift);
+            }
+            break;
+        case 'ArrowDown':
+            if (!app.renderer) return;
+            e.preventDefault();
+            {
+                const range = app.renderer.viewStop - app.renderer.viewStart;
+                const shift = range * 0.25;
+                app.renderer.setView(app.renderer.viewStart + shift, app.renderer.viewStop + shift);
+            }
+            break;
+        case '+': case '=':
+            if (!app.renderer) return;
+            e.preventDefault();
+            {
+                const mid = (app.renderer.viewStart + app.renderer.viewStop) / 2;
+                const newRange = (app.renderer.viewStop - app.renderer.viewStart) * 0.75;
+                app.renderer.setView(mid - newRange / 2, mid + newRange / 2);
+            }
+            break;
+        case '-':
+            if (!app.renderer) return;
+            e.preventDefault();
+            {
+                const mid = (app.renderer.viewStart + app.renderer.viewStop) / 2;
+                const newRange = (app.renderer.viewStop - app.renderer.viewStart) * 1.33;
+                app.renderer.setView(mid - newRange / 2, mid + newRange / 2);
+            }
+            break;
+        case 'Escape':
+            if (GeoModal._instance && GeoModal._instance._overlay) {
+                GeoModal._instance.close(null);
+            }
+            break;
+        case 'r':
+            if (e.ctrlKey || e.metaKey) return;
+            e.preventDefault();
+            if (app.renderer) app.renderer.render();
+            GeoToast.info('Refreshed');
+            break;
+    }
+});
+
+// Show keyboard shortcut help on first visit
+if (!localStorage.getItem('geolog_shortcuts_seen')) {
+    setTimeout(() => {
+        GeoToast.info('Keyboard: 1-8 panels, ↑↓ scroll, +/- zoom, R refresh, Esc close', 6000);
+        localStorage.setItem('geolog_shortcuts_seen', '1');
+    }, 2000);
+}
