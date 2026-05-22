@@ -1,0 +1,16 @@
+services:
+  geolog:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - geolog-data:/app/backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  geolog-data:

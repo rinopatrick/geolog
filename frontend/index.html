@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GeoLog — Well Log Viewer</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛢️</text></svg>">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Top Bar -->
+    <header class="topbar">
+        <div class="topbar-left">
+            <div class="logo">
+                <i data-lucide="droplets" class="logo-icon"></i>
+                <span class="logo-text">GeoLog</span>
+                <span class="logo-badge">O&G</span>
+            </div>
+        </div>
+        <nav class="topbar-nav">
+            <button class="nav-btn active" data-view="viewer">
+                <i data-lucide="activity"></i>
+                <span>Log Viewer</span>
+            </button>
+            <button class="nav-btn" data-view="crossplot">
+                <i data-lucide="scatter-chart"></i>
+                <span>Cross Plot</span>
+            </button>
+            <button class="nav-btn" data-view="pickett">
+                <i data-lucide="chart-no-axes-combined"></i>
+                <span>Pickett</span>
+            </button>
+            <button class="nav-btn" data-view="mnplot">
+                <i data-lucide="beaker"></i>
+                <span>M-N Plot</span>
+            </button>
+            <button class="nav-btn" data-view="petrophysics">
+                <i data-lucide="calculator"></i>
+                <span>Petrophysics</span>
+            </button>
+            <button class="nav-btn" data-view="qc">
+                <i data-lucide="shield-check"></i>
+                <span>QC</span>
+            </button>
+            <button class="nav-btn" data-view="correlation">
+                <i data-lucide="split-square-horizontal"></i>
+                <span>Correlation</span>
+            </button>
+            <button class="nav-btn" data-view="statistics">
+                <i data-lucide="bar-chart-3"></i>
+                <span>Statistics</span>
+            </button>
+        </nav>
+        <div class="topbar-actions">
+            <button class="btn-action" onclick="app.uploadLAS()">
+                <i data-lucide="upload"></i> Upload LAS
+            </button>
+            <button class="btn-action" id="btnExportPNG" title="Export PNG">
+                <i data-lucide="image"></i>
+            </button>
+            <button class="btn-action" id="btnExportLAS" title="Export LAS">
+                <i data-lucide="download"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h2>WELLS</h2>
+            <button class="btn-icon" onclick="app.createProject()" title="New Project">
+                <i data-lucide="folder-plus"></i>
+            </button>
+        </div>
+        <div class="sidebar-search">
+            <i data-lucide="search" class="search-icon"></i>
+            <input type="text" id="wellSearch" placeholder="Search wells...">
+        </div>
+        <div class="sidebar-content" id="projectTree">
+            <!-- Projects and wells rendered here -->
+        </div>
+        <div class="sidebar-actions">
+            <button class="btn-sidebar" onclick="app.addWell()">
+                <i data-lucide="plus"></i> Add Well
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+        <!-- Log Viewer Panel -->
+        <div id="viewerPanel" class="panel active">
+            <!-- Well Header -->
+            <div class="well-header">
+                <div class="well-header-info">
+                    <h1 id="wellName">No well selected</h1>
+                    <p id="wellInfo">Select a well from the sidebar</p>
+                    <p id="wellStats" class="well-stats"></p>
+                </div>
+                <div class="well-header-actions">
+                    <button class="btn-sm" onclick="app.uploadLAS()">
+                        <i data-lucide="upload"></i> Upload LAS
+                    </button>
+                    <button class="btn-sm" onclick="app.addFormationTop()">
+                        <i data-lucide="layers"></i> Add Top
+                    </button>
+                    <button class="btn-sm" onclick="app.addZone()">
+                        <i data-lucide="square"></i> Add Zone
+                    </button>
+                    <button class="btn-sm" onclick="app._exportLAS()">
+                        <i data-lucide="download"></i> LAS
+                    </button>
+                    <button class="btn-sm" onclick="app.exportInterpretationSummary()">
+                        <i data-lucide="file-spreadsheet"></i> Summary CSV
+                    </button>
+                    <select id="logRunSelect" class="depth-select" style="min-width:240px" title="Select active log run">
+                        <option value="">Select log run…</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Toolbar -->
+            <div class="toolbar">
+                <div class="toolbar-group">
+                    <label>Top</label>
+                    <input type="number" id="depthTop" step="10" class="depth-input">
+                </div>
+                <div class="toolbar-group">
+                    <label>Bottom</label>
+                    <input type="number" id="depthBottom" step="10" class="depth-input">
+                </div>
+                <div class="toolbar-group">
+                    <label>Scale</label>
+                    <select id="scaleSelect" class="depth-select">
+                        <option value="20">20 ft/in</option>
+                        <option value="50">50 ft/in</option>
+                        <option value="100" selected>100 ft/in</option>
+                        <option value="200">200 ft/in</option>
+                        <option value="500">500 ft/in</option>
+                        <option value="1000">1000 ft/in</option>
+                    </select>
+                </div>
+                <div class="toolbar-group">
+                    <span class="toolbar-hint">🖱️ Scroll to zoom • Drag to pan • Hover for values</span>
+                    <button class="btn-sm" onclick="document.getElementById('bottomPanels').style.display = document.getElementById('bottomPanels').style.display === 'none' ? 'grid' : 'none'" title="Toggle details panels">
+                        <i data-lucide="panel-bottom"></i> Details
+                    </button>
+                </div>
+            </div>
+
+            <!-- Log Canvas -->
+            <div class="log-container">
+                <canvas id="logCanvas"></canvas>
+            </div>
+
+            <!-- Bottom Panels (collapsed by default for max log area) -->
+            <div class="bottom-panels" id="bottomPanels" style="display:none">
+                <!-- Curve Info -->
+                <div class="info-panel">
+                    <h3><i data-lucide="activity"></i> Curves</h3>
+                    <div id="curvePanel" class="panel-content"></div>
+                </div>
+                <!-- Formation Tops -->
+                <div class="info-panel">
+                    <h3><i data-lucide="layers"></i> Formation Tops</h3>
+                    <div id="topsPanel" class="panel-content"></div>
+                </div>
+                <!-- Zones -->
+                <div class="info-panel">
+                    <h3><i data-lucide="square"></i> Zones</h3>
+                    <div id="zonesPanel" class="panel-content"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cross Plot Panel -->
+        <div id="crossplotPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group">
+                    <label>X-Axis</label>
+                    <select id="cpCurveX" class="depth-select" onchange="app._renderCrossPlot()">
+                        <option value="RHOB">RHOB</option>
+                        <option value="NPHI">NPHI</option>
+                        <option value="DT">DT</option>
+                        <option value="GR">GR</option>
+                        <option value="RT">RT</option>
+                        <option value="PEF">PEF</option>
+                    </select>
+                    <span id="cpActiveX" class="toolbar-hint"></span>
+                </div>
+                <div class="toolbar-group">
+                    <label>Y-Axis</label>
+                    <select id="cpCurveY" class="depth-select" onchange="app._renderCrossPlot()">
+                        <option value="NPHI" selected>NPHI</option>
+                        <option value="RHOB">RHOB</option>
+                        <option value="DT">DT</option>
+                        <option value="GR">GR</option>
+                        <option value="RT">RT</option>
+                    </select>
+                    <span id="cpActiveY" class="toolbar-hint"></span>
+                </div>
+            </div>
+            <div class="crossplot-container">
+                <canvas id="crossplotCanvas"></canvas>
+            </div>
+        </div>
+
+        <!-- Pickett Plot Panel -->
+        <div id="pickettPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group"><label>Model</label><span class="toolbar-hint">Archie log-log Rt vs PHIE</span></div>
+            </div>
+            <div class="crossplot-container">
+                <canvas id="pickettCanvas"></canvas>
+            </div>
+        </div>
+
+        <!-- M-N Plot Panel -->
+        <div id="mnplotPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group"><label>Lithology</label><span class="toolbar-hint">M-N crossplot (NPHI, RHOB, DT)</span></div>
+            </div>
+            <div class="crossplot-container">
+                <canvas id="mnplotCanvas"></canvas>
+            </div>
+        </div>
+
+        <!-- Petrophysics Panel -->
+        <div id="petrophysicsPanel" class="panel" style="display:none">
+            <div class="petro-panel">
+                <div class="petro-form">
+                    <h3>Archie Parameters</h3>
+                    <div class="form-row"><label>a (tortuosity)</label><input type="number" id="archA" value="1" step="0.1"></div>
+                    <div class="form-row"><label>m (cementation)</label><input type="number" id="archM" value="2" step="0.1"></div>
+                    <div class="form-row"><label>n (saturation exp)</label><input type="number" id="archN" value="2" step="0.1"></div>
+                    <div class="form-row"><label>Rw (ohm·m)</label><input type="number" id="archRw" value="0.1" step="0.01"></div>
+                    <h3 style="margin-top:14px">Cutoffs</h3>
+                    <div class="form-row"><label>Vsh max</label><input type="number" id="cutVsh" value="0.35" step="0.01"></div>
+                    <div class="form-row"><label>PHIE min</label><input type="number" id="cutPhie" value="0.10" step="0.01"></div>
+                    <div class="form-row"><label>Sw max</label><input type="number" id="cutSw" value="0.60" step="0.01"></div>
+                    <button class="btn-primary" onclick="app._renderPetrophysics()"><i data-lucide="play"></i> Calculate</button>
+                </div>
+                <div id="petroResults" class="petro-results">
+                    <p style="color:#8b949e">Click Calculate to compute Sw, Vsh, and PHIE from loaded curves.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- QC Panel -->
+        <div id="qcPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group"><label>Quality Control</label><span class="toolbar-hint">Missing values, outliers, reliability tags</span></div>
+            </div>
+            <div id="qcContent" class="stats-container"></div>
+        </div>
+
+        <!-- Correlation Panel -->
+        <div id="correlationPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group"><label>Reference Well</label><select id="corrWellA" class="depth-select"></select></div>
+                <div class="toolbar-group"><label>Compare Well</label><select id="corrWellB" class="depth-select"></select></div>
+                <div class="toolbar-group"><label>Curve</label><select id="corrCurve" class="depth-select" onchange="app.renderCorrelation()"><option value="GR">GR</option><option value="RT">RT</option><option value="NPHI">NPHI</option><option value="RHOB">RHOB</option></select><span id="corrActiveCurve" class="toolbar-hint"></span></div>
+                <div class="toolbar-group"><label>Depth Shift (ft)</label><input id="corrShift" class="depth-input" type="number" value="0" step="0.5"></div>
+                <button class="btn-sm" onclick="app.autoTieShift()"><i data-lucide="wand-sparkles"></i> Auto Tie</button>
+                <button class="btn-sm" onclick="app.startMarkerPick()"><i data-lucide="mouse-pointer-click"></i> Pick Marker</button>
+                <button class="btn-sm" onclick="app.applyMarkerShift('median')"><i data-lucide="move-horizontal"></i> Apply Median Shift</button>
+                <button class="btn-sm" onclick="app.applyMarkerShift('mean')"><i data-lucide="equal"></i> Apply Mean Shift</button>
+                <button class="btn-sm" onclick="app.clearMarkers()"><i data-lucide="eraser"></i> Clear Markers</button>
+                <button class="btn-sm" onclick="app.renderCorrelation()"><i data-lucide="refresh-cw"></i> Render</button>
+                <span id="corrInfo" class="toolbar-hint"></span>
+            </div>
+            <div class="crossplot-container"><canvas id="correlationCanvas"></canvas></div>
+            <div id="corrMarkerTable" class="stats-container" style="margin-top:10px"></div>
+        </div>
+
+        <!-- Statistics Panel -->
+        <div id="statisticsPanel" class="panel" style="display:none">
+            <div id="statsContent" class="stats-container">
+                <p style="color:#8b949e">Load a well to view curve statistics.</p>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/js/log-renderer.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

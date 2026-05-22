@@ -1,0 +1,629 @@
+/* ─── GeoLog — Oil & Gas Well Log Viewer Theme ─────────── */
+
+:root {
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-tertiary: #1c2128;
+    --bg-surface: #21262d;
+    --border: #30363d;
+    --border-light: #21262d;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #6e7681;
+    --accent: #58a6ff;
+    --accent-emphasis: #1f6feb;
+    --success: #3fb950;
+    --warning: #d29922;
+    --danger: #f85149;
+    --green: #2ecc71;
+    --blue: #3498db;
+    --red: #e74c3c;
+    --orange: #e67e22;
+    --purple: #9b59b6;
+    --cyan: #1abc9c;
+    --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'Fira Code', monospace;
+    --sidebar-width: 280px;
+    --topbar-height: 52px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: var(--font-sans);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+    height: 100vh;
+}
+
+/* ─── Top Bar ──────────────────────────────────────────── */
+.topbar {
+    height: var(--topbar-height);
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    z-index: 100;
+    position: relative;
+}
+
+.topbar-left { display: flex; align-items: center; gap: 16px; }
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.logo-icon { color: var(--accent); width: 22px; height: 22px; }
+.logo-text {
+    font-size: 18px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), var(--cyan));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.logo-badge {
+    font-size: 10px;
+    font-weight: 600;
+    background: var(--accent-emphasis);
+    color: white;
+    padding: 2px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+}
+
+.topbar-nav { display: flex; gap: 2px; }
+.nav-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s;
+}
+.nav-btn:hover { background: var(--bg-surface); color: var(--text-primary); }
+.nav-btn.active { background: var(--accent-emphasis); color: white; }
+.nav-btn i { width: 16px; height: 16px; }
+
+.topbar-actions { display: flex; gap: 6px; }
+.btn-action {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.15s;
+}
+.btn-action:hover { background: var(--border); color: var(--text-primary); }
+.btn-action i { width: 14px; height: 14px; }
+
+/* ─── Sidebar ──────────────────────────────────────────── */
+.sidebar {
+    position: fixed;
+    left: 0;
+    top: var(--topbar-height);
+    bottom: 0;
+    width: var(--sidebar-width);
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 90;
+}
+
+.sidebar-header {
+    padding: 14px 16px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border-light);
+}
+.sidebar-header h2 {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+}
+
+.sidebar-search {
+    padding: 10px 16px;
+    position: relative;
+    border-bottom: 1px solid var(--border-light);
+}
+.sidebar-search .search-icon {
+    position: absolute;
+    left: 24px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 14px;
+    height: 14px;
+    color: var(--text-muted);
+}
+.sidebar-search input {
+    width: 100%;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    padding: 7px 10px 7px 30px;
+    border-radius: 6px;
+    outline: none;
+}
+.sidebar-search input:focus { border-color: var(--accent); }
+
+.sidebar-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.sidebar-actions {
+    padding: 10px 16px;
+    border-top: 1px solid var(--border-light);
+}
+
+.project-group { margin-bottom: 8px; }
+.project-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: var(--bg-tertiary);
+}
+.project-name {
+    flex: 1;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.project-meta {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.well-list { padding: 4px 0; }
+.well-item {
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.12s;
+    border: 1px solid transparent;
+}
+.well-item:hover { background: var(--bg-surface); }
+.well-item.active {
+    background: var(--accent-emphasis);
+    border-color: var(--accent);
+}
+.well-item.active .well-meta { color: rgba(255,255,255,0.7); }
+.well-name { font-size: 13px; font-weight: 600; }
+.well-meta { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+
+/* ─── Main ─────────────────────────────────────────────── */
+.main {
+    margin-left: var(--sidebar-width);
+    margin-top: var(--topbar-height);
+    height: calc(100vh - var(--topbar-height));
+    overflow-y: auto;
+}
+
+.panel { padding: 0; }
+
+/* ─── Well Header ──────────────────────────────────────── */
+.well-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 14px 20px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+}
+.well-header h1 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+.well-header p {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    margin-top: 2px;
+}
+.well-stats { color: var(--text-muted) !important; font-size: 11px !important; }
+.well-header-actions { display: flex; gap: 6px; }
+
+.btn-sm {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 5px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.12s;
+}
+.btn-sm:hover { background: var(--border); color: var(--text-primary); }
+.btn-sm i { width: 13px; height: 13px; }
+
+/* ─── Toolbar ──────────────────────────────────────────── */
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 20px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border);
+}
+.toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.toolbar-group label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.depth-input {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    width: 80px;
+    outline: none;
+}
+.depth-input:focus { border-color: var(--accent); }
+.depth-select {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    outline: none;
+}
+.toolbar-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
+/* ─── Log Canvas ───────────────────────────────────────── */
+.log-container {
+    width: 100%;
+    height: calc(100vh - var(--topbar-height) - 130px);
+    min-height: 500px;
+    background: var(--bg-primary);
+    position: relative;
+}
+.log-container canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* ─── Tooltip ──────────────────────────────────────────── */
+#log-tooltip {
+    position: fixed;
+    display: none;
+    background: rgba(13,17,23,0.95);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    z-index: 1000;
+    pointer-events: none;
+    min-width: 180px;
+    max-width: 300px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+.tt-depth {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--border-light);
+}
+.tt-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+    font-size: 11px;
+}
+.tt-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.tt-mnem {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--text-primary);
+    min-width: 45px;
+}
+.tt-val {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    margin-left: auto;
+}
+.tt-unit {
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    font-size: 10px;
+}
+
+/* ─── Bottom Panels ────────────────────────────────────── */
+.bottom-panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    border-top: 1px solid var(--border);
+}
+.info-panel {
+    background: var(--bg-secondary);
+    padding: 10px 14px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+.info-panel h3 {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.info-panel h3 i { width: 13px; height: 13px; }
+.panel-content { font-size: 12px; }
+
+.curve-row, .top-row, .zone-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 11px;
+    font-family: var(--font-mono);
+}
+.curve-dot, .top-color, .zone-color {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.curve-name, .top-name, .zone-name { font-weight: 600; color: var(--text-primary); min-width: 50px; }
+.curve-unit, .top-lith { color: var(--text-muted); }
+.curve-track { color: var(--accent); font-size: 10px; min-width: 20px; }
+.curve-range { color: var(--text-secondary); margin-left: auto; font-size: 10px; }
+.top-depth, .zone-range { color: var(--text-secondary); margin-left: auto; font-size: 10px; }
+
+.btn-icon, .btn-icon-sm {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 3px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.12s;
+}
+.btn-icon:hover, .btn-icon-sm:hover { background: var(--bg-surface); color: var(--text-primary); }
+.btn-icon i, .btn-icon-sm i { width: 14px; height: 14px; }
+.btn-icon-sm i { width: 12px; height: 12px; }
+
+.btn-sidebar {
+    width: 100%;
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    padding: 7px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    transition: all 0.12s;
+}
+.btn-sidebar:hover { border-color: var(--accent); color: var(--accent); }
+.btn-sidebar i { width: 14px; height: 14px; }
+
+/* ─── Cross Plot ───────────────────────────────────────── */
+.panel-toolbar {
+    display: flex;
+    gap: 16px;
+    padding: 10px 20px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+}
+.crossplot-container {
+    width: 100%;
+    height: calc(100vh - var(--topbar-height) - 110px);
+    background: var(--bg-primary);
+}
+.crossplot-container canvas {
+    width: 100%;
+    height: 100%;
+}
+
+/* ─── Petrophysics ─────────────────────────────────────── */
+.petro-panel {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    height: calc(100vh - var(--topbar-height));
+}
+.petro-form {
+    background: var(--bg-secondary);
+    padding: 20px;
+    border-right: 1px solid var(--border);
+}
+.petro-form h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+.form-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+.form-row label {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.form-row input {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    width: 100px;
+    outline: none;
+    text-align: right;
+}
+.form-row input:focus { border-color: var(--accent); }
+
+.btn-primary {
+    width: 100%;
+    background: var(--accent-emphasis);
+    border: none;
+    color: white;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 16px;
+    transition: all 0.15s;
+}
+.btn-primary:hover { background: #388bfd; }
+.btn-primary i { width: 16px; height: 16px; }
+
+.petro-results {
+    padding: 20px;
+    overflow-y: auto;
+}
+.petro-summary h4 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+    margin-top: 16px;
+}
+.petro-summary h4:first-child { margin-top: 0; }
+.petro-summary hr { border: none; border-top: 1px solid var(--border-light); margin: 12px 0; }
+.petro-stat {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 12px;
+    font-family: var(--font-mono);
+}
+.petro-stat span { color: var(--text-secondary); }
+.petro-stat strong { color: var(--text-primary); }
+.petro-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; margin-top: 6px; }
+.petro-table th, .petro-table td { border-bottom: 1px solid var(--border-light); padding: 4px 6px; text-align: right; }
+.petro-table th:first-child, .petro-table td:first-child { text-align: left; }
+.petro-table th { color: var(--text-muted); font-weight: 600; }
+
+/* ─── Statistics ───────────────────────────────────────── */
+.stats-container {
+    padding: 20px;
+    overflow-y: auto;
+    height: calc(100vh - var(--topbar-height));
+}
+.stats-table { width: 100%; }
+.stats-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 10px;
+}
+.stats-card h4 {
+    color: var(--accent);
+    font-size: 13px;
+    margin-bottom: 8px;
+}
+.stats-header, .stats-row {
+    display: grid;
+    grid-template-columns: 70px 50px 80px 80px 80px 80px 80px 60px 60px;
+    gap: 8px;
+    padding: 6px 8px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    border-bottom: 1px solid var(--border-light);
+}
+.stats-header {
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    background: var(--bg-secondary);
+    position: sticky;
+    top: 0;
+}
+.stats-row { color: var(--text-secondary); }
+.stats-row:hover { background: var(--bg-surface); }
+
+/* ─── Scrollbar ────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ─── Responsive ───────────────────────────────────────── */
+@media (max-width: 1200px) {
+    .bottom-panels { grid-template-columns: 1fr; }
+    .petro-panel { grid-template-columns: 1fr; }
+    .stats-header, .stats-row { grid-template-columns: repeat(9, 1fr); }
+}
