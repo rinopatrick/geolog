@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GeoLog — Well Log Viewer</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛢️</text></svg>">
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Fira+Code:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
@@ -20,106 +20,56 @@
             </div>
         </div>
         <nav class="topbar-nav">
-            <button class="nav-btn active" data-view="viewer">
-                <i data-lucide="activity"></i>
-                <span>Log Viewer</span>
-            </button>
-            <button class="nav-btn" data-view="crossplot">
-                <i data-lucide="scatter-chart"></i>
-                <span>Cross Plot</span>
-            </button>
-            <button class="nav-btn" data-view="pickett">
-                <i data-lucide="chart-no-axes-combined"></i>
-                <span>Pickett</span>
-            </button>
-            <button class="nav-btn" data-view="mnplot">
-                <i data-lucide="beaker"></i>
-                <span>M-N Plot</span>
-            </button>
-            <button class="nav-btn" data-view="petrophysics">
-                <i data-lucide="calculator"></i>
-                <span>Petrophysics</span>
-            </button>
-            <button class="nav-btn" data-view="qc">
-                <i data-lucide="shield-check"></i>
-                <span>QC</span>
-            </button>
-            <button class="nav-btn" data-view="correlation">
-                <i data-lucide="split-square-horizontal"></i>
-                <span>Correlation</span>
-            </button>
-            <button class="nav-btn" data-view="statistics">
-                <i data-lucide="bar-chart-3"></i>
-                <span>Statistics</span>
-            </button>
-            <button class="nav-btn" data-view="sensitivity">
-                <i data-lucide="git-compare"></i>
-                <span>Sensitivity</span>
-            </button>
-            <button class="nav-btn" data-view="comparison">
-                <i data-lucide="columns-3"></i>
-                <span>Compare</span>
-            </button>
-            <button class="nav-btn" data-view="striplog">
-                <i data-lucide="columns"></i>
-                <span>Strip Log</span>
-            </button>
-            <button class="nav-btn" data-view="facies">
-                <i data-lucide="gem"></i>
-                <span>Facies</span>
-            </button>
-            <button class="nav-btn" data-view="tools">
-                <i data-lucide="wrench"></i>
-                <span>Tools</span>
-            </button>
-            <button class="nav-btn" data-view="probability">
-                <i data-lucide="trending-up"></i>
-                <span>Probability</span>
-            </button>
-            <button class="nav-btn" data-view="moveable">
-                <i data-lucide="droplet"></i>
-                <span>Moveable Oil</span>
-            </button>
-            <button class="nav-btn" data-view="dipplot">
-                <i data-lucide="compass"></i>
-                <span>Dip Plot</span>
-            </button>
-            <button class="nav-btn" data-view="buckles">
-                <i data-lucide="waves"></i>
-                <span>Buckles</span>
-            </button>
-            <button class="nav-btn" data-view="hingle">
-                <i data-lucide="axis-3d"></i>
-                <span>Hingle</span>
-            </button>
-            <button class="nav-btn" data-view="calculator">
-                <i data-lucide="function-square"></i>
-                <span>Calc</span>
-            </button>
-            <button class="nav-btn" data-view="datatable">
-                <i data-lucide="table"></i>
-                <span>Data Table</span>
-            </button>
-            <button class="nav-btn" data-view="topsmgmt">
-                <i data-lucide="layers"></i>
-                <span>Tops</span>
-            </button>
-            <button class="nav-btn" data-view="formation">
-                <i data-lucide="grid-3x3"></i>
-                <span>Formation</span>
-            </button>
-            <button class="nav-btn" data-view="batch">
-                <i data-lucide="copy"></i>
-                <span>Batch</span>
-            </button>
-            <button class="nav-btn" data-view="map">
-                <i data-lucide="map-pin"></i>
-                <span>Map</span>
-            </button>
-            <button class="nav-btn" data-view="dashboard">
-                <i data-lucide="layout-dashboard"></i>
-                <span>Dashboard</span>
-            </button>
+            <details class="nav-group" open>
+                <summary class="nav-btn nav-group-trigger" title="Core visualizations and quick-look plots">Core</summary>
+                <div class="nav-group-menu">
+                    <button class="nav-btn active" data-view="viewer" title="Primary well log display with depth tracks"><i data-lucide="activity"></i><span>Log Viewer</span></button>
+                    <button class="nav-btn" data-view="crossplot" title="Cross-plot two curves to evaluate relationships"><i data-lucide="scatter-chart"></i><span>Cross Plot</span></button>
+                    <button class="nav-btn" data-view="pickett" title="Log-log Pickett plot for Archie interpretation"><i data-lucide="chart-no-axes-combined"></i><span>Pickett</span></button>
+                    <button class="nav-btn" data-view="mnplot" title="M-N lithology discrimination plot"><i data-lucide="beaker"></i><span>M-N Plot</span></button>
+                </div>
+            </details>
+            <details class="nav-group">
+                <summary class="nav-btn nav-group-trigger" title="Petrophysical calculations and quality workflows">Petrophysics</summary>
+                <div class="nav-group-menu">
+                    <button class="nav-btn" data-view="petrophysics" title="Compute Sw, Vsh, PHIE and zonation stats"><i data-lucide="calculator"></i><span>Petrophysics</span></button>
+                    <button class="nav-btn" data-view="qc" title="Run quality checks for missing data and outliers"><i data-lucide="shield-check"></i><span>QC</span></button>
+                    <button class="nav-btn" data-view="statistics" title="View curve statistics and distributions"><i data-lucide="bar-chart-3"></i><span>Statistics</span></button>
+                    <button class="nav-btn" data-view="sensitivity" title="Sensitivity analysis for model parameters"><i data-lucide="git-compare"></i><span>Sensitivity</span></button>
+                    <button class="nav-btn" data-view="comparison" title="Compare multiple wells or runs side-by-side"><i data-lucide="columns-3"></i><span>Compare</span></button>
+                </div>
+            </details>
+            <details class="nav-group">
+                <summary class="nav-btn nav-group-trigger" title="Stratigraphic and geological interpretation tools">Interpretation</summary>
+                <div class="nav-group-menu">
+                    <button class="nav-btn" data-view="correlation" title="Tie wells using curves, tops, and markers"><i data-lucide="split-square-horizontal"></i><span>Correlation</span></button>
+                    <button class="nav-btn" data-view="striplog" title="Render lithology strip log view"><i data-lucide="columns"></i><span>Strip Log</span></button>
+                    <button class="nav-btn" data-view="facies" title="Classify and visualize facies"><i data-lucide="gem"></i><span>Facies</span></button>
+                    <button class="nav-btn" data-view="formation" title="Multi-well formation matrix and presence"><i data-lucide="grid-3x3"></i><span>Formation</span></button>
+                    <button class="nav-btn" data-view="topsmgmt" title="Create, edit, import, and export tops"><i data-lucide="layers"></i><span>Tops</span></button>
+                </div>
+            </details>
+            <details class="nav-group">
+                <summary class="nav-btn nav-group-trigger" title="Advanced analytical diagnostics">Analysis</summary>
+                <div class="nav-group-menu">
+                    <button class="nav-btn" data-view="probability" title="Probability plot and uncertainty screening"><i data-lucide="trending-up"></i><span>Probability</span></button>
+                    <button class="nav-btn" data-view="moveable" title="Estimate moveable hydrocarbon indicators"><i data-lucide="droplet"></i><span>Moveable Oil</span></button>
+                    <button class="nav-btn" data-view="dipplot" title="Dip trend and structural orientation plot"><i data-lucide="compass"></i><span>Dip Plot</span></button>
+                    <button class="nav-btn" data-view="buckles" title="Buckles diagnostic plot"><i data-lucide="waves"></i><span>Buckles</span></button>
+                    <button class="nav-btn" data-view="hingle" title="Hingle plot for saturation interpretation"><i data-lucide="axis-3d"></i><span>Hingle</span></button>
+                </div>
+            </details>
+            <details class="nav-group">
+                <summary class="nav-btn nav-group-trigger" title="Utilities, exports, mapping, and automation">Tools</summary>
+                <div class="nav-group-menu">
+                    <button class="nav-btn" data-view="tools" title="General utilities and helper workflows"><i data-lucide="wrench"></i><span>Tools</span></button>
+                    <button class="nav-btn" data-view="calculator" title="Quick petrophysical and engineering calculations"><i data-lucide="function-square"></i><span>Calc</span></button>
+                    <button class="nav-btn" data-view="datatable" title="Inspect raw curve samples in a table"><i data-lucide="table"></i><span>Data Table</span></button>
+                    <button class="nav-btn" data-view="batch" title="Run petrophysics in batch across wells"><i data-lucide="copy"></i><span>Batch</span></button>
+                    <button class="nav-btn" data-view="map" title="View and select wells on map"><i data-lucide="map-pin"></i><span>Map</span></button>
+                    <button class="nav-btn" data-view="dashboard" title="Project-level summary metrics dashboard"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></button>
+                </div>
+            </details>
         </nav>
         <div class="topbar-actions">
             <button class="btn-action" onclick="app.uploadLAS()">
@@ -131,6 +81,7 @@
             <button class="btn-action" id="btnExportLAS" title="Export LAS">
                 <i data-lucide="download"></i>
             </button>
+            <button class="btn-action" id="btnHelp" title="Keyboard shortcuts (? key)">❓</button>
         </div>
     </header>
 
@@ -744,6 +695,24 @@
             </div>
             <div class="modal-body" id="modalBody"></div>
             <div class="modal-footer" id="modalFooter"></div>
+        </div>
+    </div>
+
+    <div id="shortcutModal" class="help-modal-overlay" style="display:none" onclick="app.closeShortcutHelp(event)">
+        <div class="help-modal">
+            <div class="help-modal-header">
+                <h3>Keyboard Shortcuts</h3>
+                <button class="modal-close" onclick="app.closeShortcutHelp()">&times;</button>
+            </div>
+            <div class="help-modal-body">
+                <p><strong>Navigation:</strong> 1-8 quick panel shortcuts</p>
+                <p><strong>Depth:</strong> ↑ / ↓ pan</p>
+                <p><strong>Zoom:</strong> + / -</p>
+                <p><strong>Zones:</strong> Ctrl+Z undo, Ctrl+Y redo</p>
+                <p><strong>Refresh:</strong> R</p>
+                <p><strong>Close dialogs:</strong> Esc</p>
+                <p><strong>Help:</strong> ?</p>
+            </div>
         </div>
     </div>
 

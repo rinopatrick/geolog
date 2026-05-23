@@ -103,6 +103,7 @@ class GeoLogApp {
             }
         }
         if (typeof lucide !== 'undefined') lucide.createIcons();
+        this._showFirstRunWelcome();
     }
 
     _bindUI() {
@@ -145,6 +146,7 @@ class GeoLogApp {
         // Export buttons
         document.getElementById('btnExportPNG')?.addEventListener('click', () => this.renderer?.exportPNG());
         document.getElementById('btnExportLAS')?.addEventListener('click', () => this._exportLAS());
+        document.getElementById('btnHelp')?.addEventListener('click', () => this.openShortcutHelp());
 
         // Window resize
         window.addEventListener('resize', () => {
@@ -4392,6 +4394,25 @@ class GeoLogApp {
         } catch (e) { GeoToast.error(e.message); }
     }
 
+    openShortcutHelp() {
+        const modal = document.getElementById('shortcutModal');
+        if (modal) modal.style.display = 'flex';
+    }
+
+    closeShortcutHelp(event = null) {
+        if (event && event.target && event.target.id !== 'shortcutModal') return;
+        const modal = document.getElementById('shortcutModal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    _showFirstRunWelcome() {
+        if (localStorage.getItem('geolog_welcome_seen')) return;
+        setTimeout(() => {
+            GeoToast.info('Welcome to GeoLog! Upload a LAS file to begin. Press ? for keyboard shortcuts.', 7000);
+            localStorage.setItem('geolog_welcome_seen', '1');
+        }, 1200);
+    }
+
 }
 // Initialize
 const app = new GeoLogApp();
@@ -4447,6 +4468,11 @@ document.addEventListener('keydown', (e) => {
             break;
         case 'Escape':
             if (GeoModal._resolve) { GeoModal.close(); }
+            app.closeShortcutHelp();
+            break;
+        case '?':
+            e.preventDefault();
+            app.openShortcutHelp();
             break;
         case 'z':
             if (e.ctrlKey || e.metaKey) {
@@ -4468,11 +4494,3 @@ document.addEventListener('keydown', (e) => {
             break;
     }
 });
-
-// Show keyboard shortcut help on first visit
-if (!localStorage.getItem('geolog_shortcuts_seen')) {
-    setTimeout(() => {
-        GeoToast.info('Keyboard: 1-8 panels, ↑↓ scroll, +/- zoom, Ctrl+Z/Y zone undo/redo, R refresh, Esc close', 6000);
-        localStorage.setItem('geolog_shortcuts_seen', '1');
-    }, 2000);
-}
