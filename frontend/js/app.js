@@ -551,6 +551,11 @@ class GeoLogApp {
             if (well.log_runs && well.log_runs.length > 0) {
                 this.currentLogRun = well.log_runs[0];
                 this._populateLogRunSelector(well.log_runs, this.currentLogRun.id);
+                // Auto-populate depth inputs on initial well load
+                const topIn = document.getElementById('depthTop');
+                const botIn = document.getElementById('depthBottom');
+                if (topIn && this.currentLogRun.start_depth != null) topIn.value = this.currentLogRun.start_depth;
+                if (botIn && this.currentLogRun.stop_depth != null) botIn.value = this.currentLogRun.stop_depth;
                 await this._loadCurveData();
                 await this._loadFormationTops();
                 await this._loadZones();
@@ -575,6 +580,11 @@ class GeoLogApp {
             if (!chosen) return;
             this.currentLogRun = chosen;
             this._populateLogRunSelector(well.log_runs || [], chosen.id);
+            // Auto-populate depth inputs with log run bounds
+            const topInput = document.getElementById('depthTop');
+            const bottomInput = document.getElementById('depthBottom');
+            if (topInput && chosen.start_depth != null) topInput.value = chosen.start_depth;
+            if (bottomInput && chosen.stop_depth != null) bottomInput.value = chosen.stop_depth;
             await this._loadCurveData();
             await this._loadFormationTops();
             await this._loadZones();
