@@ -2548,6 +2548,29 @@ class GeoLogApp {
         panel.innerHTML = html;
     }
 
+    async autoZoneFromTops() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        try {
+            const result = await this._api(`/wells/${this.currentWell.id}/auto-zone-from-tops`, { method: 'POST' });
+            GeoToast.success(`Created ${result.zones_created} zones from formation tops`);
+            this._renderZoneStats();
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
+    async downloadZonationReport() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        try {
+            const resp = await fetch(`/api/wells/${this.currentWell.id}/zonation-report`);
+            if (!resp.ok) throw new Error(await resp.text());
+            const blob = await resp.blob();
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `${this.currentWell.name || 'well'}_zonation_report.csv`;
+            a.click();
+            GeoToast.success('Zonation report downloaded');
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
     exportZonationReport() {
         if (!this.currentWell || !this._petroCache) {
             GeoToast.warn('Run petrophysics calculation first');

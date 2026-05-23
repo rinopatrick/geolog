@@ -2679,6 +2679,140 @@ def zone_stats(wid: int, db: Session = Depends(get_db)):
     }
 
 
+@app.post("/api/wells/{wid}/auto-zone-from-tops")
+def auto_zone_from_tops(wid: int, db: Session = Depends(get_db),
+                        _role: str = Depends(require_interpreter)):
+    """Auto-create zones from pairs of formation tops (top[i] → top[i+1])."""
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+
+    tops = (
+        db.query(FormationTop)
+        .filter(FormationTop.well_id == wid)
+        .order_by(FormationTop.depth.asc())
+        .all()
+    )
+    if len(tops) < 2:
+        raise HTTPException(400, "Need at least 2 formation tops to create zones")
+
+    # Delete existing zones for this well
+    db.query(Zone).filter(Zone.well_id == wid).delete()
+
+    colors = ['#1f6feb', '#238636', '#9e6a03', '#8957e5', '#da3633',
+              '#f78166', '#3fb950', '#58a6ff', '#d29922', '#f0883e']
+
+    created = []
+    for i in range(len(tops) - 1):
+        t = tops[i]
+        t_next = tops[i + 1]
+        zone_name = f"{t.formation_name} — {t_next.formation_name}"
+        z = Zone(
+            well_id=wid,
+            name=zone_name,
+            top_depth=float(t.depth),
+            bottom_depth=float(t_next.depth),
+            color=colors[i % len(colors)],
+            sort_order=i,
+        )
+        db.add(z)
+        created.append(zone_name)
+
+    db.commit()
+    _log_audit(db, "auto_zone", "zone", well_id=wid,
+               details=f"Created {len(created)} zones from {len(tops)} tops")
+
+    return {"status": "ok", "zones_created": len(created), "zone_names": created}
+
+
+@app.get("/api/wells/{wid}/zonation-report")
+def zonation_report(wid: int, db: Session = Depends(get_db)):
+    """Generate full zonation report as downloadable CSV."""
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+
+    # Reuse zone-stats logic
+    zones_resp = zone_stats(wid, db)
+    zones = zones_resp.get("zones", [])
+    cutoffs = zones_resp.get("cutoffs", {})
+
+    # Compute totals
+    total_gross = sum(z.get("gross_ft", 0) for z in zones)
+    total_net = sum(z.get("net_pay_ft", 0) for z in zones)
+    total_ntg = (total_net / total_gross) if total_gross > 0 else 0
+
+    # Weighted averages
+    def weighted_avg(key):
+        vals = [(z.get(key, 0) or 0, z.get("net_pay_ft", 0)) for z in zones if z.get(key) is not None]
+        if not vals or sum(v[1] for v in vals) == 0:
+            return None
+        return sum(v[0] * v[1] for v in vals) / sum(v[1] for v in vals)
+
+    out = io.StringIO()
+    writer = csv.writer(out)
+
+    # Header section
+    writer.writerow(["# ZONATION REPORT"])
+    writer.writerow(["# Well", well.name])
+    writer.writerow(["# UWI", well.uwi or ""])
+    writer.writerow(["# Operator", well.operator or ""])
+    writer.writerow(["# Field", well.field_name or ""])
+    writer.writerow(["# Generated", datetime.datetime.now().strftime("%Y-%m-%d %H:%M")])
+    writer.writerow([])
+    writer.writerow(["# CUTOFFS"])
+    writer.writerow(["# Vsh_max", cutoffs.get("vsh", "")])
+    writer.writerow(["# PHIE_min", cutoffs.get("phie", "")])
+    writer.writerow(["# Sw_max", cutoffs.get("sw", "")])
+    writer.writerow([])
+
+    # Summary
+    writer.writerow(["# SUMMARY"])
+    writer.writerow(["# Total Gross (ft)", f"{total_gross:.1f}"])
+    writer.writerow(["# Total Net Pay (ft)", f"{total_net:.1f}"])
+    writer.writerow(["# Total NTG", f"{total_ntg:.3f}"])
+    wa_phie = weighted_avg("avg_phie")
+    wa_sw = weighted_avg("avg_sw")
+    wa_vsh = weighted_avg("avg_vsh")
+    if wa_phie is not None:
+        writer.writerow(["# Wtd Avg PHIE", f"{wa_phie:.4f}"])
+    if wa_sw is not None:
+        writer.writerow(["# Wtd Avg Sw", f"{wa_sw:.4f}"])
+    if wa_vsh is not None:
+        writer.writerow(["# Wtd Avg Vsh", f"{wa_vsh:.4f}"])
+    writer.writerow([])
+
+    # Zone table
+    headers = ["Zone", "Top (ft)", "Base (ft)", "Gross (ft)", "Net Pay (ft)",
+               "NTG", "Avg PHIE", "Avg Sw", "Avg Vsh", "Avg K", "Points"]
+    writer.writerow(headers)
+    for z in zones:
+        writer.writerow([
+            z.get("name", ""),
+            f"{z.get('top_depth', 0):.1f}",
+            f"{z.get('bottom_depth', 0):.1f}",
+            f"{z.get('gross_ft', 0):.1f}",
+            f"{z.get('net_pay_ft', 0):.1f}",
+            f"{z.get('ntg', 0):.3f}",
+            f"{z.get('avg_phie', 0):.4f}" if z.get('avg_phie') is not None else "",
+            f"{z.get('avg_sw', 0):.4f}" if z.get('avg_sw') is not None else "",
+            f"{z.get('avg_vsh', 0):.4f}" if z.get('avg_vsh') is not None else "",
+            f"{z.get('avg_k', 0):.2f}" if z.get('avg_k') is not None else "",
+            z.get("points", ""),
+        ])
+
+    # Totals row
+    writer.writerow([])
+    writer.writerow(["TOTAL", "", "", f"{total_gross:.1f}", f"{total_net:.1f}",
+                     f"{total_ntg:.3f}", "", "", "", "", len(zones)])
+
+    csv_text = out.getvalue()
+    out.close()
+    fname = f"{well.name or 'well'}_zonation_report.csv"
+    headers = {"Content-Disposition": f'attachment; filename="{fname}"'}
+    return StreamingResponse(iter([csv_text]), media_type="text/csv", headers=headers)
+
+
 @app.get("/api/wells/{wid}/tops-petrel")
 def export_tops_petrel(wid: int, db: Session = Depends(get_db)):
     """Export well tops in Petrel-compatible CSV format."""
