@@ -8,6 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Geologica:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/sprint26.css">
 </head>
 <body>
     <!-- Top Bar -->
@@ -68,6 +69,8 @@
                     <button class="nav-btn" data-view="batch" title="Run petrophysics in batch across wells"><i data-lucide="copy"></i><span>Batch</span></button>
                     <button class="nav-btn" data-view="map" title="View and select wells on map"><i data-lucide="map-pin"></i><span>Map</span></button>
                     <button class="nav-btn" data-view="dashboard" title="Project-level summary metrics dashboard"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></button>
+                    <button class="nav-btn" data-view="matrix" title="Multi-well cross-plot matrix for formation comparison"><i data-lucide="grid-3x3"></i><span>Matrix</span></button>
+                    <button class="nav-btn" data-view="audit" title="Audit trail — track all project activity"><i data-lucide="file-text"></i><span>Audit</span></button>
                 </div>
             </details>
         </nav>
@@ -684,6 +687,45 @@
                 <p style="color:#8b949e">Click Refresh to load project summary.</p>
             </div>
         </div>
+
+        <!-- Cross-Plot Matrix Panel -->
+        <div id="matrixPanel" class="panel" style="display:none">
+            <div class="matrix-controls">
+                <div class="toolbar-group">
+                    <label>Cross-Plot Matrix</label>
+                    <span class="toolbar-hint">Multi-well scatter — compare formation trends across wells</span>
+                </div>
+                <div class="toolbar-group">
+                    <label>X-Axis</label>
+                    <select id="matrixCurveX"><option>GR</option><option>RT</option><option>NPHI</option><option>RHOB</option><option>DT</option><option>SP</option></select>
+                </div>
+                <div class="toolbar-group">
+                    <label>Y-Axis</label>
+                    <select id="matrixCurveY"><option>RT</option><option>GR</option><option>NPHI</option><option>RHOB</option><option>DT</option><option>PEF</option></select>
+                </div>
+                <button class="btn-primary" onclick="app.loadCrossPlotMatrix()"><i data-lucide="refresh-cw"></i> Plot</button>
+            </div>
+            <div style="position:relative"><canvas id="matrixCanvas" class="matrix-scatter"></canvas></div>
+            <div id="matrixLegend" class="matrix-legend"></div>
+        </div>
+
+        <!-- Audit Trail Panel -->
+        <div id="auditPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group">
+                    <label>Audit Trail</label>
+                    <span class="toolbar-hint">Track all project activity — uploads, computations, edits, exports</span>
+                </div>
+                <button class="btn-primary" onclick="app._renderAuditPanel()"><i data-lucide="refresh-cw"></i> Refresh</button>
+            </div>
+            <div style="padding:20px">
+                <div id="auditPanelContent" class="empty-state">
+                    <div class="empty-state-icon"><i data-lucide="file-text"></i></div>
+                    <h3>No Activity Yet</h3>
+                    <p>Upload LAS files, compute petrophysics, or export data to see the audit trail here.</p>
+                </div>
+            </div>
+        </div>
     </main>
 
     <!-- Modal Dialog -->
@@ -719,6 +761,39 @@
     <!-- Toast Container -->
     <div id="toastContainer" class="toast-container"></div>
 
+    <!-- Context Menu (hidden by default) -->
+    <div id="contextMenu" class="context-menu" style="display:none"></div>
+
+    <!-- Command Palette (Ctrl+K) -->
+    <div id="cmdPaletteOverlay" class="cmd-palette-overlay" style="display:none" onclick="app.closeCmdPalette(event)">
+        <div class="cmd-palette">
+            <input type="text" id="cmdPaletteInput" placeholder="Type a command..." oninput="app.filterCmdPalette(this.value)">
+            <div class="cmd-palette-results" id="cmdPaletteResults"></div>
+        </div>
+    </div>
+
+    <!-- Report Preview Modal -->
+    <div id="reportModal" class="help-modal-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+        <div style="max-width:860px;width:95vw;max-height:90vh;overflow-y:auto;background:var(--bg-secondary);border-radius:12px;border:1px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border)">
+                <h3 style="color:var(--accent)">Well Report</h3>
+                <button class="modal-close" onclick="document.getElementById('reportModal').style.display='none'">&times;</button>
+            </div>
+            <div id="reportContent" style="padding:20px"></div>
+        </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+        <div class="status-item"><span class="status-dot"></span> <span id="statusConn">Connected</span></div>
+        <div class="status-item" id="statusWell">No well</div>
+        <div class="status-item" id="statusDepth">—</div>
+        <div class="status-item" id="statusPoints">—</div>
+        <div class="status-spacer"></div>
+        <div class="status-item accent" id="statusView">Log Viewer</div>
+        <div class="status-item" id="statusCoords">—</div>
+    </div>
+
     <!-- Loading Overlay -->
     <div id="loadingOverlay" class="loading-overlay" style="display:none">
         <div class="loading-spinner"></div>
@@ -732,6 +807,11 @@ function toggleSidebar() {
     document.querySelector('.sidebar').classList.toggle('open');
     document.querySelector('.sidebar-overlay').classList.toggle('active');
 }
+// Close context menu on click elsewhere
+document.addEventListener('click', () => {
+    const cm = document.getElementById('contextMenu');
+    if (cm) cm.style.display = 'none';
+});
 </script>
 </body>
 </html>

@@ -216,3 +216,18 @@ class DeviationSurvey(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     well = relationship("Well")
+
+
+class AuditLog(Base):
+    """Track all user actions for audit trail."""
+    __tablename__ = "audit_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=True)
+    action = Column(String(100), nullable=False)  # upload, compute, export, edit, delete
+    entity_type = Column(String(50), default="")  # well, top, zone, curve, petro_params
+    entity_id = Column(Integer, nullable=True)
+    details = Column(Text, default="")  # JSON details of what changed
+    user_label = Column(String(100), default="local")  # user identifier
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)

@@ -104,6 +104,7 @@ class GeoLogApp {
         }
         if (typeof lucide !== 'undefined') lucide.createIcons();
         this._showFirstRunWelcome();
+        this._bindContextMenu();
     }
 
     _bindUI() {
@@ -242,6 +243,13 @@ class GeoLogApp {
         document.getElementById('batchPanel').style.display = view === 'batch' ? 'block' : 'none';
         document.getElementById('mapPanel').style.display = view === 'map' ? 'block' : 'none';
         document.getElementById('dashboardPanel').style.display = view === 'dashboard' ? 'block' : 'none';
+        document.getElementById('matrixPanel').style.display = view === 'matrix' ? 'block' : 'none';
+        document.getElementById('auditPanel').style.display = view === 'audit' ? 'block' : 'none';
+
+        // Sprint 26: Update status bar + trigger panel-specific loads
+        this._updateStatusBar(view);
+        if (view === 'matrix') this.loadCrossPlotMatrix();
+        if (view === 'audit') this._renderAuditPanel();
 
         if (view === 'crossplot') this._renderCrossPlot();
         if (view === 'pickett') this._renderPickettPlot();
@@ -4413,6 +4421,369 @@ class GeoLogApp {
         }, 1200);
     }
 
+    // ─── Sprint 26: Status Bar ──────────────────────────────────
+    _updateStatusBar(view) {
+        const el = document.getElementById('statusView');
+        if (el) {
+            const names = { viewer: 'Log Viewer', crossplot: 'Cross Plot', pickett: 'Pickett', mnplot: 'M-N Plot',
+                petrophysics: 'Petrophysics', qc: 'QC', statistics: 'Statistics', sensitivity: 'Sensitivity',
+                comparison: 'Comparison', correlation: 'Correlation', striplog: 'Strip Log', facies: 'Facies',
+                formation: 'Formation', topsmgmt: 'Tops', probability: 'Probability', moveable: 'Moveable Oil',
+                dipplot: 'Dip Plot', buckles: 'Buckles', hingle: 'Hingle', tools: 'Tools', calculator: 'Calc',
+                datatable: 'Data Table', batch: 'Batch', map: 'Map', dashboard: 'Dashboard', matrix: 'Matrix',
+                audit: 'Audit Trail' };
+            el.textContent = names[view] || view;
+        }
+        if (this.currentWell) {
+            const w = this.wells.find(w => w.id === this.currentWell);
+            const el2 = document.getElementById('statusWell');
+            if (el2 && w) el2.textContent = w.name;
+        }
+        if (this.renderer) {
+            const el3 = document.getElementById('statusDepth');
+            if (el3) el3.textContent = `${this.renderer.viewStart?.toFixed(1) || '—'} – ${this.renderer.viewStop?.toFixed(1) || '—'} ft`;
+        }
+    }
+
+    _updateStatusDepth(start, stop) {
+        const el = document.getElementById('statusDepth');
+        if (el) el.textContent = `${start.toFixed(1)} – ${stop.toFixed(1)} ft`;
+    }
+
+    _updateStatusPoints(count) {
+        const el = document.getElementById('statusPoints');
+        if (el) el.textContent = `${count.toLocaleString()} pts`;
+    }
+
+    // ─── Sprint 26: Context Menu ────────────────────────────────
+    showContextMenu(x, y, items) {
+        const cm = document.getElementById('contextMenu');
+        cm.innerHTML = items.map(item => {
+            if (item.separator) return '<div class="context-menu-sep"></div>';
+            return `<div class="context-menu-item ${item.danger ? 'danger' : ''}" onclick="${item.action}">
+                <i data-lucide="${item.icon || 'circle'}"></i> ${item.label}
+            </div>`;
+        }).join('');
+        cm.style.display = 'block';
+        cm.style.left = Math.min(x, window.innerWidth - 220) + 'px';
+        cm.style.top = Math.min(y, window.innerHeight - 200) + 'px';
+        if (typeof lucide !== 'undefined') lucide.createIcons({ attrs: { 'stroke-width': 1.5 } });
+    }
+
+    // ─── Sprint 26: Command Palette ─────────────────────────────
+    openCmdPalette() {
+        const overlay = document.getElementById('cmdPaletteOverlay');
+        overlay.style.display = 'flex';
+        const input = document.getElementById('cmdPaletteInput');
+        input.value = '';
+        input.focus();
+        this._renderCmdResults('');
+    }
+
+    closeCmdPalette(event) {
+        if (event && event.target !== event.currentTarget) return;
+        document.getElementById('cmdPaletteOverlay').style.display = 'none';
+    }
+
+    filterCmdPalette(query) {
+        this._renderCmdResults(query);
+    }
+
+    _renderCmdResults(query) {
+        const commands = [
+            { label: 'Log Viewer', icon: 'activity', action: "app.switchView('viewer')", shortcut: '1' },
+            { label: 'Cross Plot', icon: 'scatter-chart', action: "app.switchView('crossplot')", shortcut: '2' },
+            { label: 'Pickett Plot', icon: 'chart-no-axes-combined', action: "app.switchView('pickett')", shortcut: '3' },
+            { label: 'Petrophysics', icon: 'calculator', action: "app.switchView('petrophysics')", shortcut: '4' },
+            { label: 'QC', icon: 'shield-check', action: "app.switchView('qc')", shortcut: '5' },
+            { label: 'Statistics', icon: 'bar-chart-3', action: "app.switchView('statistics')", shortcut: '6' },
+            { label: 'Correlation', icon: 'split-square-horizontal', action: "app.switchView('correlation')", shortcut: '7' },
+            { label: 'Sensitivity', icon: 'git-compare', action: "app.switchView('sensitivity')" },
+            { label: 'Facies', icon: 'gem', action: "app.switchView('facies')", shortcut: '9' },
+            { label: 'Data Table', icon: 'table', action: "app.switchView('datatable')" },
+            { label: 'Map', icon: 'map-pin', action: "app.switchView('map')" },
+            { label: 'Dashboard', icon: 'layout-dashboard', action: "app.switchView('dashboard')" },
+            { label: 'Matrix Plot', icon: 'grid-3x3', action: "app.switchView('matrix')" },
+            { label: 'Audit Trail', icon: 'file-text', action: "app.switchView('audit')" },
+            { label: 'Upload LAS', icon: 'upload', action: "app.uploadLAS()" },
+            { label: 'Export Report', icon: 'file-down', action: "app.exportReport()" },
+            { label: 'Export PNG', icon: 'image', action: "app._exportPNG()" },
+            { label: 'Keyboard Shortcuts', icon: 'keyboard', action: "app.openShortcutHelp()", shortcut: '?' },
+        ];
+        const q = query.toLowerCase();
+        const filtered = q ? commands.filter(c => c.label.toLowerCase().includes(q)) : commands;
+        const container = document.getElementById('cmdPaletteResults');
+        container.innerHTML = filtered.map(c =>
+            `<div class="cmd-palette-item" onclick="${c.action}; app.closeCmdPalette()">
+                <i data-lucide="${c.icon}"></i> ${c.label}
+                ${c.shortcut ? `<span class="shortcut">${c.shortcut}</span>` : ''}
+            </div>`
+        ).join('');
+        if (typeof lucide !== 'undefined') lucide.createIcons({ attrs: { 'stroke-width': 1.5 } });
+    }
+
+    // ─── Sprint 26: Audit Trail ─────────────────────────────────
+    async loadAuditLog() {
+        if (!this.projects.length) return [];
+        const pid = this.projects[0]?.id;
+        try {
+            const resp = await fetch(`/api/audit-log?project_id=${pid}&limit=50`);
+            return await resp.json();
+        } catch { return []; }
+    }
+
+    async _renderAuditPanel() {
+        const panel = document.getElementById('auditPanelContent');
+        if (!panel) return;
+        const entries = await this.loadAuditLog();
+        if (!entries.length) {
+            panel.innerHTML = `<div class="empty-state">
+                <div class="empty-state-icon"><i data-lucide="file-text"></i></div>
+                <h3>No Activity Yet</h3>
+                <p>Upload LAS files, compute petrophysics, or export data to see the audit trail here.</p>
+            </div>`;
+            if (typeof lucide !== 'undefined') lucide.createIcons({ attrs: { 'stroke-width': 1.5 } });
+            return;
+        }
+        const iconMap = { upload: 'upload', compute: 'calculator', export: 'download', edit: 'pencil', delete: 'trash-2' };
+        panel.innerHTML = `<div class="audit-list">${entries.map(e => `
+            <div class="audit-entry">
+                <div class="audit-icon ${e.action}"><i data-lucide="${iconMap[e.action] || 'circle'}"></i></div>
+                <div class="audit-meta">
+                    <div class="audit-action">${e.action.toUpperCase()} ${e.entity_type || ''} ${e.entity_id ? '#' + e.entity_id : ''}</div>
+                    <div class="audit-detail">${e.details || ''}</div>
+                </div>
+                <div class="audit-time">${new Date(e.created_at).toLocaleString()}</div>
+            </div>
+        `).join('')}</div>`;
+        if (typeof lucide !== 'undefined') lucide.createIcons({ attrs: { 'stroke-width': 1.5 } });
+    }
+
+    // ─── Sprint 26: Cross-Plot Matrix ───────────────────────────
+    async loadCrossPlotMatrix() {
+        if (!this.projects.length) return;
+        const pid = this.projects[0]?.id;
+        const curveX = document.getElementById('matrixCurveX')?.value || 'GR';
+        const curveY = document.getElementById('matrixCurveY')?.value || 'RT';
+        try {
+            const resp = await fetch(`/api/projects/${pid}/crossplot-matrix?curve_x=${curveX}&curve_y=${curveY}`);
+            const data = await resp.json();
+            this._renderMatrixPlot(data);
+        } catch (e) {
+            GeoToast.error('Failed to load matrix data');
+        }
+    }
+
+    _renderMatrixPlot(data) {
+        const canvas = document.getElementById('matrixCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width * 2;
+        canvas.height = rect.height * 2;
+        ctx.scale(2, 2);
+        const W = rect.width, H = rect.height;
+        const pad = { top: 40, right: 40, bottom: 60, left: 70 };
+        const pw = W - pad.left - pad.right;
+        const ph = H - pad.top - pad.bottom;
+
+        // Find global ranges
+        let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+        for (const w of data.wells) {
+            for (let i = 0; i < w.x.length; i++) {
+                if (w.x[i] < xMin) xMin = w.x[i];
+                if (w.x[i] > xMax) xMax = w.x[i];
+                if (w.y[i] < yMin) yMin = w.y[i];
+                if (w.y[i] > yMax) yMax = w.y[i];
+            }
+        }
+        if (!isFinite(xMin)) { xMin = 0; xMax = 1; yMin = 0; yMax = 1; }
+        const xPad = (xMax - xMin) * 0.05 || 1;
+        const yPad = (yMax - yMin) * 0.05 || 1;
+        xMin -= xPad; xMax += xPad; yMin -= yPad; yMax += yPad;
+
+        ctx.fillStyle = '#0a0e14';
+        ctx.fillRect(0, 0, W, H);
+
+        // Grid
+        ctx.strokeStyle = 'rgba(42,52,70,0.5)';
+        ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 5; i++) {
+            const x = pad.left + (pw / 5) * i;
+            const y = pad.top + (ph / 5) * i;
+            ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, pad.top + ph); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + pw, y); ctx.stroke();
+        }
+
+        // Axes labels
+        ctx.fillStyle = '#9aa8b8';
+        ctx.font = '12px Geologica';
+        ctx.textAlign = 'center';
+        ctx.fillText(data.curve_x, pad.left + pw / 2, H - 10);
+        ctx.save();
+        ctx.translate(16, pad.top + ph / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText(data.curve_y, 0, 0);
+        ctx.restore();
+
+        // Tick labels
+        ctx.font = '10px JetBrains Mono';
+        ctx.fillStyle = '#6b7a8d';
+        for (let i = 0; i <= 5; i++) {
+            const xv = xMin + ((xMax - xMin) / 5) * i;
+            const yv = yMin + ((yMax - yMin) / 5) * (5 - i);
+            ctx.textAlign = 'center';
+            ctx.fillText(xv.toFixed(1), pad.left + (pw / 5) * i, pad.top + ph + 16);
+            ctx.textAlign = 'right';
+            ctx.fillText(yv.toFixed(2), pad.left - 8, pad.top + (ph / 5) * i + 4);
+        }
+
+        // Plot points
+        const colors = ['#d4a853', '#4caf7d', '#5b8fb9', '#c75a5a', '#8b6fb0', '#5ba8a0', '#d48a4a', '#a0d45b'];
+        const legendEl = document.getElementById('matrixLegend');
+        if (legendEl) legendEl.innerHTML = '';
+        data.wells.forEach((w, idx) => {
+            const color = colors[idx % colors.length];
+            ctx.fillStyle = color;
+            ctx.globalAlpha = 0.6;
+            for (let i = 0; i < w.x.length; i++) {
+                const px = pad.left + ((w.x[i] - xMin) / (xMax - xMin)) * pw;
+                const py = pad.top + ((yMax - w.y[i]) / (yMax - yMin)) * ph;
+                ctx.beginPath();
+                ctx.arc(px, py, 2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+            if (legendEl) {
+                legendEl.innerHTML += `<div class="matrix-legend-item"><span class="matrix-legend-dot" style="background:${color}"></span>${w.well_name} (${w.count})</div>`;
+            }
+        });
+    }
+
+    // ─── Sprint 26: Well Report Export ──────────────────────────
+    async exportReport() {
+        if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
+        GeoLoading.show('Generating report...');
+        try {
+            const resp = await fetch(`/api/wells/${this.currentWell}/report`);
+            const data = await resp.json();
+            GeoLoading.hide();
+            this._renderReportPreview(data);
+        } catch (e) {
+            GeoLoading.hide();
+            GeoToast.error('Report generation failed');
+        }
+    }
+
+    _renderReportPreview(data) {
+        const w = data.well || {};
+        let html = `<div class="report-preview">
+            <h1>Well Log Report — ${w.name || 'Unknown'}</h1>
+            <p><strong>UWI:</strong> ${w.uwi || '—'} | <strong>Operator:</strong> ${w.operator || '—'} | <strong>Field:</strong> ${w.field_name || '—'} | <strong>Generated:</strong> ${data.generated_at || '—'}</p>`;
+        if (data.formation_tops && data.formation_tops.length) {
+            html += `<h2>Formation Tops</h2><table><tr><th>Formation</th><th>Depth (${w.depth_unit || 'FT'})</th><th>Lithology</th></tr>`;
+            data.formation_tops.forEach(t => {
+                html += `<tr><td>${t.formation_name}</td><td>${t.depth?.toFixed(1) || '—'}</td><td>${t.lithology || '—'}</td></tr>`;
+            });
+            html += '</table>';
+        }
+        if (data.zones && data.zones.length) {
+            html += `<h2>Zones</h2><table><tr><th>Zone</th><th>Top</th><th>Bottom</th><th>Gross (ft)</th></tr>`;
+            data.zones.forEach(z => {
+                html += `<tr><td>${z.name}</td><td>${z.top_depth?.toFixed(1)}</td><td>${z.bottom_depth?.toFixed(1)}</td><td>${(z.bottom_depth - z.top_depth)?.toFixed(1)}</td></tr>`;
+            });
+            html += '</table>';
+        }
+        if (data.curve_summary && data.curve_summary.length) {
+            html += `<h2>Curve Summary</h2><table><tr><th>Run</th><th>Curve</th><th>Unit</th><th>Count</th><th>Min</th><th>Max</th><th>Mean</th></tr>`;
+            data.curve_summary.forEach(c => {
+                html += `<tr><td>${c.run}</td><td>${c.mnemonic}</td><td>${c.unit || ''}</td><td>${c.count?.toLocaleString()}</td><td>${c.min?.toFixed(3) || '—'}</td><td>${c.max?.toFixed(3) || '—'}</td><td>${c.mean?.toFixed(3) || '—'}</td></tr>`;
+            });
+            html += '</table>';
+        }
+        if (data.petro_params) {
+            html += `<h2>Petrophysics Parameters</h2>`;
+            html += `<p><strong>Model:</strong> ${data.petro_params.saturation_model} | <strong>a:</strong> ${data.petro_params.a} | <strong>m:</strong> ${data.petro_params.m} | <strong>n:</strong> ${data.petro_params.n} | <strong>Rw:</strong> ${data.petro_params.rw}</p>`;
+            html += `<p><strong>VSH cutoff:</strong> ${data.petro_params.vsh_cutoff} | <strong>PHIE cutoff:</strong> ${data.petro_params.phie_cutoff} | <strong>Sw cutoff:</strong> ${data.petro_params.sw_cutoff}</p>`;
+        }
+        html += `<div class="report-meta">Generated by GeoLog — Professional Well Log Viewer</div></div>`;
+        document.getElementById('reportContent').innerHTML = html;
+        document.getElementById('reportModal').style.display = 'flex';
+    }
+
+    // ─── Sprint 26: Context Menu for Wells ──────────────────────
+    _bindContextMenu() {
+        // Right-click on well items in sidebar
+        document.addEventListener('contextmenu', (e) => {
+            const wellItem = e.target.closest('.well-item');
+            if (wellItem) {
+                e.preventDefault();
+                const wid = parseInt(wellItem.dataset.id);
+                this.showContextMenu(e.clientX, e.clientY, [
+                    { label: 'Select Well', icon: 'check', action: `app.selectWell(${wid})` },
+                    { label: 'Edit Well', icon: 'pencil', action: `app.editWell(${wid})` },
+                    { separator: true },
+                    { label: 'Upload LAS', icon: 'upload', action: `app.uploadLASForWell(${wid})` },
+                    { label: 'Export Report', icon: 'file-down', action: `app.currentWell=${wid}; app.exportReport()` },
+                    { label: 'Export Package', icon: 'package', action: `app._exportPackage(${wid})` },
+                    { separator: true },
+                    { label: 'Delete Well', icon: 'trash-2', action: `app.deleteWell(${wid})`, danger: true },
+                ]);
+            }
+        });
+    }
+
+    async _exportPackage(wid) {
+        try {
+            const resp = await fetch(`/api/wells/${wid}/export-package`);
+            const data = await resp.json();
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `well_${wid}_package.json`;
+            a.click();
+            GeoToast.success('Package exported');
+        } catch { GeoToast.error('Export failed'); }
+    }
+
+    async uploadLASForWell(wid) {
+        // Upload LAS to specific well
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.las';
+        input.onchange = async () => {
+            const file = input.files[0];
+            if (!file) return;
+            GeoLoading.show(`Uploading ${file.name}...`);
+            const fd = new FormData();
+            fd.append('file', file);
+            try {
+                const resp = await fetch(`/api/wells/${wid}/upload-las`, { method: 'POST', body: fd });
+                if (resp.ok) {
+                    GeoToast.success(`Uploaded to well #${wid}`);
+                    await this.loadProjects();
+                } else {
+                    GeoToast.error('Upload failed');
+                }
+            } catch { GeoToast.error('Upload failed'); }
+            GeoLoading.hide();
+        };
+        input.click();
+    }
+
+    async editWell(wid) {
+        await this.selectWell(wid);
+        this.editCurrentWell();
+    }
+
+    deleteWell(wid) {
+        if (!confirm('Delete this well and all its data?')) return;
+        fetch(`/api/wells/${wid}`, { method: 'DELETE' }).then(() => {
+            GeoToast.success('Well deleted');
+            this.loadProjects();
+        });
+    }
+
 }
 // Initialize
 const app = new GeoLogApp();
@@ -4422,7 +4793,7 @@ document.addEventListener('keydown', (e) => {
     // Don't trigger if typing in input/textarea
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
 
-    const views = ['viewer', 'crossplot', 'pickett', 'mnplot', 'petrophysics', 'qc', 'correlation', 'statistics', 'sensitivity', 'comparison', 'striplog', 'facies', 'tools', 'probability', 'moveable', 'dipplot', 'buckles', 'hingle', 'calculator', 'datatable', 'topsmgmt', 'formation', 'batch', 'map', 'dashboard'];
+    const views = ['viewer', 'crossplot', 'pickett', 'mnplot', 'petrophysics', 'qc', 'correlation', 'statistics', 'sensitivity', 'comparison', 'striplog', 'facies', 'tools', 'probability', 'moveable', 'dipplot', 'buckles', 'hingle', 'calculator', 'datatable', 'topsmgmt', 'formation', 'batch', 'map', 'dashboard', 'matrix', 'audit'];
 
     switch (e.key) {
         case '1': case '2': case '3': case '4':
@@ -4469,10 +4840,17 @@ document.addEventListener('keydown', (e) => {
         case 'Escape':
             if (GeoModal._resolve) { GeoModal.close(); }
             app.closeShortcutHelp();
+            app.closeCmdPalette();
             break;
         case '?':
             e.preventDefault();
             app.openShortcutHelp();
+            break;
+        case 'k':
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                app.openCmdPalette();
+            }
             break;
         case 'z':
             if (e.ctrlKey || e.metaKey) {

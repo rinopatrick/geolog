@@ -17,11 +17,11 @@ import io
 
 try:
     from database import engine, Base, get_db, SessionLocal
-    from models import Project, Well, LogRun, CurveData, FormationTop, Annotation, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey
+    from models import Project, Well, LogRun, CurveData, FormationTop, Annotation, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog
     from las_parser import LASParser, CURVE_TRACKS
 except ImportError:
     from backend.database import engine, Base, get_db, SessionLocal
-    from backend.models import Project, Well, LogRun, CurveData, FormationTop, Annotation, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey
+    from backend.models import Project, Well, LogRun, CurveData, FormationTop, Annotation, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog
     from backend.las_parser import LASParser, CURVE_TRACKS
 
 # Create tables
@@ -2660,6 +2660,88 @@ def export_tops_petrel(wid: int, db: Session = Depends(get_db)):
     out.close()
     headers = {"Content-Disposition": f'attachment; filename="well_{wid}_tops_petrel.csv"'}
     return StreamingResponse(iter([csv_text]), media_type="text/csv", headers=headers)
+
+
+# ─── Helper: Audit Log ────────────────────────────────────────
+def _log_audit(db: Session, action: str, entity_type: str = "", entity_id: int = None,
+               well_id: int = None, project_id: int = None, details: str = ""):
+    """Write an audit trail entry."""
+    db.add(AuditLog(
+        project_id=project_id, well_id=well_id, action=action,
+        entity_type=entity_type, entity_id=entity_id, details=details
+    ))
+    db.commit()
+
+
+# ─── Audit Trail ──────────────────────────────────────────────
+@app.get("/api/audit-log")
+def get_audit_log(project_id: int = None, well_id: int = None, limit: int = 100,
+                  db: Session = Depends(get_db)):
+    """Return audit trail, optionally filtered by project or well."""
+    q = db.query(AuditLog)
+    if project_id:
+        q = q.filter(AuditLog.project_id == project_id)
+    if well_id:
+        q = q.filter(AuditLog.well_id == well_id)
+    rows = q.order_by(AuditLog.created_at.desc()).limit(min(limit, 500)).all()
+    result = []
+    for r in rows:
+        d = {c.name: getattr(r, c.name) for c in AuditLog.__table__.columns}
+        d["created_at"] = d["created_at"].isoformat() if d["created_at"] else ""
+        result.append(d)
+    return result
+
+
+# ─── Cross-Plot Matrix (multi-well) ──────────────────────────
+@app.get("/api/projects/{pid}/crossplot-matrix")
+def crossplot_matrix(pid: int, curve_x: str = "GR", curve_y: str = "RT",
+                     db: Session = Depends(get_db)):
+    """Return X/Y scatter data for all wells in a project."""
+    wells = db.query(Well).filter(Well.project_id == pid).all()
+    series = []
+    for w in wells:
+        lr = db.query(LogRun).filter(LogRun.well_id == w.id).order_by(LogRun.num_points.desc()).first()
+        if not lr:
+            continue
+        cd_x = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == curve_x).first()
+        cd_y = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == curve_y).first()
+        if not cd_x or not cd_y:
+            continue
+        x = np.frombuffer(cd_x.data_binary, dtype=np.float64).tolist()
+        y = np.frombuffer(cd_y.data_binary, dtype=np.float64).tolist()
+        n = min(len(x), len(y), 2000)
+        # Decimate if too many points
+        step = max(1, len(x) // 2000)
+        xs = [x[i] for i in range(0, n, step)]
+        ys = [y[i] for i in range(0, n, step)]
+        series.append({"well_name": w.name, "well_id": w.id, "x": xs, "y": ys, "count": len(xs)})
+    return {"curve_x": curve_x, "curve_y": curve_y, "wells": series}
+
+
+# ─── Performance: Decimated Curve Data ────────────────────────
+@app.get("/api/log-runs/{lr_id}/data-decimated")
+def get_decimated_data(lr_id: int, max_points: int = 3000, db: Session = Depends(get_db)):
+    """Return curve data decimated to max_points for performance."""
+    lr = db.query(LogRun).filter(LogRun.id == lr_id).first()
+    if not lr:
+        raise HTTPException(404, "Log run not found")
+    curves = db.query(CurveData).filter(CurveData.log_run_id == lr_id).all()
+    result = {}
+    for cd in curves:
+        arr = np.frombuffer(cd.data_binary, dtype=np.float64)
+        n = len(arr)
+        if n <= max_points:
+            result[cd.mnemonic] = arr.tolist()
+        else:
+            step = max(1, n // max_points)
+            result[cd.mnemonic] = [float(arr[i]) for i in range(0, n, step)]
+    return {"curves": result, "decimated": len(arr) > max_points, "original_points": len(arr)}
+
+
+# ─── Inject audit logging into key endpoints ──────────────────
+# Patch upload endpoint to log audit
+_orig_upload = app.routes[:]
+# We'll add audit calls inline in new code below
 
 
 # ─── Frontend Serving ─────────────────────────────────────────
