@@ -85,6 +85,12 @@ class GeoLogApp {
         this._petroCache = null;
         this.zoneUndoStack = [];
         this.zoneRedoStack = [];
+        this.performanceMode = localStorage.getItem('geolog_performance_mode') === '1';
+        this.maxPoints = parseInt(localStorage.getItem('geolog_max_points') || '3000', 10);
+        this._searchDebounceTimer = null;
+        this._jobMonitorTimer = null;
+        this.currentRole = (localStorage.getItem('geolog_active_role') || 'admin').toLowerCase();
+        this.jobIds = JSON.parse(localStorage.getItem('geolog_job_ids') || '[]');
 
         this.init();
     }
@@ -103,15 +109,20 @@ class GeoLogApp {
             }
         }
         if (typeof lucide !== 'undefined') lucide.createIcons();
+        this._restoreUIPreferences();
         this._showFirstRunWelcome();
         this._bindContextMenu();
     }
 
     _bindUI() {
         // Navigation
-        document.querySelectorAll('.nav-btn').forEach(btn => {
-            btn.addEventListener('click', () => this.switchView(btn.dataset.view));
+        document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.switchView(btn.dataset.view);
+                this._closeAllNavGroups();
+            });
         });
+        this._bindNavGroups();
 
         // Scale selector
         const scaleSelect = document.getElementById('scaleSelect');
@@ -119,6 +130,7 @@ class GeoLogApp {
             scaleSelect.addEventListener('change', () => {
                 const scale = parseInt(scaleSelect.value);
                 this.renderer.scale = scale;
+                localStorage.setItem('geolog_scale', String(scale));
                 this._loadCurveData();
             });
         }
@@ -132,6 +144,8 @@ class GeoLogApp {
                 const stop = parseFloat(bottomInput.value);
                 if (!isNaN(start) && !isNaN(stop) && stop > start) {
                     this.renderer.setView(start, stop);
+                    localStorage.setItem('geolog_depth_top', String(start));
+                    localStorage.setItem('geolog_depth_bottom', String(stop));
                 }
             };
             topInput.addEventListener('change', applyDepth);
@@ -141,7 +155,32 @@ class GeoLogApp {
         // Search
         const searchInput = document.getElementById('wellSearch');
         if (searchInput) {
-            searchInput.addEventListener('input', () => this._filterWells(searchInput.value));
+            searchInput.addEventListener('input', () => {
+                clearTimeout(this._searchDebounceTimer);
+                const q = searchInput.value;
+                this._searchDebounceTimer = setTimeout(() => this._filterWells(q), 120);
+            });
+        }
+
+        const perfToggle = document.getElementById('performanceModeToggle');
+        const maxPointsInput = document.getElementById('maxPointsInput');
+        if (perfToggle) {
+            perfToggle.checked = this.performanceMode;
+            perfToggle.addEventListener('change', async () => {
+                this.performanceMode = perfToggle.checked;
+                localStorage.setItem('geolog_performance_mode', this.performanceMode ? '1' : '0');
+                await this._loadCurveData();
+            });
+        }
+        if (maxPointsInput) {
+            if (Number.isFinite(this.maxPoints) && this.maxPoints > 0) maxPointsInput.value = String(this.maxPoints);
+            maxPointsInput.addEventListener('change', async () => {
+                const v = Math.max(500, Math.min(20000, parseInt(maxPointsInput.value || '3000', 10)));
+                this.maxPoints = Number.isFinite(v) ? v : 3000;
+                maxPointsInput.value = String(this.maxPoints);
+                localStorage.setItem('geolog_max_points', String(this.maxPoints));
+                if (this.performanceMode) await this._loadCurveData();
+            });
         }
 
         // Export buttons
@@ -253,12 +292,14 @@ class GeoLogApp {
         document.getElementById('imagelogPanel').style.display = view === 'imagelog' ? 'block' : 'none';
         document.getElementById('analogsPanel').style.display = view === 'analogs' ? 'block' : 'none';
         document.getElementById('usersPanel').style.display = view === 'users' ? 'block' : 'none';
+        document.getElementById('jobmonitorPanel').style.display = view === 'jobmonitor' ? 'block' : 'none';
 
         // Sprint 26: Update status bar + trigger panel-specific loads
         this._updateStatusBar(view);
         if (view === 'matrix') this.loadCrossPlotMatrix();
         if (view === 'audit') this._renderAuditPanel();
         if (view === 'users') this.loadUsers();
+        if (view === 'jobmonitor') this._refreshJobMonitor();
 
         if (view === 'crossplot') this._renderCrossPlot();
         if (view === 'pickett') this._renderPickettPlot();
@@ -272,7 +313,7 @@ class GeoLogApp {
         if (view === 'statistics') this._renderStatistics();
         if (view === 'sensitivity') { /* auto-loads on click */ }
         if (view === 'comparison') this.loadWellComparison();
-        if (view === 'tools') this._initToolsPanel();
+        if (view === 'tools') { this._initToolsPanel(); this.refreshJobs(); }
         if (view === 'facies') this._initFaciesPanel();
         if (view === 'striplog') this.renderStripLog();
         if (view === 'probability') this.runProbabilityPlot();
@@ -287,13 +328,165 @@ class GeoLogApp {
         if (view === 'batch') { /* user fills form */ }
         if (view === 'map') this.renderWellMap();
         if (view === 'dashboard') this.loadDashboard();
+        localStorage.setItem('geolog_last_view', view);
+    }
+
+    _bindNavGroups() {
+        const groups = Array.from(document.querySelectorAll('.nav-group'));
+        groups.forEach(group => {
+            group.addEventListener('toggle', () => {
+                if (!group.open) return;
+                groups.forEach(other => {
+                    if (other !== group) other.open = false;
+                });
+            });
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.topbar-nav')) this._closeAllNavGroups();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') this._closeAllNavGroups();
+        });
+    }
+
+    _closeAllNavGroups() {
+        document.querySelectorAll('.nav-group').forEach(g => { g.open = false; });
+        document.querySelectorAll('.btn-group-dropdown.open').forEach(d => d.classList.remove('open'));
+    }
+
+    _restoreUIPreferences() {
+        const savedScale = parseInt(localStorage.getItem('geolog_scale') || '', 10);
+        if (Number.isFinite(savedScale)) {
+            const scaleSelect = document.getElementById('scaleSelect');
+            if (scaleSelect) scaleSelect.value = String(savedScale);
+            if (this.renderer) this.renderer.scale = savedScale;
+        }
+
+        const top = parseFloat(localStorage.getItem('geolog_depth_top') || '');
+        const bottom = parseFloat(localStorage.getItem('geolog_depth_bottom') || '');
+        if (Number.isFinite(top)) {
+            const topInput = document.getElementById('depthTop');
+            if (topInput) topInput.value = String(top);
+        }
+        if (Number.isFinite(bottom)) {
+            const bottomInput = document.getElementById('depthBottom');
+            if (bottomInput) bottomInput.value = String(bottom);
+        }
+
+        const roleSelect = document.getElementById('activeRoleSelect');
+        if (roleSelect) roleSelect.value = this.currentRole;
+
+        const lastView = localStorage.getItem('geolog_last_view');
+        if (lastView) this.switchView(lastView);
+    }
+
+    setActiveRole(role) {
+        const r = String(role || 'viewer').toLowerCase();
+        this.currentRole = r;
+        localStorage.setItem('geolog_active_role', r);
+        GeoToast.info(`Active role: ${r}`);
+    }
+
+    _updateWorkflowStrip() {
+        const strip = document.getElementById('workflowStrip');
+        if (!strip) return;
+        const steps = strip.querySelectorAll('.wf-step');
+        if (!steps.length) return;
+
+        const hasWell = !!this.currentWell;
+        const hasRuns = hasWell && this.currentWell.log_runs?.length > 0;
+        const hasTops = hasWell && this.formationTops?.length > 0;
+        const hasZones = hasWell && this.renderer?.zones?.length > 0;
+
+        // Reset all
+        steps.forEach(s => { s.classList.remove('active', 'done'); });
+
+        if (!hasWell) {
+            steps[0]?.classList.add('active');
+            return;
+        }
+        if (!hasRuns) { steps[0]?.classList.add('active'); return; }
+        steps[0]?.classList.add('done');
+
+        if (!hasTops) { steps[1]?.classList.add('active'); return; }
+        steps[1]?.classList.add('done');
+
+        if (!hasZones) { steps[2]?.classList.add('active'); return; }
+        steps[2]?.classList.add('done');
+
+        // Interpret + Export available
+        steps[3]?.classList.add('active');
+        steps[4]?.classList.add('active');
+    }
+
+    async runSmokeRegression() {
+        try {
+            const res = await this._api('/regression/smoke');
+            const ok = !!res.ok;
+            const failed = (res.checks || []).filter(c => !c.ok).map(c => c.name);
+            if (ok) GeoToast.success('Smoke regression: PASS');
+            else GeoToast.error(`Smoke regression: FAIL (${failed.join(', ')})`);
+            const host = document.getElementById('regressionResult');
+            if (host) {
+                host.innerHTML = `<pre>${JSON.stringify(res, null, 2)}</pre>`;
+            }
+        } catch (e) {
+            GeoToast.error('Smoke regression error: ' + e.message);
+        }
+    }
+
+    async _refreshJobMonitor() {
+        try {
+            const res = await this._api('/jobs');
+            this._renderJobMonitor(res.jobs || []);
+            // Auto-poll every 3s if any job is still running
+            clearInterval(this._jobMonitorTimer);
+            const hasActive = (res.jobs || []).some(j => j.status === 'queued' || j.status === 'running');
+            if (hasActive) {
+                this._jobMonitorTimer = setInterval(() => this._refreshJobMonitor(), 3000);
+            }
+        } catch (e) {
+            const host = document.getElementById('jobMonitorBody');
+            if (host) host.innerHTML = `<p style="color:var(--danger)">Error: ${e.message}</p>`;
+        }
+    }
+
+    _renderJobMonitor(jobs) {
+        const host = document.getElementById('jobMonitorBody');
+        if (!host) return;
+        if (!jobs.length) {
+            host.innerHTML = '<p style="color:var(--text-muted)">No background jobs yet. Use async endpoints (synthetic-seismogram-async, electrofacies-async, batch-petro-async) to queue jobs.</p>';
+            return;
+        }
+        const statusColors = { queued: '#d29922', running: '#58a6ff', done: '#3fb950', failed: '#f85149' };
+        const statusIcons = { queued: '⏳', running: '🔄', done: '✅', failed: '❌' };
+        let html = '<table style="width:100%;border-collapse:collapse;font-size:13px">';
+        html += '<thead><tr style="border-bottom:1px solid var(--border);text-align:left">';
+        html += '<th style="padding:8px">Status</th><th>Type</th><th>ID</th><th>Created</th><th>Finished</th><th>Error</th>';
+        html += '</tr></thead><tbody>';
+        for (const j of jobs) {
+            const color = statusColors[j.status] || '#8b949e';
+            const icon = statusIcons[j.status] || '❓';
+            html += `<tr style="border-bottom:1px solid var(--border-light)">`;
+            html += `<td style="padding:8px;color:${color};font-weight:600">${icon} ${j.status}</td>`;
+            html += `<td style="padding:8px">${j.type || '-'}</td>`;
+            html += `<td style="padding:8px;font-family:var(--font-mono);font-size:11px">${j.id}</td>`;
+            html += `<td style="padding:8px">${j.created_at ? new Date(j.created_at).toLocaleTimeString() : '-'}</td>`;
+            html += `<td style="padding:8px">${j.finished_at ? new Date(j.finished_at).toLocaleTimeString() : '-'}</td>`;
+            html += `<td style="padding:8px;color:var(--danger);max-width:200px;overflow:hidden;text-overflow:ellipsis">${j.error || ''}</td>`;
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+        host.innerHTML = html;
     }
 
     // ─── API ─────────────────────────────────────────────────
     async _api(path, opts = {}) {
         try {
             const resp = await fetch('/api' + path, {
-                headers: { 'Content-Type': 'application/json', ...opts.headers },
+                headers: { 'Content-Type': 'application/json', 'X-User-Role': this.currentRole || 'viewer', ...opts.headers },
                 ...opts,
             });
             if (!resp.ok) {
@@ -366,6 +559,7 @@ class GeoLogApp {
 
             this._renderWellHeader(well);
             localStorage.setItem('geolog_last_well', wellId);
+            this._updateWorkflowStrip();
         } catch (e) { console.error('Failed to select well:', e); }
             finally { GeoLoading.hide(); }
     }
@@ -416,14 +610,23 @@ class GeoLogApp {
             const start = topInput ? parseFloat(topInput.value) : this.currentLogRun.start_depth;
             const stop = bottomInput ? parseFloat(bottomInput.value) : this.currentLogRun.stop_depth;
 
-            const data = await this._api(`/log-runs/${this.currentLogRun.id}/data`, {
-                method: 'POST',
-                body: JSON.stringify({
-                    curve_mnemonics: mnemonics,
-                    start_depth: start,
-                    stop_depth: stop,
-                }),
-            });
+            let data;
+            if (this.performanceMode) {
+                const dec = await this._api(`/log-runs/${this.currentLogRun.id}/data-decimated?max_points=${this.maxPoints}`);
+                data = { ...(dec?.curves || {}) };
+                if (data.DEPT && !data.DEPTH) data.DEPTH = data.DEPT;
+                const points = data.DEPTH?.length || data.DEPT?.length || 0;
+                GeoToast.info(`Performance mode ON: ${points} pts`);
+            } else {
+                data = await this._api(`/log-runs/${this.currentLogRun.id}/data`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        curve_mnemonics: mnemonics,
+                        start_depth: start,
+                        stop_depth: stop,
+                    }),
+                });
+            }
 
             const depth = data.DEPTH || [];
             const curveData = {};
@@ -459,6 +662,7 @@ class GeoLogApp {
                 this.renderer.render();
             }
             this._renderTopsList();
+            this._updateWorkflowStrip();
         } catch (e) { console.error('Failed to load formation tops:', e); }
     }
 
@@ -477,6 +681,7 @@ class GeoLogApp {
             this.zoneUndoStack = [];
             this.zoneRedoStack = [];
             this._renderZonesList();
+            this._updateWorkflowStrip();
         } catch (e) {
             console.error('Failed to load zones:', e);
         }
@@ -3282,6 +3487,21 @@ class GeoLogApp {
         finally { GeoLoading.hide(); }
     }
 
+    async runElectrofaciesAsync() {
+        if (!this.currentWell || !this.currentLogRun) return GeoToast.warn('Load a well first');
+        const n = parseInt(document.getElementById('faciesN')?.value || '4');
+        const checks = document.querySelectorAll('#faciesCurveCheckboxes input:checked');
+        const curves = Array.from(checks).map(c => c.value);
+        if (curves.length < 2) return GeoToast.warn('Select at least 2 curves');
+        try {
+            const res = await this._api('/wells/' + this.currentWell.id + '/electrofacies-async', {
+                method: 'POST', body: JSON.stringify({ log_run_id: this.currentLogRun.id, n_clusters: n, curves })
+            });
+            this._trackJob(res.job_id);
+            GeoToast.success('Electrofacies job queued: ' + res.job_id);
+        } catch (e) { GeoToast.error('Queue failed: ' + e.message); }
+    }
+
     toggleLithTrack() {
         if (!this.renderer) return;
         this._showLithTrack = !this._showLithTrack;
@@ -4409,6 +4629,60 @@ class GeoLogApp {
                 </div>`;
             GeoToast.success(`Parameters applied to ${result.updated} wells`);
         } catch (e) { GeoToast.error(e.message); }
+    }
+
+    async runBatchPetroAsync() {
+        if (!this.projects?.[0]) return GeoToast.warn('No active project');
+        const pid = this.projects[0].id;
+        const params = {
+            saturation_model: document.getElementById('batchSatModel').value,
+            a: parseFloat(document.getElementById('batchA').value),
+            m: parseFloat(document.getElementById('batchM').value),
+            n: parseFloat(document.getElementById('batchN').value),
+            rw: parseFloat(document.getElementById('batchRw').value),
+            vsh_cutoff: parseFloat(document.getElementById('batchVshCut').value),
+            phie_cutoff: parseFloat(document.getElementById('batchPhieCut').value),
+            sw_cutoff: parseFloat(document.getElementById('batchSwCut').value),
+            template: document.getElementById('batchTemplate').value
+        };
+        try {
+            const res = await this._api(`/projects/${pid}/batch-petro-async`, {
+                method: 'POST', body: JSON.stringify(params)
+            });
+            this._trackJob(res.job_id);
+            GeoToast.success('Batch petro job queued: ' + res.job_id);
+        } catch (e) { GeoToast.error('Queue failed: ' + e.message); }
+    }
+
+    _trackJob(jobId) {
+        if (!jobId) return;
+        if (!this.jobIds.includes(jobId)) {
+            this.jobIds.unshift(jobId);
+            this.jobIds = this.jobIds.slice(0, 20);
+            localStorage.setItem('geolog_job_ids', JSON.stringify(this.jobIds));
+        }
+        this.refreshJobs();
+    }
+
+    async refreshJobs() {
+        const host = document.getElementById('jobMonitorList');
+        if (!host) return;
+        if (!this.jobIds.length) {
+            host.innerHTML = '<p style="color:#8b949e">No jobs yet.</p>';
+            return;
+        }
+        let html = '';
+        for (const id of this.jobIds) {
+            try {
+                const j = await this._api(`/jobs/${id}`);
+                const color = j.status === 'done' ? '#3fb950' : j.status === 'failed' ? '#f85149' : '#d29922';
+                html += `<div style="border:1px solid #30363d;border-radius:6px;padding:8px;margin-bottom:6px">`;
+                html += `<div><strong>${j.type}</strong> <span style="color:${color}">${j.status}</span></div>`;
+                html += `<div style="font-size:11px;color:#8b949e">${j.id}</div>`;
+                html += `</div>`;
+            } catch (_) { }
+        }
+        host.innerHTML = html || '<p style="color:#8b949e">No readable jobs.</p>';
     }
 
     openShortcutHelp() {

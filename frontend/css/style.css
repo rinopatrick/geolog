@@ -901,6 +901,171 @@ label,
     justify-content: flex-start;
 }
 
+.perf-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.toolbar-perf input[type="checkbox"] {
+    transform: translateY(1px);
+}
+
+/* ── Button Group Dropdowns ────────────────────────────── */
+.btn-group-dropdown {
+    position: relative;
+}
+
+.btn-group-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.dropdown-arrow {
+    font-size: 10px;
+    opacity: 0.6;
+    transition: transform 0.2s;
+}
+
+.btn-group-dropdown.open .dropdown-arrow {
+    transform: rotate(180deg);
+}
+
+.btn-group-menu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    min-width: 180px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px;
+    z-index: 300;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+
+.btn-group-dropdown.open .btn-group-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.btn-group-menu button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 12.5px;
+    cursor: pointer;
+    border-radius: 6px;
+    white-space: nowrap;
+    text-align: left;
+}
+
+.btn-group-menu button:hover {
+    background: var(--bg-tertiary);
+}
+
+.menu-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 8px;
+}
+
+.btn-primary-action {
+    background: var(--accent) !important;
+    color: #000 !important;
+    font-weight: 600;
+}
+
+/* ── Workflow Strip ────────────────────────────────────── */
+.workflow-strip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    margin: 0 0 8px;
+    background: linear-gradient(135deg, rgba(88,166,255,0.08), rgba(63,185,80,0.06));
+    border: 1px solid rgba(88,166,255,0.15);
+    border-radius: 10px;
+    font-size: 12px;
+    overflow-x: auto;
+}
+
+.wf-step {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    transition: all 0.2s;
+}
+
+.wf-step.active {
+    background: rgba(88,166,255,0.15);
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.wf-step.done {
+    color: var(--success);
+}
+
+.wf-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--border);
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.wf-step.active .wf-num {
+    background: var(--accent);
+    color: #000;
+}
+
+.wf-step.done .wf-num {
+    background: var(--success);
+    color: #000;
+}
+
+.wf-arrow {
+    color: var(--text-muted);
+    opacity: 0.4;
+    font-size: 14px;
+}
+
+/* ── Advanced Controls (Progressive Disclosure) ────────── */
+.btn-advanced-toggle.active {
+    background: var(--bg-tertiary);
+    color: var(--accent);
+}
+
+.advanced-controls {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0;
+    margin-left: 4px;
+    border-left: 1px solid var(--border);
+    padding-left: 12px;
+}
+
+.advanced-controls.open {
+    display: flex;
+}
+
 .help-modal-overlay {
     position: fixed;
     inset: 0;

@@ -1,7 +1,7 @@
 """GeoLog — Oil & Gas Well Log Viewer."""
 import logging
 import traceback
-from fastapi import FastAPI, Request, UploadFile, File, Depends, HTTPException
+from fastapi import FastAPI, Request, UploadFile, File, Depends, HTTPException, Header
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +14,8 @@ import os
 import datetime
 import csv
 import io
+from concurrent.futures import ThreadPoolExecutor
+import uuid
 
 try:
     from database import engine, Base, get_db, SessionLocal
@@ -36,6 +38,29 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="GeoLog", version="2.0.0", description="Oil & Gas Well Log Viewer")
 
+JOB_EXECUTOR = ThreadPoolExecutor(max_workers=2)
+JOBS = {}
+
+ROLE_RANK = {"viewer": 1, "interpreter": 2, "admin": 3}
+
+def _require_role(min_role: str, x_user_role: str = Header(default="viewer")):
+    role = (x_user_role or "viewer").strip().lower()
+    if ROLE_RANK.get(role, 0) < ROLE_RANK.get(min_role, 99):
+        raise HTTPException(status_code=403, detail=f"{min_role} role required")
+    return role
+
+
+def require_viewer(x_user_role: str = Header(default="viewer")):
+    return _require_role("viewer", x_user_role)
+
+
+def require_interpreter(x_user_role: str = Header(default="viewer")):
+    return _require_role("interpreter", x_user_role)
+
+
+def require_admin(x_user_role: str = Header(default="viewer")):
+    return _require_role("admin", x_user_role)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -43,6 +68,38 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class RBACWriteGuardMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        method = request.method.upper()
+        path = request.url.path
+        if method in {"POST", "PUT", "DELETE"} and path.startswith("/api/"):
+            role = (request.headers.get("X-User-Role") or "viewer").strip().lower()
+
+            # POST endpoints that are read/query-only (safe for viewer)
+            viewer_safe = {
+                "/api/log-runs/",       # /data, /data-decimated queries
+            }
+
+            # Admin-only paths (structural/destructive)
+            admin_exact_post = {"/api/projects/", "/api/wells/"}
+            admin_prefixes = ("/api/users",)
+
+            required = "interpreter"
+            if path in admin_exact_post and method == "POST":
+                required = "admin"
+            elif any(path.startswith(p) for p in admin_prefixes):
+                required = "admin"
+            elif method == "DELETE":
+                required = "admin"
+            elif any(path.startswith(p) for p in viewer_safe):
+                required = "viewer"
+
+            if ROLE_RANK.get(role, 0) < ROLE_RANK.get(required, 99):
+                return JSONResponse(status_code=403, content={"detail": f"{required} role required"})
+
+        return await call_next(request)
 
 
 class ErrorLoggingMiddleware(BaseHTTPMiddleware):
@@ -60,6 +117,7 @@ class ErrorLoggingMiddleware(BaseHTTPMiddleware):
                 content={"detail": "Internal server error", "error": str(e)},
             )
 
+app.add_middleware(RBACWriteGuardMiddleware)
 app.add_middleware(ErrorLoggingMiddleware)
 
 
@@ -1326,7 +1384,7 @@ def strip_log_data(pid: int, curve: str = "GR", db: Session = Depends(get_db)):
 
 # ─── Formation Top Auto-Pick ──────────────────────────────────
 @app.post("/api/wells/{wid}/auto-pick-tops")
-def auto_pick_tops(wid: int, data: dict, db: Session = Depends(get_db)):
+def auto_pick_tops(wid: int, data: dict, db: Session = Depends(get_db), _role: str = Depends(require_interpreter)):
     """Auto-detect formation boundaries from GR or RT curve breaks."""
     curve = data.get("curve", "GR")
     threshold = float(data.get("threshold", 1.5))  # z-score threshold for boundary detection
@@ -2721,21 +2779,43 @@ def crossplot_matrix(pid: int, curve_x: str = "GR", curve_y: str = "RT",
 # ─── Performance: Decimated Curve Data ────────────────────────
 @app.get("/api/log-runs/{lr_id}/data-decimated")
 def get_decimated_data(lr_id: int, max_points: int = 3000, db: Session = Depends(get_db)):
-    """Return curve data decimated to max_points for performance."""
+    """Return curve data decimated to <= max_points for performance."""
     lr = db.query(LogRun).filter(LogRun.id == lr_id).first()
     if not lr:
         raise HTTPException(404, "Log run not found")
+
+    max_points = max(200, min(int(max_points or 3000), 50000))
     curves = db.query(CurveData).filter(CurveData.log_run_id == lr_id).all()
+
     result = {}
+    original_points = 0
+    output_points = 0
+    decimated = False
+
     for cd in curves:
         arr = np.frombuffer(cd.data_binary, dtype=np.float64)
-        n = len(arr)
+        n = int(len(arr))
+        if n > original_points:
+            original_points = n
+
         if n <= max_points:
-            result[cd.mnemonic] = arr.tolist()
+            sampled = arr.tolist()
         else:
-            step = max(1, n // max_points)
-            result[cd.mnemonic] = [float(arr[i]) for i in range(0, n, step)]
-    return {"curves": result, "decimated": len(arr) > max_points, "original_points": len(arr)}
+            step = int(np.ceil(n / max_points))
+            sampled = [float(arr[i]) for i in range(0, n, step)]
+            decimated = True
+
+        if len(sampled) > output_points:
+            output_points = len(sampled)
+        result[cd.mnemonic] = sampled
+
+    return {
+        "curves": result,
+        "decimated": decimated,
+        "original_points": original_points,
+        "output_points": output_points,
+        "max_points": max_points,
+    }
 
 
 # ─── Sprint 27: Dual-Water Saturation Model ─────────────────
@@ -3215,14 +3295,14 @@ _orig_upload = app.routes[:]
 
 
 @app.get("/api/users")
-def list_users(db: Session = Depends(get_db)):
+def list_users(db: Session = Depends(get_db), _role: str = Depends(require_viewer)):
     users = db.query(User).all()
     return [{"id": u.id, "username": u.username, "display_name": u.display_name,
              "role": u.role, "created_at": u.created_at.isoformat() if u.created_at else ""} for u in users]
 
 
 @app.post("/api/users", status_code=201)
-def create_user(data: dict, db: Session = Depends(get_db)):
+def create_user(data: dict, db: Session = Depends(get_db), _role: str = Depends(require_admin)):
     import hashlib, time
     username = data.get("username", "")
     if not username:
@@ -3240,7 +3320,7 @@ def create_user(data: dict, db: Session = Depends(get_db)):
 
 
 @app.put("/api/users/{uid}")
-def update_user(uid: int, data: dict, db: Session = Depends(get_db)):
+def update_user(uid: int, data: dict, db: Session = Depends(get_db), _role: str = Depends(require_admin)):
     u = db.query(User).filter(User.id == uid).first()
     if not u:
         raise HTTPException(404, "User not found")
@@ -3252,7 +3332,7 @@ def update_user(uid: int, data: dict, db: Session = Depends(get_db)):
 
 
 @app.delete("/api/users/{uid}", status_code=204)
-def delete_user(uid: int, db: Session = Depends(get_db)):
+def delete_user(uid: int, db: Session = Depends(get_db), _role: str = Depends(require_admin)):
     u = db.query(User).filter(User.id == uid).first()
     if not u:
         raise HTTPException(404, "User not found")
@@ -3261,12 +3341,7 @@ def delete_user(uid: int, db: Session = Depends(get_db)):
 
 
 # ─── Sprint 28: Synthetic Seismogram ─────────────────────────
-@app.post("/api/wells/{wid}/synthetic-seismogram")
-def synthetic_seismogram(wid: int, data: dict, db: Session = Depends(get_db)):
-    """Generate a synthetic seismogram from sonic (DT) and density (RHOB) logs.
-    Computes acoustic impedance (AI), reflection coefficients (RC), and
-    convolves with a Ricker wavelet to produce a synthetic trace.
-    """
+def _compute_synthetic_seismogram(wid: int, data: dict, db: Session):
     lr_id = data.get("log_run_id")
     lr = db.query(LogRun).filter(LogRun.id == lr_id).first() if lr_id else \
          db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
@@ -3284,7 +3359,6 @@ def synthetic_seismogram(wid: int, data: dict, db: Session = Depends(get_db)):
     rhob = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy()
     dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(dt)) * 0.5
 
-    # Filter valid data
     valid = ~np.isnan(dt) & ~np.isnan(rhob) & (dt > 0) & (rhob > 1.5) & (rhob < 3.5)
     dt_v = dt[valid]
     rhob_v = rhob[valid]
@@ -3293,32 +3367,18 @@ def synthetic_seismogram(wid: int, data: dict, db: Session = Depends(get_db)):
     if len(dt_v) < 10:
         raise HTTPException(400, "Not enough valid DT/RHOB data")
 
-    # Velocity from sonic: V = 1e6 / DT (ft/s)
     velocity = 1e6 / dt_v
-
-    # Acoustic impedance: AI = V * rho
     ai = velocity * rhob_v
-
-    # Reflection coefficients at each interface
     rc = np.zeros(len(ai))
     for i in range(1, len(ai)):
         rc[i] = (ai[i] - ai[i-1]) / (ai[i] + ai[i-1]) if (ai[i] + ai[i-1]) > 0 else 0
 
-    # Ricker wavelet
-    freq = float(data.get("frequency", 30))  # Hz
+    freq = float(data.get("frequency", 30))
     dt_sample = float(lr.step) if lr.step else 0.5
-    # Convert depth step to time: two-way time
-    t_wt = 2 * np.cumsum(dt_sample / velocity)  # two-way time in seconds
-
-    # Create Ricker wavelet
     t_wav = np.arange(-0.05, 0.05, dt_sample / np.mean(velocity))
     wav = (1 - 2 * (np.pi * freq * t_wav) ** 2) * np.exp(-(np.pi * freq * t_wav) ** 2)
-    wav = wav / np.max(np.abs(wav))  # normalize
-
-    # Convolve RC with wavelet
+    wav = wav / np.max(np.abs(wav))
     synthetic = np.convolve(rc, wav, mode='same')
-
-    # Decimate for frontend (max 2000 points)
     step = max(1, len(dept_v) // 2000)
 
     return {
@@ -3338,76 +3398,131 @@ def synthetic_seismogram(wid: int, data: dict, db: Session = Depends(get_db)):
     }
 
 
-# ─── Sprint 28: Formation Tops Auto-Pick ─────────────────────
-@app.post("/api/wells/{wid}/auto-pick-tops")
-def auto_pick_tops(wid: int, data: dict, db: Session = Depends(get_db)):
-    """Automatically pick formation tops based on curve inflection points.
-    Uses GR or SP curve derivative to detect major formation boundaries.
-    """
-    lr_id = data.get("log_run_id")
-    lr = db.query(LogRun).filter(LogRun.id == lr_id).first() if lr_id else \
-         db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
-    if not lr:
-        raise HTTPException(404, "No log run")
+@app.post("/api/wells/{wid}/synthetic-seismogram")
+def synthetic_seismogram(wid: int, data: dict, db: Session = Depends(get_db), _role: str = Depends(require_interpreter)):
+    """Generate synthetic seismogram from DT+RHOB."""
+    return _compute_synthetic_seismogram(wid, data, db)
 
-    curve_name = data.get("curve", "GR")
-    n_tops = min(int(data.get("n_tops", 5)), 20)
-    min_gap = float(data.get("min_gap", 50))  # minimum feet between tops
 
-    cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == curve_name).first()
-    dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
-    if not cd or not dept_cd:
-        raise HTTPException(400, f"Curve {curve_name} or DEPTH not found")
-
-    arr = np.frombuffer(cd.data_binary, dtype=np.float64).copy()
-    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy()
-
-    # Smooth the curve (moving average, window=11)
-    valid = ~np.isnan(arr)
-    smoothed = arr.copy()
-    half = 5
-    for i in range(half, len(arr) - half):
-        if valid[i]:
-            window = arr[max(0, i-half):i+half+1]
-            window = window[~np.isnan(window)]
-            if len(window) > 0:
-                smoothed[i] = np.mean(window)
-
-    # Compute gradient (first derivative)
-    gradient = np.gradient(smoothed)
-
-    # Find inflection points (zero crossings of second derivative, or peaks of |gradient|)
-    abs_grad = np.abs(gradient)
-    abs_grad[~valid] = 0
-
-    # Find local maxima of |gradient|
-    candidates = []
-    for i in range(2, len(abs_grad) - 2):
-        if abs_grad[i] > abs_grad[i-1] and abs_grad[i] > abs_grad[i+1] and abs_grad[i] > abs_grad[i-2] and abs_grad[i] > abs_grad[i+2]:
-            if abs_grad[i] > np.mean(abs_grad[valid]) * 1.5:  # threshold
-                candidates.append((float(dept[i]), float(abs_grad[i])))
-
-    # Sort by magnitude (strongest boundaries first)
-    candidates.sort(key=lambda x: x[1], reverse=True)
-
-    # Select tops with minimum gap
-    picked = []
-    for depth, mag in candidates:
-        if len(picked) >= n_tops:
-            break
-        if all(abs(depth - p[0]) >= min_gap for p in picked):
-            picked.append((depth, mag))
-
-    # Sort by depth
-    picked.sort(key=lambda x: x[0])
-
-    return {
-        "curve": curve_name,
-        "n_picked": len(picked),
-        "min_gap": min_gap,
-        "tops": [{"depth": round(d, 1), "magnitude": round(m, 4)} for d, m in picked],
+@app.post("/api/wells/{wid}/synthetic-seismogram-async", status_code=202)
+def synthetic_seismogram_async(wid: int, data: dict, _role: str = Depends(require_interpreter)):
+    """Queue synthetic seismogram computation in background job."""
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    JOBS[job_id] = {
+        "id": job_id,
+        "type": "synthetic-seismogram",
+        "status": "queued",
+        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "result": None,
+        "error": None,
     }
 
+    def _run():
+        db = SessionLocal()
+        try:
+            JOBS[job_id]["status"] = "running"
+            JOBS[job_id]["result"] = _compute_synthetic_seismogram(wid, data, db)
+            JOBS[job_id]["status"] = "done"
+        except Exception as e:
+            JOBS[job_id]["status"] = "failed"
+            JOBS[job_id]["error"] = str(e)
+        finally:
+            JOBS[job_id]["finished_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+            db.close()
+
+    JOB_EXECUTOR.submit(_run)
+    return {"job_id": job_id, "status": "queued"}
+
+
+@app.get("/api/jobs/{job_id}")
+def get_job_status(job_id: str, _role: str = Depends(require_viewer)):
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    return job
+
+
+@app.get("/api/jobs")
+def list_jobs(_role: str = Depends(require_viewer)):
+    """List all background jobs (newest first)."""
+    jobs = sorted(JOBS.values(), key=lambda j: j.get("created_at", ""), reverse=True)
+    return {"jobs": jobs, "total": len(jobs)}
+
+
+@app.post("/api/wells/{wid}/electrofacies-async", status_code=202)
+def electrofacies_async(wid: int, data: dict, _role: str = Depends(require_interpreter)):
+    """Queue electrofacies clustering in background job."""
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    JOBS[job_id] = {
+        "id": job_id,
+        "type": "electrofacies",
+        "status": "queued",
+        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "result": None,
+        "error": None,
+    }
+
+    def _run():
+        db = SessionLocal()
+        try:
+            JOBS[job_id]["status"] = "running"
+            JOBS[job_id]["result"] = compute_electrofacies(wid, data, db)
+            JOBS[job_id]["status"] = "done"
+        except Exception as e:
+            JOBS[job_id]["status"] = "failed"
+            JOBS[job_id]["error"] = str(e)
+        finally:
+            JOBS[job_id]["finished_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+            db.close()
+
+    JOB_EXECUTOR.submit(_run)
+    return {"job_id": job_id, "status": "queued"}
+
+
+@app.post("/api/projects/{pid}/batch-petro-async", status_code=202)
+def batch_petro_async(pid: int, data: dict, _role: str = Depends(require_interpreter)):
+    """Queue batch petrophysics in background job."""
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    JOBS[job_id] = {
+        "id": job_id,
+        "type": "batch-petro",
+        "status": "queued",
+        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "result": None,
+        "error": None,
+    }
+
+    def _run():
+        db = SessionLocal()
+        try:
+            JOBS[job_id]["status"] = "running"
+            JOBS[job_id]["result"] = batch_petro_params(pid, data, db)
+            JOBS[job_id]["status"] = "done"
+        except Exception as e:
+            JOBS[job_id]["status"] = "failed"
+            JOBS[job_id]["error"] = str(e)
+        finally:
+            JOBS[job_id]["finished_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+            db.close()
+
+    JOB_EXECUTOR.submit(_run)
+    return {"job_id": job_id, "status": "queued"}
+
+
+@app.get("/api/regression/smoke")
+def regression_smoke(db: Session = Depends(get_db), _role: str = Depends(require_viewer)):
+    """One-click backend smoke regression for key app capabilities."""
+    checks = []
+    checks.append({"name": "projects_exist", "ok": db.query(Project).count() > 0})
+    checks.append({"name": "wells_exist", "ok": db.query(Well).count() > 0})
+    checks.append({"name": "log_runs_exist", "ok": db.query(LogRun).count() > 0})
+    checks.append({"name": "curve_data_exist", "ok": db.query(CurveData).count() > 0})
+    checks.append({"name": "users_table_access", "ok": db.query(User).count() >= 0})
+    ok = all(c["ok"] for c in checks)
+    return {"ok": ok, "checks": checks, "timestamp": datetime.datetime.utcnow().isoformat() + "Z"}
+
+
+# (deduplicated) auto-pick-tops endpoint defined earlier in file
 
 # ─── Sprint 28: Offset-Well Analog ──────────────────────────
 @app.get("/api/projects/{pid}/well-analogs")

@@ -21,7 +21,7 @@
             </div>
         </div>
         <nav class="topbar-nav">
-            <details class="nav-group" open>
+            <details class="nav-group">
                 <summary class="nav-btn nav-group-trigger" title="Core visualizations and quick-look plots">Core</summary>
                 <div class="nav-group-menu">
                     <button class="nav-btn active" data-view="viewer" title="Primary well log display with depth tracks"><i data-lucide="activity"></i><span>Log Viewer</span></button>
@@ -79,10 +79,19 @@
                     <button class="nav-btn" data-view="imagelog" title="Resistivity image log display (FMI/OBI lite)"><i data-lucide="image"></i><span>Image Log</span></button>
                     <button class="nav-btn" data-view="analogs" title="Offset-well analog recommendation"><i data-lucide="git-branch"></i><span>Analogs</span></button>
                     <button class="nav-btn" data-view="users" title="Manage users and roles"><i data-lucide="users"></i><span>Users</span></button>
+                    <button class="nav-btn" data-view="jobmonitor" title="Background job queue monitor"><i data-lucide="activity"></i><span>Jobs</span></button>
                 </div>
             </details>
         </nav>
         <div class="topbar-actions">
+            <select id="activeRoleSelect" class="depth-select" style="min-width:120px" onchange="app.setActiveRole(this.value)" title="Active API role">
+                <option value="viewer">viewer</option>
+                <option value="interpreter">interpreter</option>
+                <option value="admin">admin</option>
+            </select>
+            <button class="btn-action" onclick="app.runSmokeRegression()" title="Run one-click smoke regression">
+                <i data-lucide="shield"></i> Smoke
+            </button>
             <button class="btn-action" onclick="app.uploadLAS()">
                 <i data-lucide="upload"></i> Upload LAS
             </button>
@@ -136,37 +145,62 @@
                     <p id="wellStats" class="well-stats"></p>
                 </div>
                 <div class="well-header-actions">
-                    <button class="btn-sm" onclick="app.uploadLAS()">
+                    <!-- Primary CTA -->
+                    <button class="btn-sm btn-primary-action" onclick="app.uploadLAS()">
                         <i data-lucide="upload"></i> Upload LAS
                     </button>
-                    <button class="btn-sm" onclick="app.editCurrentWell()">
-                        <i data-lucide="pencil"></i> Edit Well
-                    </button>
-                    <button class="btn-sm" onclick="app.addFormationTop()">
-                        <i data-lucide="layers"></i> Add Top
-                    </button>
-                    <button class="btn-sm" onclick="app.addZone()">
-                        <i data-lucide="square"></i> Add Zone
-                    </button>
-                    <button class="btn-sm" onclick="app.undoZone()">
-                        <i data-lucide="undo-2"></i> Undo Zone
-                    </button>
-                    <button class="btn-sm" onclick="app.redoZone()">
-                        <i data-lucide="redo-2"></i> Redo Zone
-                    </button>
-                    <button class="btn-sm" onclick="app._exportLAS()">
-                        <i data-lucide="download"></i> LAS
-                    </button>
-                    <button class="btn-sm" onclick="app.exportInterpretationSummary()">
-                        <i data-lucide="file-spreadsheet"></i> Summary CSV
-                    </button>
-                    <button class="btn-sm" onclick="app.exportBulkPackage()">
-                        <i data-lucide="package"></i> Export Package
-                    </button>
-                    <select id="logRunSelect" class="depth-select" style="min-width:240px" title="Select active log run">
+                    <!-- Data group -->
+                    <div class="btn-group-dropdown" data-group="data">
+                        <button class="btn-sm btn-group-trigger" onclick="this.parentElement.classList.toggle('open')">
+                            <i data-lucide="database"></i> Data <span class="dropdown-arrow">▾</span>
+                        </button>
+                        <div class="btn-group-menu">
+                            <button onclick="app.uploadLAS()"><i data-lucide="upload"></i> Upload LAS</button>
+                            <button onclick="app.editCurrentWell()"><i data-lucide="pencil"></i> Edit Well</button>
+                        </div>
+                    </div>
+                    <!-- Interpretation group -->
+                    <div class="btn-group-dropdown" data-group="interp">
+                        <button class="btn-sm btn-group-trigger" onclick="this.parentElement.classList.toggle('open')">
+                            <i data-lucide="layers"></i> Interpret <span class="dropdown-arrow">▾</span>
+                        </button>
+                        <div class="btn-group-menu">
+                            <button onclick="app.addFormationTop()"><i data-lucide="layers"></i> Add Top</button>
+                            <button onclick="app.addZone()"><i data-lucide="square"></i> Add Zone</button>
+                            <div class="menu-divider"></div>
+                            <button onclick="app.undoZone()"><i data-lucide="undo-2"></i> Undo</button>
+                            <button onclick="app.redoZone()"><i data-lucide="redo-2"></i> Redo</button>
+                        </div>
+                    </div>
+                    <!-- Export group -->
+                    <div class="btn-group-dropdown" data-group="export">
+                        <button class="btn-sm btn-group-trigger" onclick="this.parentElement.classList.toggle('open')">
+                            <i data-lucide="download"></i> Export <span class="dropdown-arrow">▾</span>
+                        </button>
+                        <div class="btn-group-menu">
+                            <button onclick="app._exportLAS()"><i data-lucide="download"></i> LAS File</button>
+                            <button onclick="app.exportInterpretationSummary()"><i data-lucide="file-spreadsheet"></i> Summary CSV</button>
+                            <button onclick="app.exportBulkPackage()"><i data-lucide="package"></i> Full Package</button>
+                        </div>
+                    </div>
+                    <!-- Run selector -->
+                    <select id="logRunSelect" class="depth-select" style="min-width:200px" title="Select active log run">
                         <option value="">Select log run…</option>
                     </select>
                 </div>
+            </div>
+
+            <!-- Workflow Guide (shown when no well data loaded, hidden otherwise) -->
+            <div class="workflow-strip" id="workflowStrip">
+                <div class="wf-step active" data-step="1"><span class="wf-num">1</span> Upload LAS</div>
+                <div class="wf-arrow">→</div>
+                <div class="wf-step" data-step="2"><span class="wf-num">2</span> Add Tops</div>
+                <div class="wf-arrow">→</div>
+                <div class="wf-step" data-step="3"><span class="wf-num">3</span> Add Zones</div>
+                <div class="wf-arrow">→</div>
+                <div class="wf-step" data-step="4"><span class="wf-num">4</span> Interpret</div>
+                <div class="wf-arrow">→</div>
+                <div class="wf-step" data-step="5"><span class="wf-num">5</span> Export</div>
             </div>
 
             <!-- Toolbar -->
@@ -179,33 +213,44 @@
                     <label>Bottom</label>
                     <input type="number" id="depthBottom" step="10" class="depth-input">
                 </div>
-                <div class="toolbar-group">
-                    <label>Scale</label>
-                    <select id="scaleSelect" class="depth-select">
-                        <option value="20">20 ft/in</option>
-                        <option value="50">50 ft/in</option>
-                        <option value="100" selected>100 ft/in</option>
-                        <option value="200">200 ft/in</option>
-                        <option value="500">500 ft/in</option>
-                        <option value="1000">1000 ft/in</option>
-                    </select>
-                </div>
-                <div class="toolbar-group">
+                <span class="toolbar-hint">🖱️ Scroll to zoom • Drag to pan</span>
+                <button class="btn-sm" onclick="app.toggleLithTrack()" title="Toggle lithology track">
+                    <i data-lucide="paintbrush"></i> Lith
+                </button>
+                <button class="btn-sm" onclick="document.getElementById('bottomPanels').style.display = document.getElementById('bottomPanels').style.display === 'none' ? 'grid' : 'none'" title="Toggle details panels">
+                    <i data-lucide="panel-bottom"></i> Details
+                </button>
+                <!-- Advanced controls (progressive disclosure) -->
+                <button class="btn-sm btn-advanced-toggle" id="advancedToggleBtn" onclick="document.getElementById('advancedControls').classList.toggle('open'); this.classList.toggle('active')">
+                    <i data-lucide="settings"></i> Advanced
+                </button>
+                <div class="advanced-controls" id="advancedControls">
                     <div class="toolbar-group">
-                    <label>Units</label>
-                    <select id="unitToggle" class="depth-select" onchange="app._onUnitChange()" style="min-width:100px">
-                        <option value="native">Native</option>
-                        <option value="metric">Metric</option>
-                        <option value="imperial">Imperial</option>
-                    </select>
-                </div>
-                <span class="toolbar-hint">🖱️ Scroll to zoom • Drag to pan • Hover for values</span>
-                    <button class="btn-sm" onclick="app.toggleLithTrack()" title="Toggle lithology track">
-                        <i data-lucide="paintbrush"></i> Lith
-                    </button>
-                    <button class="btn-sm" onclick="document.getElementById('bottomPanels').style.display = document.getElementById('bottomPanels').style.display === 'none' ? 'grid' : 'none'" title="Toggle details panels">
-                        <i data-lucide="panel-bottom"></i> Details
-                    </button>
+                        <label>Scale</label>
+                        <select id="scaleSelect" class="depth-select">
+                            <option value="20">20 ft/in</option>
+                            <option value="50">50 ft/in</option>
+                            <option value="100" selected>100 ft/in</option>
+                            <option value="200">200 ft/in</option>
+                            <option value="500">500 ft/in</option>
+                            <option value="1000">1000 ft/in</option>
+                        </select>
+                    </div>
+                    <div class="toolbar-group">
+                        <label>Units</label>
+                        <select id="unitToggle" class="depth-select" onchange="app._onUnitChange()" style="min-width:90px">
+                            <option value="native">Native</option>
+                            <option value="metric">Metric</option>
+                            <option value="imperial">Imperial</option>
+                        </select>
+                    </div>
+                    <div class="toolbar-group toolbar-perf" title="Use decimated dataset for faster rendering">
+                        <label>Perf</label>
+                        <div class="perf-inline">
+                            <input type="checkbox" id="performanceModeToggle">
+                            <input type="number" id="maxPointsInput" class="depth-input" min="500" max="20000" step="500" value="3000" style="width:74px" aria-label="Max points">
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -420,6 +465,7 @@
                         <div id="faciesCurveCheckboxes" style="display:flex;flex-wrap:wrap;gap:8px"></div>
                     </div>
                     <button class="btn-primary" onclick="app.runElectrofacies()"><i data-lucide="play"></i> Classify</button>
+                    <button class="btn-sm" onclick="app.runElectrofaciesAsync()"><i data-lucide="timer"></i> Queue</button>
                 </div>
                 <div id="faciesResults" class="petro-results">
                     <p style="color:#8b949e">Select curves and run K-means clustering to identify electrofacies.</p>
@@ -431,8 +477,19 @@
         <div id="toolsPanel" class="panel" style="display:none">
             <div class="panel-toolbar">
                 <div class="toolbar-group"><label>Professional Tools</label><span class="toolbar-hint">Depth shift, splice, annotations, mnemonic remap, bulk import, print report</span></div>
+                <div class="toolbar-group">
+                    <button class="btn-sm" onclick="app.refreshJobs()"><i data-lucide="refresh-cw"></i> Refresh Jobs</button>
+                </div>
             </div>
+            <div id="regressionResult" style="padding:0 16px 8px 16px;font-size:12px;color:#8b949e"></div>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;padding:16px">
+                <!-- Job Monitor -->
+                <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:16px">
+                    <h4><i data-lucide="workflow"></i> Background Jobs</h4>
+                    <p style="color:#8b949e;font-size:12px">Track queued/running/done analytical jobs</p>
+                    <div id="jobMonitorList" style="margin-top:8px;max-height:200px;overflow-y:auto;font-size:12px"></div>
+                </div>
+
                 <!-- Bulk Upload -->
                 <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:16px">
                     <h4><i data-lucide="upload-cloud"></i> Bulk LAS Upload</h4>
@@ -475,7 +532,7 @@
 
                 <!-- Mnemonic Remap -->
                 <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:16px">
-                    <h4><i data-lucide="rename"></i> Curve Mnemonic Remap</h4>
+                    <h4><i data-lucide="pencil-ruler"></i> Curve Mnemonic Remap</h4>
                     <p style="color:#8b949e;font-size:12px">Remap vendor mnemonics to standard names</p>
                     <button class="btn-sm" onclick="app.openMnemonicRemap()"><i data-lucide="settings"></i> Open Remap Panel</button>
                     <div id="aliasStatus" style="margin-top:8px;font-size:12px;color:#8b949e"></div>
@@ -673,6 +730,7 @@
                     </select>
                 </div>
                 <button class="btn-primary" onclick="app.runBatchPetro()"><i data-lucide="play"></i> Apply to All Wells</button>
+                <button class="btn-sm" onclick="app.runBatchPetroAsync()"><i data-lucide="timer"></i> Queue Batch</button>
                 <div id="batchResults" style="margin-top:12px;font-size:13px;color:#8b949e"></div>
             </div>
         </div>
@@ -893,6 +951,20 @@
                 <div id="usersResults">
                     <p style="color:var(--text-muted)">Loading users...</p>
                 </div>
+            </div>
+        </div>
+
+        <!-- Job Monitor Panel -->
+        <div id="jobmonitorPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group">
+                    <label>Job Monitor</label>
+                    <span class="toolbar-hint">Background job queue — synthetic seismogram, electrofacies, batch petro</span>
+                </div>
+                <button class="btn-sm" onclick="app._refreshJobMonitor()"><i data-lucide="refresh-cw"></i> Refresh</button>
+            </div>
+            <div style="padding:16px" id="jobMonitorBody">
+                <p style="color:var(--text-muted)">Loading jobs...</p>
             </div>
         </div>
     </main>
