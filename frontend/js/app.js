@@ -343,7 +343,9 @@ class GeoLogApp {
         });
 
         document.addEventListener('click', (e) => {
-            if (!e.target.closest('.topbar-nav')) this._closeAllNavGroups();
+            if (!e.target.closest('.topbar-nav') && !e.target.closest('.btn-group-dropdown')) {
+                this._closeAllNavGroups();
+            }
         });
 
         document.addEventListener('keydown', (e) => {
