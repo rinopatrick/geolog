@@ -80,6 +80,11 @@ class GeoLogApp {
         this.corrMarkers = [];
         this.corrPickMode = false;
         this.corrLastRender = null;
+        this._corrLoadedKey = null;
+        this._corrTopCache = { a: [], b: [] };
+        this._petroCache = null;
+        this.zoneUndoStack = [];
+        this.zoneRedoStack = [];
 
         this.init();
     }
@@ -89,6 +94,14 @@ class GeoLogApp {
         this._bindUI();
         await this.loadCurveConfig();
         await this.loadProjects();
+        const lastWell = localStorage.getItem('geolog_last_well');
+        if (lastWell && this.wells.find(w => w.id === parseInt(lastWell))) {
+            await this.selectWell(parseInt(lastWell));
+            const lastRun = localStorage.getItem('geolog_last_run');
+            if (lastRun && this.currentWell?.log_runs?.find(r => r.id === parseInt(lastRun))) {
+                await this.selectLogRun(parseInt(lastRun));
+            }
+        }
         if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
@@ -149,6 +162,52 @@ class GeoLogApp {
 
         // Correlation canvas pick handler
         document.getElementById('correlationCanvas')?.addEventListener('click', (ev) => this._onCorrelationCanvasClick(ev));
+        document.getElementById('logCanvas')?.addEventListener('click', (e) => {
+            if (!e.ctrlKey || !this.renderer || !this.currentWell) return;
+            const canvas = document.getElementById('logCanvas');
+            if (!canvas) return;
+            const rect = canvas.getBoundingClientRect();
+            const y = e.clientY - rect.top;
+            const depth = this.renderer._yToDepth(y);
+            if (!Number.isFinite(depth) || depth < 0) return;
+            this.addFormationTopAtDepth(depth);
+        });
+        document.getElementById('corrWellA')?.addEventListener('change', () => { this._corrLoadedKey = null; this.renderCorrelation(); });
+        document.getElementById('corrWellB')?.addEventListener('change', () => { this._corrLoadedKey = null; this.renderCorrelation(); });
+
+        // Drag-and-drop LAS upload
+        const dropZone = document.getElementById('logDropZone');
+        if (dropZone) {
+            dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.outline = '2px solid #58a6ff'; });
+            dropZone.addEventListener('dragleave', () => { dropZone.style.outline = ''; });
+            dropZone.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                dropZone.style.outline = '';
+                const file = e.dataTransfer?.files?.[0];
+                if (!file || !file.name.toLowerCase().endsWith('.las')) {
+                    GeoToast.warn('Drop a .las file');
+                    return;
+                }
+                if (!this.currentWell) {
+                    GeoToast.warn('Select or create a well first');
+                    return;
+                }
+                const formData = new FormData();
+                formData.append('file', file);
+                try {
+                    GeoLoading.show(`Uploading ${file.name}...`);
+                    const resp = await fetch(`/api/wells/${this.currentWell.id}/upload-las`, { method: 'POST', body: formData });
+                    if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
+                    const result = await resp.json();
+                    GeoToast.success(`Uploaded ${result.filename} — ${result.curves.length} curves, ${result.num_points} points`);
+                    await this.loadWells(this.projects[0].id);
+                } catch (err) {
+                    GeoToast.error('Upload failed: ' + err.message);
+                } finally {
+                    GeoLoading.hide();
+                }
+            });
+        }
     }
 
     // ─── Navigation ──────────────────────────────────────────
@@ -164,6 +223,23 @@ class GeoLogApp {
         document.getElementById('qcPanel').style.display = view === 'qc' ? 'block' : 'none';
         document.getElementById('correlationPanel').style.display = view === 'correlation' ? 'block' : 'none';
         document.getElementById('statisticsPanel').style.display = view === 'statistics' ? 'block' : 'none';
+        document.getElementById('sensitivityPanel').style.display = view === 'sensitivity' ? 'block' : 'none';
+        document.getElementById('comparisonPanel').style.display = view === 'comparison' ? 'block' : 'none';
+        document.getElementById('toolsPanel').style.display = view === 'tools' ? 'block' : 'none';
+        document.getElementById('faciesPanel').style.display = view === 'facies' ? 'block' : 'none';
+        document.getElementById('striplogPanel').style.display = view === 'striplog' ? 'block' : 'none';
+        document.getElementById('probabilityPanel').style.display = view === 'probability' ? 'block' : 'none';
+        document.getElementById('moveablePanel').style.display = view === 'moveable' ? 'block' : 'none';
+        document.getElementById('dipplotPanel').style.display = view === 'dipplot' ? 'block' : 'none';
+        document.getElementById('bucklesPanel').style.display = view === 'buckles' ? 'block' : 'none';
+        document.getElementById('hinglePanel').style.display = view === 'hingle' ? 'block' : 'none';
+        document.getElementById('calculatorPanel').style.display = view === 'calculator' ? 'block' : 'none';
+        document.getElementById('datatablePanel').style.display = view === 'datatable' ? 'block' : 'none';
+        document.getElementById('topsmgmtPanel').style.display = view === 'topsmgmt' ? 'block' : 'none';
+        document.getElementById('formationPanel').style.display = view === 'formation' ? 'block' : 'none';
+        document.getElementById('batchPanel').style.display = view === 'batch' ? 'block' : 'none';
+        document.getElementById('mapPanel').style.display = view === 'map' ? 'block' : 'none';
+        document.getElementById('dashboardPanel').style.display = view === 'dashboard' ? 'block' : 'none';
 
         if (view === 'crossplot') this._renderCrossPlot();
         if (view === 'pickett') this._renderPickettPlot();
@@ -175,6 +251,23 @@ class GeoLogApp {
             this.renderCorrelation();
         }
         if (view === 'statistics') this._renderStatistics();
+        if (view === 'sensitivity') { /* auto-loads on click */ }
+        if (view === 'comparison') this.loadWellComparison();
+        if (view === 'tools') this._initToolsPanel();
+        if (view === 'facies') this._initFaciesPanel();
+        if (view === 'striplog') this.renderStripLog();
+        if (view === 'probability') this.runProbabilityPlot();
+        if (view === 'moveable') this.runMoveableOil();
+        if (view === 'dipplot') this.runDipPlot();
+        if (view === 'buckles') this.runBuckles();
+        if (view === 'hingle') this.runHingle();
+        if (view === 'calculator') { /* user fills form */ }
+        if (view === 'datatable') this.loadDataTable();
+        if (view === 'topsmgmt') this._renderTopsManagement();
+        if (view === 'formation') this.loadFormationMatrix();
+        if (view === 'batch') { /* user fills form */ }
+        if (view === 'map') this.renderWellMap();
+        if (view === 'dashboard') this.loadDashboard();
     }
 
     // ─── API ─────────────────────────────────────────────────
@@ -238,17 +331,22 @@ class GeoLogApp {
             document.querySelectorAll('.well-item').forEach(el => el.classList.remove('active'));
             document.querySelector(`.well-item[data-id="${wellId}"]`)?.classList.add('active');
 
+            this.loadPetroParams();
+            this._initBulkUpload();
+            this._initCSVUpload();
             if (well.log_runs && well.log_runs.length > 0) {
                 this.currentLogRun = well.log_runs[0];
                 this._populateLogRunSelector(well.log_runs, this.currentLogRun.id);
                 await this._loadCurveData();
                 await this._loadFormationTops();
+                await this._loadZones();
             } else {
                 this.currentLogRun = null;
                 this._populateLogRunSelector([], null);
             }
 
             this._renderWellHeader(well);
+            localStorage.setItem('geolog_last_well', wellId);
         } catch (e) { console.error('Failed to select well:', e); }
             finally { GeoLoading.hide(); }
     }
@@ -264,7 +362,9 @@ class GeoLogApp {
             this._populateLogRunSelector(well.log_runs || [], chosen.id);
             await this._loadCurveData();
             await this._loadFormationTops();
+            await this._loadZones();
             this._renderWellHeader(well);
+            if (this.currentLogRun) localStorage.setItem('geolog_last_run', logRunId);
         } catch (e) { console.error('Failed to select log run:', e); }
     }
 
@@ -343,6 +443,102 @@ class GeoLogApp {
         } catch (e) { console.error('Failed to load formation tops:', e); }
     }
 
+    async _loadZones() {
+        if (!this.currentWell || !this.renderer) return;
+        try {
+            const rows = await this._api(`/wells/${this.currentWell.id}/zones`);
+            const zones = (rows || []).map(z => ({
+                id: z.id,
+                name: z.name,
+                top: Number(z.top_depth),
+                bottom: Number(z.bottom_depth),
+                color: z.color || '#1f6feb',
+            })).filter(z => Number.isFinite(z.top) && Number.isFinite(z.bottom) && z.bottom > z.top);
+            this.renderer.setZones(zones);
+            this.zoneUndoStack = [];
+            this.zoneRedoStack = [];
+            this._renderZonesList();
+        } catch (e) {
+            console.error('Failed to load zones:', e);
+        }
+    }
+
+    async _saveZones() {
+        if (!this.currentWell || !this.renderer) return;
+        const payload = {
+            zones: (this.renderer.zones || []).map(z => ({
+                id: z.id,
+                name: z.name,
+                top: z.top,
+                bottom: z.bottom,
+                color: z.color || '#1f6feb',
+            }))
+        };
+        await this._api(`/wells/${this.currentWell.id}/zones`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        });
+    }
+
+    async _loadCorrelationProfile() {
+        const { wellAId, wellBId } = this._currentCorrPair();
+        if (!wellAId || !wellBId) return;
+        try {
+            const curve = document.getElementById('corrCurve')?.value || 'GR';
+            const p = await this._api(`/correlation-profile?well_a_id=${wellAId}&well_b_id=${wellBId}&curve=${curve}`);
+            const shiftInput = document.getElementById('corrShift');
+            const stretchInput = document.getElementById('corrStretch');
+            const snapInput = document.getElementById('corrSnapTops');
+            if (shiftInput) shiftInput.value = (p.depth_shift ?? 0).toFixed(1);
+            if (stretchInput) stretchInput.value = (p.stretch ?? 1).toFixed(3);
+            if (snapInput) snapInput.checked = !!p.snap_to_tops;
+        } catch (e) {
+            console.error('Failed to load correlation profile:', e);
+        }
+    }
+
+    async _saveCorrelationProfile() {
+        const { wellAId, wellBId } = this._currentCorrPair();
+        if (!wellAId || !wellBId) return;
+        const curve = document.getElementById('corrCurve')?.value || 'GR';
+        const shift = parseFloat(document.getElementById('corrShift')?.value || '0') || 0;
+        const stretch = parseFloat(document.getElementById('corrStretch')?.value || '1') || 1;
+        const snap = document.getElementById('corrSnapTops')?.checked ? 1 : 0;
+        await this._api('/correlation-profile', {
+            method: 'POST',
+            body: JSON.stringify({ well_a_id: wellAId, well_b_id: wellBId, curve, depth_shift: shift, stretch, snap_to_tops: snap }),
+        });
+    }
+
+    _pushZoneHistory() {
+        if (!this.renderer) return;
+        this.zoneUndoStack.push(JSON.parse(JSON.stringify(this.renderer.zones || [])));
+        if (this.zoneUndoStack.length > 50) this.zoneUndoStack.shift();
+        this.zoneRedoStack = [];
+    }
+
+    async undoZone() {
+        if (!this.renderer || !this.zoneUndoStack.length) return GeoToast.warn('Nothing to undo');
+        const current = JSON.parse(JSON.stringify(this.renderer.zones || []));
+        this.zoneRedoStack.push(current);
+        const prev = this.zoneUndoStack.pop();
+        this.renderer.setZones(prev || []);
+        this._renderZonesList();
+        await this._saveZones();
+        GeoToast.info('Zone undo applied');
+    }
+
+    async redoZone() {
+        if (!this.renderer || !this.zoneRedoStack.length) return GeoToast.warn('Nothing to redo');
+        const current = JSON.parse(JSON.stringify(this.renderer.zones || []));
+        this.zoneUndoStack.push(current);
+        const nxt = this.zoneRedoStack.pop();
+        this.renderer.setZones(nxt || []);
+        this._renderZonesList();
+        await this._saveZones();
+        GeoToast.info('Zone redo applied');
+    }
+
     // ─── UI Rendering ────────────────────────────────────────
     _renderProjectTree() {
         const container = document.getElementById('projectTree');
@@ -393,6 +589,31 @@ class GeoLogApp {
         if (this.wells.length > 0) a.value = String(this.wells[0].id);
         if (this.wells.length > 1) b.value = String(this.wells[1].id);
         else if (this.wells.length > 0) b.value = String(this.wells[0].id);
+    }
+
+    _currentCorrPair() {
+        const wellAId = parseInt(document.getElementById('corrWellA')?.value || '0');
+        const wellBId = parseInt(document.getElementById('corrWellB')?.value || '0');
+        return { wellAId, wellBId };
+    }
+
+    async _loadCorrelationMarkers() {
+        const { wellAId, wellBId } = this._currentCorrPair();
+        if (!wellAId || !wellBId) return;
+        try {
+            this.corrMarkers = await this._api(`/correlation-markers?well_a_id=${wellAId}&well_b_id=${wellBId}`);
+        } catch {
+            this.corrMarkers = [];
+        }
+    }
+
+    async _saveCorrelationMarkers() {
+        const { wellAId, wellBId } = this._currentCorrPair();
+        if (!wellAId || !wellBId) return;
+        await this._api('/correlation-markers', {
+            method: 'POST',
+            body: JSON.stringify({ well_a_id: wellAId, well_b_id: wellBId, markers: this.corrMarkers || [] }),
+        });
     }
 
     _curveFamilyLabel(mnemonic) {
@@ -450,9 +671,18 @@ class GeoLogApp {
         const wellBId = parseInt(document.getElementById('corrWellB')?.value || '0');
         const requestedCurve = document.getElementById('corrCurve')?.value || 'GR';
         const shift = parseFloat(document.getElementById('corrShift')?.value || '0');
+        const stretch = parseFloat(document.getElementById('corrStretch')?.value || '1') || 1;
+        const snapToTops = !!document.getElementById('corrSnapTops')?.checked;
 
         if (!wellAId || !wellBId) {
             ctx.fillStyle='#8b949e'; ctx.font='14px DM Sans'; ctx.fillText('Select wells', 40, 40); return;
+        }
+
+        const pairKey = `${wellAId}:${wellBId}`;
+        if (this._corrLoadedKey !== pairKey) {
+            await this._loadCorrelationMarkers();
+            await this._loadCorrelationProfile();
+            this._corrLoadedKey = pairKey;
         }
 
         const wa = await this._api(`/wells/${wellAId}`);
@@ -465,6 +695,10 @@ class GeoLogApp {
 
         const da = await this._api(`/log-runs/${runA.id}/data`, {method:'POST', body: JSON.stringify({curve_mnemonics:[requestedCurve], start_depth:runA.start_depth, stop_depth:runA.stop_depth})});
         const db = await this._api(`/log-runs/${runB.id}/data`, {method:'POST', body: JSON.stringify({curve_mnemonics:[requestedCurve], start_depth:runB.start_depth, stop_depth:runB.stop_depth})});
+        this._corrTopCache = {
+            a: (wa.formation_tops || []).map(t => Number(t.top_depth ?? t.depth)).filter(v => Number.isFinite(v)).sort((x,y)=>x-y),
+            b: (wb.formation_tops || []).map(t => Number(t.top_depth ?? t.depth)).filter(v => Number.isFinite(v)).sort((x,y)=>x-y),
+        };
 
         let valsA = da[requestedCurve] || [];
         let valsB = db[requestedCurve] || [];
@@ -491,7 +725,13 @@ class GeoLogApp {
             }
         }
 
-        const depthA = da.DEPTH || [], depthB = (db.DEPTH || []).map(d => d + shift);
+        const depthA = da.DEPTH || [];
+        const rawDepthB = db.DEPTH || [];
+        const midB = rawDepthB.length ? (rawDepthB[0] + rawDepthB[rawDepthB.length - 1]) / 2 : 0;
+        let depthB = rawDepthB.map(d => (d - midB) * stretch + midB + shift);
+        if (snapToTops && this._corrTopCache.a.length && this._corrTopCache.b.length) {
+            depthB = this._applyTopSnapDepths(depthB, this._corrTopCache.a, this._corrTopCache.b, shift);
+        }
         if (!depthA.length || !depthB.length) { ctx.fillStyle='#8b949e'; ctx.fillText('No data', 40, 40); return; }
 
         const xMin = Math.min(depthA[0], depthB[0]), xMax = Math.max(depthA[depthA.length-1], depthB[depthB.length-1]);
@@ -525,12 +765,12 @@ class GeoLogApp {
         ctx.fillStyle='#c9d1d9'; ctx.fillText('Depth', m.left+w/2, canvas.height-10);
 
         // Save render context for marker picking
-        this.corrLastRender = { m, w, h, xMin, xMax, yMin, yMax, shift, waName: wa.name, wbName: wb.name };
+        this.corrLastRender = { m, w, h, xMin, xMax, yMin, yMax, shift, stretch, midB, waName: wa.name, wbName: wb.name };
 
         // Draw marker ties
         this.corrMarkers.forEach((mk, idx) => {
             const xA = sx(mk.aDepth);
-            const xB = sx(mk.bDepth + shift);
+            const xB = sx(((mk.bDepth - midB) * stretch + midB + shift));
             const yTop = m.top + 10 + (idx % 6) * 16;
             ctx.strokeStyle = '#f2cc60';
             ctx.setLineDash([4,3]);
@@ -643,6 +883,142 @@ class GeoLogApp {
         await this.renderCorrelation();
     }
 
+    _applyTopSnapDepths(depthB, topsA, topsB, shift) {
+        if (!depthB.length || !topsA.length || !topsB.length) return depthB;
+        const maxPairs = Math.min(topsA.length, topsB.length, 6);
+        if (maxPairs < 2) return depthB;
+        let biasSum = 0;
+        let n = 0;
+        for (let i = 0; i < maxPairs; i++) {
+            const d = topsA[i] - (topsB[i] + shift);
+            if (!Number.isFinite(d)) continue;
+            biasSum += d;
+            n += 1;
+        }
+        if (!n) return depthB;
+        const bias = biasSum / n;
+        return depthB.map(d => d + bias);
+    }
+
+    applyTopSnap() {
+        const info = document.getElementById('corrInfo');
+        if (!this._corrTopCache?.a?.length || !this._corrTopCache?.b?.length) {
+            if (info) info.textContent = 'Top Snap skipped: missing tops on one/both wells';
+            return;
+        }
+        const shiftInput = document.getElementById('corrShift');
+        const shift = parseFloat(shiftInput?.value || '0') || 0;
+        const maxPairs = Math.min(this._corrTopCache.a.length, this._corrTopCache.b.length, 6);
+        let sumDelta = 0;
+        let n = 0;
+        for (let i = 0; i < maxPairs; i++) {
+            const d = this._corrTopCache.a[i] - (this._corrTopCache.b[i] + shift);
+            if (!Number.isFinite(d)) continue;
+            sumDelta += d;
+            n += 1;
+        }
+        if (!n) return;
+        const extraShift = sumDelta / n;
+        if (shiftInput) shiftInput.value = (shift + extraShift).toFixed(1);
+        if (info) info.textContent = `Top Snap applied from ${n} top pairs: Δshift ${extraShift.toFixed(1)} ft`;
+        this.renderCorrelation();
+    }
+
+    _normalizeTopName(name) {
+        const raw = (name || '').toLowerCase();
+        const synonyms = [
+            [/\bformation\b/g, 'fm'],
+            [/\bmember\b/g, 'mbr'],
+            [/\btop\b/g, 'top'],
+            [/\bbase\b/g, 'base'],
+            [/\bupper\b/g, 'up'],
+            [/\blower\b/g, 'lo'],
+            [/\bmiddle\b/g, 'mid'],
+            [/\bsandstone\b/g, 'sand'],
+            [/\bshale\b/g, 'sh'],
+            [/\blimestone\b/g, 'ls'],
+            [/\bdolomite\b/g, 'dol'],
+        ];
+        let n = raw;
+        synonyms.forEach(([re, rep]) => { n = n.replace(re, rep); });
+        return n.replace(/[^a-z0-9]+/g, ' ').trim();
+    }
+
+    _tokenSet(s) {
+        return new Set((s || '').split(' ').filter(Boolean));
+    }
+
+    _jaccard(a, b) {
+        const sa = this._tokenSet(a);
+        const sb = this._tokenSet(b);
+        if (!sa.size || !sb.size) return 0;
+        let inter = 0;
+        sa.forEach(t => { if (sb.has(t)) inter += 1; });
+        const uni = new Set([...sa, ...sb]).size;
+        return uni ? inter / uni : 0;
+    }
+
+    _bestTopMatch(nameA, topsB) {
+        let best = null;
+        let bestScore = 0;
+        for (const tb of topsB) {
+            const score = this._jaccard(nameA, tb.n);
+            if (score > bestScore) {
+                bestScore = score;
+                best = tb;
+            }
+        }
+        return bestScore >= 0.5 ? { ...best, score: bestScore } : null;
+    }
+
+    applyTopNameTie() {
+        const info = document.getElementById('corrInfo');
+        const shiftInput = document.getElementById('corrShift');
+        const waId = parseInt(document.getElementById('corrWellA')?.value || '0');
+        const wbId = parseInt(document.getElementById('corrWellB')?.value || '0');
+        const wa = this.wells.find(w => w.id === waId);
+        const wb = this.wells.find(w => w.id === wbId);
+        if (!wa || !wb) return;
+        Promise.all([this._api(`/wells/${waId}`), this._api(`/wells/${wbId}`)]).then(([a, b]) => {
+            const topsA = (a.formation_tops || []).map(t => ({ raw: t.formation_name || '', n: this._normalizeTopName(t.formation_name), d: Number(t.top_depth ?? t.depth) })).filter(x => x.n && Number.isFinite(x.d));
+            const topsB = (b.formation_tops || []).map(t => ({ raw: t.formation_name || '', n: this._normalizeTopName(t.formation_name), d: Number(t.top_depth ?? t.depth) })).filter(x => x.n && Number.isFinite(x.d));
+
+            const deltas = [];
+            let exact = 0;
+            let fuzzy = 0;
+            topsA.forEach(t => {
+                const exactHit = topsB.find(x => x.n === t.n);
+                if (exactHit) {
+                    deltas.push(t.d - exactHit.d);
+                    exact += 1;
+                    return;
+                }
+                const fuzzyHit = this._bestTopMatch(t.n, topsB);
+                if (fuzzyHit) {
+                    deltas.push(t.d - fuzzyHit.d);
+                    fuzzy += 1;
+                }
+            });
+            if (!deltas.length) {
+                if (info) info.textContent = 'Name Tie skipped: no exact/fuzzy top matches';
+                return;
+            }
+            deltas.sort((x,y)=>x-y);
+            const mid = Math.floor(deltas.length/2);
+            const med = deltas.length % 2 ? deltas[mid] : (deltas[mid-1] + deltas[mid]) / 2;
+            if (shiftInput) shiftInput.value = med.toFixed(1);
+            if (info) info.textContent = `Name Tie: ${deltas.length} matches (exact ${exact}, fuzzy ${fuzzy}), median shift ${med.toFixed(1)} ft`;
+            this.renderCorrelation();
+        }).catch(err => {
+            if (info) info.textContent = `Name Tie error: ${err.message || err}`;
+        });
+    }
+
+    async saveCorrelationSettings() {
+        await this._saveCorrelationProfile();
+        GeoToast.success('Correlation profile saved');
+    }
+
     startMarkerPick() {
         this.corrPickMode = true;
         this._corrPickTemp = null;
@@ -650,11 +1026,12 @@ class GeoLogApp {
         if (info) info.textContent = 'Pick mode: click depth for Well A, then click depth for Well B';
     }
 
-    clearMarkers() {
+    async clearMarkers() {
         this.corrMarkers = [];
         const info = document.getElementById('corrInfo');
         if (info) info.textContent = 'Markers cleared';
         this._renderCorrelationMarkerTable();
+        await this._saveCorrelationMarkers();
         this.renderCorrelation();
     }
 
@@ -711,7 +1088,7 @@ class GeoLogApp {
         if (!cv) return;
         const rect = cv.getBoundingClientRect();
         const x = ev.clientX - rect.left;
-        const { m, w, xMin, xMax, shift } = this.corrLastRender;
+        const { m, w, xMin, xMax, shift, stretch, midB } = this.corrLastRender;
         if (x < m.left || x > m.left + w) return;
 
         const depth = xMin + ((x - m.left) / w) * (xMax - xMin);
@@ -722,11 +1099,12 @@ class GeoLogApp {
             if (info) info.textContent = `Marker A picked @ ${depth.toFixed(1)} ft. Now click marker B depth.`;
         } else {
             const aDepth = this._corrPickTemp;
-            const bDepth = depth - shift;
+            const bDepth = ((depth - shift - midB) / (stretch || 1)) + midB;
             this.corrMarkers.push({ aDepth, bDepth });
             this._corrPickTemp = null;
             const localShift = aDepth - bDepth;
             if (info) info.textContent = `Marker tie added. Local shift Δ=${localShift.toFixed(1)} ft`;
+            this._saveCorrelationMarkers().catch(() => {});
             this.renderCorrelation();
         }
     }
@@ -782,6 +1160,9 @@ class GeoLogApp {
                 <span class="top-name">${t.formation_name}</span>
                 <span class="top-depth">${t.depth?.toFixed(1)} ${t.depth_unit || 'FT'}</span>
                 <span class="top-lith">${t.lithology || ''}</span>
+                <button class="btn-icon-sm" onclick="app.editTop(${t.id})" title="Edit">
+                    <i data-lucide="pencil"></i>
+                </button>
                 <button class="btn-icon-sm" onclick="app.deleteTop(${t.id})" title="Delete">
                     <i data-lucide="x"></i>
                 </button>
@@ -854,23 +1235,106 @@ class GeoLogApp {
         } catch (e) { GeoToast.error('Failed to delete top: ' + e.message); }
     }
 
+    async editTop(id) {
+        const top = this.formationTops.find(t => t.id === id);
+        if (!top) return;
+        const r = await GeoModal.show({ title: 'Edit Formation Top', fields: [
+            { id: 'formation_name', label: 'Formation Name', value: top.formation_name },
+            { id: 'depth', label: 'Depth (ft)', type: 'number', step: '0.1', value: top.depth },
+            { id: 'color', label: 'Color', type: 'color', value: top.color || '#f0883e' },
+            { id: 'lithology', label: 'Lithology (optional)', value: top.lithology || '' },
+        ]});
+        if (!r?.formation_name || isNaN(parseFloat(r.depth))) return;
+        try {
+            await this._api(`/tops/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    formation_name: r.formation_name,
+                    depth: parseFloat(r.depth),
+                    color: r.color || '#f0883e',
+                    lithology: r.lithology || '',
+                }),
+            });
+            await this._loadFormationTops();
+            GeoToast.success('Formation top updated');
+        } catch (e) { GeoToast.error('Failed to update top: ' + e.message); }
+    }
+
     async addFormationTop() {
         if (!this.currentWell) return;
         const r = await GeoModal.show({ title: 'Add Formation Top', fields: [
             { id: 'name', label: 'Formation Name', placeholder: 'e.g. Top Reservoir' },
             { id: 'depth', label: 'Depth (ft)', type: 'number', step: '0.1', placeholder: '5000.0' },
+            { id: 'base_depth', label: 'Base Depth (ft, optional)', type: 'number', step: '0.1', placeholder: '' },
             { id: 'color', label: 'Color', type: 'color', value: '#f0883e' },
             { id: 'lithology', label: 'Lithology (optional)', placeholder: 'e.g. Sandstone' },
         ]});
         if (!r?.name || isNaN(parseFloat(r.depth))) return;
-        const name = r.name, depth = parseFloat(r.depth), color = r.color || '#f0883e', lithology = r.lithology || '';
+        const payload = {
+            formation_name: r.name,
+            depth: parseFloat(r.depth),
+            color: r.color || '#f0883e',
+            lithology: r.lithology || '',
+            depth_unit: 'FT',
+        };
+        if (r.base_depth && !isNaN(parseFloat(r.base_depth))) {
+            payload.top_depth = parseFloat(r.depth);
+            payload.base_depth = parseFloat(r.base_depth);
+        }
         try {
             await this._api(`/wells/${this.currentWell.id}/tops`, {
                 method: 'POST',
-                body: JSON.stringify({ formation_name: name, depth, color, lithology, depth_unit: 'FT' }),
+                body: JSON.stringify(payload),
             });
             await this._loadFormationTops();
         } catch (e) { GeoToast.error('Failed to add top: ' + e.message); }
+    }
+
+    async addFormationTopAtDepth(depth) {
+        if (!this.currentWell || !Number.isFinite(depth) || depth < 0) return;
+        const result = await GeoModal.show({
+            title: `Add Formation Top at ${depth.toFixed(1)} ft`,
+            fields: [
+                { id: 'name', label: 'Formation Name', type: 'text', value: '', placeholder: 'e.g. SAND-A' },
+                { id: 'color', label: 'Color', type: 'color', value: '#3fb950' },
+                { id: 'lithology', label: 'Lithology', type: 'text', value: '', placeholder: 'e.g. Sandstone' }
+            ]
+        });
+        if (!result?.name) return;
+        try {
+            await this._api(`/wells/${this.currentWell.id}/tops`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    formation_name: result.name,
+                    depth,
+                    color: result.color || '#3fb950',
+                    lithology: result.lithology || '',
+                    depth_unit: 'FT'
+                })
+            });
+            await this._loadFormationTops();
+            GeoToast.success(`Top '${result.name}' added at ${depth.toFixed(1)} ft`);
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
+    async editCurrentWell() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        const r = await GeoModal.show({ title: 'Edit Well', fields: [
+            { id: 'name', label: 'Well Name', value: this.currentWell.name || '' },
+            { id: 'uwi', label: 'UWI / API Number', value: this.currentWell.uwi || '' },
+            { id: 'operator', label: 'Operator', value: this.currentWell.operator || '' },
+            { id: 'field_name', label: 'Field Name', value: this.currentWell.field_name || '' },
+            { id: 'depth_unit', label: 'Depth Unit', type: 'select', value: this.currentWell.depth_unit || 'FT', options: [{value:'FT',label:'Feet (FT)'},{value:'M',label:'Meters (M)'}] },
+        ]});
+        if (!r?.name) return;
+        try {
+            await this._api(`/wells/${this.currentWell.id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ name: r.name, uwi: r.uwi, operator: r.operator, field_name: r.field_name, depth_unit: r.depth_unit }),
+            });
+            await this.loadWells(this.projects[0].id);
+            GeoToast.success('Well updated');
+        } catch (e) { GeoToast.error('Failed to update well: ' + e.message); }
     }
 
     async uploadLAS() {
@@ -1045,16 +1509,20 @@ class GeoLogApp {
         ]});
         if (!r?.name || isNaN(parseFloat(r.top)) || isNaN(parseFloat(r.bottom))) return;
         const name = r.name, top = parseFloat(r.top), bottom = parseFloat(r.bottom);
+        this._pushZoneHistory();
         const zones = [...(this.renderer.zones || []), { name, top, bottom }];
         this.renderer.setZones(zones);
         this._renderZonesList();
+        await this._saveZones();
     }
 
-    removeZone(index) {
+    async removeZone(index) {
+        this._pushZoneHistory();
         const zones = [...(this.renderer.zones || [])];
         zones.splice(index, 1);
         this.renderer.setZones(zones);
         this._renderZonesList();
+        await this._saveZones();
     }
 
     _renderZonesList() {
@@ -1067,12 +1535,102 @@ class GeoLogApp {
                 <span class="zone-color" style="background:${z.color || colors[i % colors.length]}"></span>
                 <span class="zone-name">${z.name}</span>
                 <span class="zone-range">${z.top.toFixed(1)} – ${z.bottom.toFixed(1)}</span>
+                <button class="btn-icon-sm" onclick="app.editZone(${i})" title="Edit">
+                    <i data-lucide="pencil"></i>
+                </button>
+                <button class="btn-icon-sm" onclick="app.moveZoneUp(${i})" title="Move Up">
+                    <i data-lucide="arrow-up"></i>
+                </button>
+                <button class="btn-icon-sm" onclick="app.moveZoneDown(${i})" title="Move Down">
+                    <i data-lucide="arrow-down"></i>
+                </button>
+                <button class="btn-icon-sm" onclick="app.splitZone(${i})" title="Split">
+                    <i data-lucide="split"></i>
+                </button>
+                <button class="btn-icon-sm" onclick="app.mergeZone(${i})" title="Merge Next">
+                    <i data-lucide="merge"></i>
+                </button>
                 <button class="btn-icon-sm" onclick="app.removeZone(${i})" title="Remove">
                     <i data-lucide="x"></i>
                 </button>
             </div>
         `).join('');
         if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    async editZone(index) {
+        const zones = [...(this.renderer.zones || [])];
+        const z = zones[index];
+        if (!z) return;
+        const r = await GeoModal.show({ title: 'Edit Zone', fields: [
+            { id: 'name', label: 'Zone Name', value: z.name },
+            { id: 'top', label: 'Top Depth (ft)', type: 'number', step: '0.1', value: z.top },
+            { id: 'bottom', label: 'Bottom Depth (ft)', type: 'number', step: '0.1', value: z.bottom },
+        ]});
+        if (!r?.name || isNaN(parseFloat(r.top)) || isNaN(parseFloat(r.bottom))) return;
+        const top = parseFloat(r.top), bottom = parseFloat(r.bottom);
+        if (bottom <= top) return GeoToast.warn('Bottom must be > Top');
+        this._pushZoneHistory();
+        zones[index] = { ...z, name: r.name, top, bottom };
+        this.renderer.setZones(zones);
+        this._renderZonesList();
+        await this._saveZones();
+    }
+
+    async splitZone(index) {
+        const zones = [...(this.renderer.zones || [])];
+        const z = zones[index];
+        if (!z) return;
+        const midDefault = ((z.top + z.bottom) / 2).toFixed(1);
+        const r = await GeoModal.show({ title: 'Split Zone', fields: [
+            { id: 'depth', label: `Split depth (${z.top.toFixed(1)}-${z.bottom.toFixed(1)})`, type: 'number', step: '0.1', value: midDefault },
+        ]});
+        const d = parseFloat(r?.depth);
+        if (!Number.isFinite(d) || d <= z.top || d >= z.bottom) return GeoToast.warn('Invalid split depth');
+        this._pushZoneHistory();
+        zones.splice(index, 1, { ...z, name: `${z.name}-A`, bottom: d }, { ...z, name: `${z.name}-B`, top: d });
+        this.renderer.setZones(zones);
+        this._renderZonesList();
+        await this._saveZones();
+    }
+
+    async moveZoneUp(index) {
+        const zones = [...(this.renderer.zones || [])];
+        if (index <= 0 || index >= zones.length) return;
+        this._pushZoneHistory();
+        [zones[index - 1], zones[index]] = [zones[index], zones[index - 1]];
+        this.renderer.setZones(zones);
+        this._renderZonesList();
+        await this._saveZones();
+    }
+
+    async moveZoneDown(index) {
+        const zones = [...(this.renderer.zones || [])];
+        if (index < 0 || index >= zones.length - 1) return;
+        this._pushZoneHistory();
+        [zones[index], zones[index + 1]] = [zones[index + 1], zones[index]];
+        this.renderer.setZones(zones);
+        this._renderZonesList();
+        await this._saveZones();
+    }
+
+    async mergeZone(index) {
+        const zones = [...(this.renderer.zones || [])];
+        if (index < 0 || index >= zones.length - 1) return GeoToast.warn('No next zone to merge');
+        this._pushZoneHistory();
+        const a = zones[index];
+        const b = zones[index + 1];
+        const merged = {
+            ...a,
+            name: `${a.name}+${b.name}`,
+            top: Math.min(a.top, b.top),
+            bottom: Math.max(a.bottom, b.bottom),
+        };
+        zones.splice(index, 2, merged);
+        this.renderer.setZones(zones);
+        this._renderZonesList();
+        await this._saveZones();
+        GeoToast.success('Zones merged');
     }
 
     _getCurveByFamily(family) {
@@ -1436,7 +1994,8 @@ class GeoLogApp {
             return;
         }
 
-        // Calculate Sw (Archie)
+        // Calculate Sw (multi-model)
+        const satModel = document.getElementById('satModel')?.value || 'archie';
         const sw = [];
         const vsh = [];
         const phie = [];
@@ -1469,12 +2028,8 @@ class GeoLogApp {
             // Effective porosity
             const phieVal = Math.max(0, phi * (1 - vshVal));
 
-            // Archie Sw
-            let swVal = 1;
-            if (rtVal > 0 && phieVal > 0.01) {
-                swVal = Math.pow(a / (phieVal ** m * rtVal / rw), 1 / n);
-                swVal = Math.max(0, Math.min(1, swVal));
-            }
+            // Multi-model saturation
+            const swVal = this._computeSaturation(satModel, rtVal, phieVal, vshVal, a, m, n, rw);
 
             sw.push(swVal);
             vsh.push(vshVal);
@@ -1532,6 +2087,7 @@ class GeoLogApp {
             }
         }
 
+        this._petroCache = { intervals, gross, netPay, ntg, vshCut, phieCut, swCut, mdStep };
         const rows = intervals.map((z,idx)=>`<tr><td>Z${idx+1}</td><td>${z.top.toFixed(1)}</td><td>${z.base.toFixed(1)}</td><td>${z.gross.toFixed(1)}</td><td>${z.phie.toFixed(3)}</td><td>${z.sw.toFixed(3)}</td><td>${z.vsh.toFixed(3)}</td></tr>`).join('') || '<tr><td colspan="7">No pay intervals under current cutoffs</td></tr>';
 
         result.innerHTML = `
@@ -1549,16 +2105,52 @@ class GeoLogApp {
                 <h4 style="margin-top:10px">Reservoir Interval Table</h4>
                 <div style="overflow:auto"><table class="petro-table"><thead><tr><th>Zone</th><th>Top</th><th>Base</th><th>Gross</th><th>PHIE</th><th>Sw</th><th>Vsh</th></tr></thead><tbody>${rows}</tbody></table></div>
                 <hr>
-                <h4>Archie Parameters</h4>
+                <h4>Saturation Model: ${satModel.charAt(0).toUpperCase() + satModel.slice(1)}</h4>
                 <div class="petro-stat"><span>a:</span> <strong>${a}</strong></div>
                 <div class="petro-stat"><span>m:</span> <strong>${m}</strong></div>
-                <div class="petro-stat"><span>n:</span> <strong>${n}</strong></div>
+                ${satModel === 'archie' ? '<div class="petro-stat"><span>n:</span> <strong>'+n+'</strong></div>' : ''}
                 <div class="petro-stat"><span>Rw:</span> <strong>${rw}</strong></div>
             </div>
         `;
 
         // Refresh viewer
         this.renderer.render();
+    }
+
+    async _renderZoneStats() {
+        if (!this.currentWell) return;
+        try {
+            const data = await this._api(`/wells/${this.currentWell.id}/zone-stats`);
+            if (!data?.zones?.length) {
+                GeoToast.info('No zones defined. Add zones first.');
+                return;
+            }
+            let html = '<h3 style="color:#c9d1d9;margin:12px 0 8px">Zone Statistics</h3>';
+            html += '<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:11px;font-family:IBM Plex Mono,monospace">';
+            html += '<thead><tr style="background:#161b22">';
+            const headers = ['Zone', 'Top', 'Base', 'Gross', 'Net Pay', 'NTG', 'Avg PHIE', 'Avg Sw', 'Avg Vsh', 'Avg K', 'Points'];
+            for (const h of headers) html += `<th style="padding:4px 6px;border:1px solid #30363d;color:#58a6ff;white-space:nowrap">${h}</th>`;
+            html += '</tr></thead><tbody>';
+            const fmt = (v, digits = 3) => (v !== null && v !== undefined && Number.isFinite(Number(v)) ? Number(v).toFixed(digits) : '-');
+            for (const z of data.zones) {
+                html += '<tr>';
+                html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#c9d1d9">${z.name || '-'}</td>`;
+                html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#c9d1d9">${fmt(z.top_depth, 1)}</td>`;
+                html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#c9d1d9">${fmt(z.bottom_depth, 1)}</td>`;
+                html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#c9d1d9">${fmt(z.gross_ft, 1)}</td>`;
+                html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#3fb950">${fmt(z.net_pay_ft, 1)}</td>`;
+                html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#d29922">${fmt(z.ntg, 2)}</td>`;
+                html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#c9d1d9">${fmt(z.avg_phie)}</td>`;
+                html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#c9d1d9">${fmt(z.avg_sw)}</td>`;
+                html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#c9d1d9">${fmt(z.avg_vsh)}</td>`;
+                html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#c9d1d9">${fmt(z.avg_k)}</td>`;
+                html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#8b949e">${z.points ?? '-'}</td>`;
+                html += '</tr>';
+            }
+            html += '</tbody></table></div>';
+            const el = document.getElementById('petroResults');
+            if (el) el.innerHTML = html + el.innerHTML;
+        } catch (e) { GeoToast.error(e.message); }
     }
 
     // ─── QC / Reliability ───────────────────────────────────
@@ -1597,6 +2189,53 @@ class GeoLogApp {
 
         rows.sort((a,b)=> (a.tag===b.tag?0:(a.tag==='LOW'?-1:a.tag==='MEDIUM'&&b.tag==='HIGH'?-1:1)));
 
+        const anomalyNotes = [];
+        const gapDetails = [];
+        const longGapCurves = rows.filter(r => (r.total - r.valid) > 0 && r.missPct > 10).map(r => r.mn);
+        if (longGapCurves.length) anomalyNotes.push(`Missing intervals likely on ${longGapCurves.join(', ')}`);
+
+        const depth = this.renderer.depthData || [];
+        for (const [mn, data] of Object.entries(this.renderer.curveData || {})) {
+            if (!Array.isArray(data) || !data.length || !depth.length) continue;
+            let s = -1;
+            for (let i = 0; i < data.length; i++) {
+                const miss = data[i] == null || isNaN(data[i]);
+                if (miss && s < 0) s = i;
+                if (!miss && s >= 0) {
+                    if (i - s >= 20) {
+                        gapDetails.push(`${mn}: ${depth[s]?.toFixed?.(1) ?? s} - ${depth[i - 1]?.toFixed?.(1) ?? (i - 1)} ft`);
+                    }
+                    s = -1;
+                }
+            }
+            if (s >= 0 && (data.length - s) >= 20) {
+                gapDetails.push(`${mn}: ${depth[s]?.toFixed?.(1) ?? s} - ${depth[data.length - 1]?.toFixed?.(1) ?? (data.length - 1)} ft`);
+            }
+        }
+
+        const calPack = this._getCurveByFamily('CAL');
+        if (calPack?.data?.length) {
+            const cal = calPack.data.filter(v => v != null && !isNaN(v));
+            if (cal.length) {
+                const meanCal = cal.reduce((s,v)=>s+v,0)/cal.length;
+                if (meanCal > 9.7) anomalyNotes.push(`Washout risk: mean CAL ${meanCal.toFixed(2)} in`);
+            }
+        }
+
+        const deep = this.renderer.curveData['RILD'] || this.renderer.curveData['ILD'] || this.renderer.curveData['RT'];
+        const shallow = this.renderer.curveData['RILM'] || this.renderer.curveData['ILM'] || this.renderer.curveData['MSFL'] || this.renderer.curveData['RXO'];
+        if (Array.isArray(deep) && Array.isArray(shallow)) {
+            let n = 0, bad = 0;
+            for (let i = 0; i < Math.min(deep.length, shallow.length); i++) {
+                const d = deep[i], s = shallow[i];
+                if (d == null || s == null || isNaN(d) || isNaN(s) || d <= 0 || s <= 0) continue;
+                n += 1;
+                const ratio = d / s;
+                if (ratio < 0.67 || ratio > 1.5) bad += 1;
+            }
+            if (n > 30 && (bad / n) > 0.35) anomalyNotes.push(`Deep/Shallow mismatch ${(bad / n * 100).toFixed(1)}%`);
+        }
+
         const htmlRows = rows.map(r => `
             <tr>
               <td><strong>${r.mn}</strong></td>
@@ -1618,11 +2257,28 @@ class GeoLogApp {
             ? `<div class="petro-stat"><span>Confidence:</span> <strong style="color:#d29922">LOW sample on ${smallSampleCurves.join(', ')} (valid<30)</strong></div>`
             : `<div class="petro-stat"><span>Confidence:</span> <strong style="color:#3fb950">OK sample size</strong></div>`;
 
+        const score = Math.max(0, 100 - (lowCount * 25) - (medCount * 10) - (anomalyNotes.length * 8) - Math.min(gapDetails.length, 10) * 2);
+        let grade = 'A';
+        let gradeColor = '#3fb950';
+        if (score < 75) { grade = 'B'; gradeColor = '#d29922'; }
+        if (score < 55) { grade = 'C'; gradeColor = '#f85149'; }
+
+        const recs = [];
+        if (lowCount) recs.push('Reprocess low-quality curves (despike + depth-match + merge)');
+        if (gapDetails.length) recs.push('Fill/flag long missing intervals before net-pay decision');
+        if (anomalyNotes.some(x => x.includes('Washout'))) recs.push('Apply borehole/washout correction before petrophysics');
+        if (anomalyNotes.some(x => x.includes('Deep/Shallow'))) recs.push('Review invasion profile; validate Rt source for Archie');
+        if (!recs.length) recs.push('QC acceptable for quicklook interpretation');
+
         panel.innerHTML = `
             <div class="petro-summary" style="margin-bottom:10px">
                 <div class="petro-stat"><span>Reliability Summary:</span> <strong>HIGH ${highCount} • MEDIUM ${medCount} • LOW ${lowCount}</strong></div>
                 ${smallSampleWarn}
                 <div class="petro-stat"><span>Rules:</span> <strong>LOW if missing>20% or outlier>8%</strong></div>
+                <div class="petro-stat"><span>Advanced QC:</span> <strong>${anomalyNotes.length ? anomalyNotes.join(' • ') : 'No major anomaly flags'}</strong></div>
+                <div class="petro-stat"><span>Gap intervals:</span> <strong>${gapDetails.length ? gapDetails.slice(0,6).join(' • ') : 'No long gaps detected'}</strong></div>
+                <div class="petro-stat"><span>QC Grade:</span> <strong style="color:${gradeColor}">${grade} (${score.toFixed(0)}/100)</strong></div>
+                <div class="petro-stat"><span>Recommendation:</span> <strong>${recs.join(' • ')}</strong></div>
             </div>
             <div style="overflow:auto">
               <table class="petro-table">
@@ -1665,8 +2321,2078 @@ class GeoLogApp {
         html += '</div>';
         panel.innerHTML = html;
     }
-}
 
+    exportZonationReport() {
+        if (!this.currentWell || !this._petroCache) {
+            GeoToast.warn('Run petrophysics calculation first');
+            return;
+        }
+        const z = this._petroCache;
+        const lines = [];
+        lines.push('section,key,value');
+        lines.push(`well,name,${this.currentWell.name}`);
+        lines.push(`well,uwi,${this.currentWell.uwi || ''}`);
+        lines.push(`cutoff,vsh_max,${z.vshCut}`);
+        lines.push(`cutoff,phie_min,${z.phieCut}`);
+        lines.push(`cutoff,sw_max,${z.swCut}`);
+        lines.push(`summary,gross_ft,${z.gross.toFixed(2)}`);
+        lines.push(`summary,net_pay_ft,${z.netPay.toFixed(2)}`);
+        lines.push(`summary,ntg_pct,${(z.ntg * 100).toFixed(2)}`);
+        lines.push('');
+        lines.push('zones,zone,top_ft,base_ft,gross_ft,avg_phie,avg_sw,avg_vsh');
+        if (!z.intervals.length) {
+            lines.push('zones,None,,,,,,');
+        } else {
+            z.intervals.forEach((it, idx) => {
+                lines.push(`zones,Z${idx + 1},${it.top.toFixed(2)},${it.base.toFixed(2)},${it.gross.toFixed(2)},${it.phie.toFixed(4)},${it.sw.toFixed(4)},${it.vsh.toFixed(4)}`);
+            });
+        }
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${this.currentWell.name || 'well'}_zonation_report.csv`;
+        a.click();
+        GeoToast.success('Zonation report exported');
+    }
+
+    async exportBulkPackage() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        try {
+            const pkg = await this._api(`/wells/${this.currentWell.id}/export-package`);
+            pkg.interpretation = this._petroCache ? {
+                cutoffs: { vsh_max: this._petroCache.vshCut, phie_min: this._petroCache.phieCut, sw_max: this._petroCache.swCut },
+                gross: this._petroCache.gross,
+                net_pay: this._petroCache.netPay,
+                ntg: this._petroCache.ntg,
+                intervals: this._petroCache.intervals,
+            } : null;
+            pkg.correlation_markers = this.corrMarkers || [];
+            const blob = new Blob([JSON.stringify(pkg, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `${this.currentWell.name || 'well'}_export_package.json`;
+            a.click();
+            GeoToast.success('Export package downloaded');
+        } catch (e) {
+            GeoToast.error('Export failed: ' + e.message);
+        }
+    }
+    // ─── Saturation Model Selector ───────────────────────────
+    _onSatModelChange() {
+        const model = document.getElementById('satModel')?.value || 'archie';
+        // Show/hide n parameter for non-Archie models
+        const nRow = document.getElementById('archN')?.closest('.form-row');
+        if (nRow) nRow.style.display = model === 'archie' ? '' : 'none';
+    }
+
+    // ─── Petro Template Presets ───────────────────────────────
+    applyPetroTemplate(template) {
+        const presets = {
+            sandstone: { a: 1.0, m: 2.0, n: 2.0, rw: 0.05, vsh: 0.35, phie: 0.10, sw: 0.60, model: 'archie' },
+            carbonate: { a: 1.0, m: 2.0, n: 2.0, rw: 0.02, vsh: 0.25, phie: 0.05, sw: 0.50, model: 'archie' },
+            shaly_sand: { a: 1.0, m: 1.8, n: 1.8, rw: 0.08, vsh: 0.40, phie: 0.08, sw: 0.70, model: 'simandoux' },
+        };
+        const p = presets[template];
+        if (!p) return;
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+        set('archA', p.a); set('archM', p.m); set('archN', p.n); set('archRw', p.rw);
+        set('cutVsh', p.vsh); set('cutPhie', p.phie); set('cutSw', p.sw);
+        set('satModel', p.model);
+        this._onSatModelChange();
+        GeoToast.success('Template "' + template + '" applied');
+    }
+
+    // ─── Save/Load Petro Params ──────────────────────────────
+    async savePetroParams() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        const getVal = (id) => parseFloat(document.getElementById(id)?.value || '0');
+        const model = document.getElementById('satModel')?.value || 'archie';
+        await this._api(`/wells/${this.currentWell.id}/petro-params`, {
+            method: 'POST',
+            body: JSON.stringify({
+                saturation_model: model,
+                a: getVal('archA'), m: getVal('archM'), n: getVal('archN'), rw: getVal('archRw'),
+                vsh_cutoff: getVal('cutVsh'), phie_cutoff: getVal('cutPhie'), sw_cutoff: getVal('cutSw'),
+                template: 'custom',
+            }),
+        });
+        GeoToast.success('Petro params saved');
+    }
+
+    async loadPetroParams() {
+        if (!this.currentWell) return;
+        try {
+            const p = await this._api(`/wells/${this.currentWell.id}/petro-params`);
+            if (!p) return;
+            const set = (id, v) => { const el = document.getElementById(id); if (el && v !== null && v !== undefined) el.value = v; };
+            set('archA', p.a); set('archM', p.m); set('archN', p.n); set('archRw', p.rw);
+            set('cutVsh', p.vsh_cutoff); set('cutPhie', p.phie_cutoff); set('cutSw', p.sw_cutoff);
+            set('satModel', p.saturation_model);
+            this._onSatModelChange();
+        } catch (e) { /* ignore if not saved yet */ }
+    }
+
+    // ─── Unit Normalization ──────────────────────────────────
+    _onUnitChange() {
+        const mode = document.getElementById('unitToggle')?.value || 'native';
+        this._unitMode = mode;
+        if (this.renderer) this.renderer.render();
+        GeoToast.info('Unit mode: ' + mode);
+    }
+
+    _convertValue(val, mnemonic) {
+        const mode = this._unitMode || 'native';
+        if (mode === 'native' || val === null || val === undefined || isNaN(val)) return val;
+        const m = mnemonic.toUpperCase();
+        // Depth: FT <-> M
+        if (['DEPT', 'DEPTH', 'MD', 'TVD'].includes(m)) {
+            return mode === 'metric' ? val * 0.3048 : val / 0.3048;
+        }
+        // Resistivity: ohm.m <-> ohm.ft
+        if (['RT', 'RESD', 'RILD', 'ILD', 'ILM', 'RILM', 'RLL3', 'RLLS', 'MSFL', 'RXO', 'SFLU', 'SFLA'].includes(m)) {
+            return mode === 'metric' ? val / 0.3048 : val * 0.3048;
+        }
+        // Sonic: us/ft <-> us/m
+        if (['DT', 'DTC', 'DTP', 'DTS'].includes(m)) {
+            return mode === 'metric' ? val / 0.3048 : val * 0.3048;
+        }
+        // Density: g/cc <-> kg/m3
+        if (['RHOB', 'RHOZ'].includes(m)) {
+            return mode === 'metric' ? val * 1000 : val / 1000;
+        }
+        return val;
+    }
+
+    _getDepthUnitLabel() {
+        const mode = this._unitMode || 'native';
+        if (mode === 'metric') return 'm';
+        return 'ft';
+    }
+
+    // ─── Multi-Mineral Solver (Saturation) ───────────────────
+    _computeSaturation(model, rt, phi, vsh, a, m, n, rw) {
+        if (rt <= 0 || phi < 0.01) return 1.0;
+        let swVal = 1.0;
+        if (model === 'simandoux') {
+            // Simandoux: Sw^n = (a*Rw)/(phi^m * Rt) - Vsh * Rw / (0.4 * phi)
+            const inner = (a * rw) / (Math.pow(phi, m) * rt) - vsh * rw / (0.4 * phi);
+            swVal = Math.sqrt(Math.max(0, inner));
+        } else if (model === 'indonesian') {
+            // Indonesian: 1/Sw^n = sqrt(phi^m/(a*Rw)) + sqrt(Vsh)/sqrt(Rt)
+            const denom = Math.sqrt(Math.pow(phi, m) / (a * rw)) + Math.sqrt(Math.max(0, vsh)) / Math.sqrt(Math.max(rt, 0.01));
+            swVal = denom > 0 ? 1.0 / (Math.sqrt(Math.max(rt, 0.01)) * denom) : 1.0;
+        } else {
+            // Archie: Sw^n = a*Rw / (phi^m * Rt)
+            swVal = Math.pow(a / (Math.pow(phi, m) * rt / rw), 1 / n);
+        }
+        return Math.max(0, Math.min(1, swVal));
+    }
+
+    // ─── Enhanced Statistics with Histogram ──────────────────
+    _renderStatistics() {
+        if (!this.renderer) return;
+        const panel = document.getElementById('statsContent');
+        if (!panel) return;
+
+        let html = '<div class="stats-table">';
+        html += '<div class="stats-header"><span>Curve</span><span>Unit</span><span>Min</span><span>Max</span><span>Mean</span><span>Median</span><span>Std</span><span>Count</span><span>Null%</span><span>Skewness</span></div>';
+
+        const histograms = [];
+        for (const track of this.renderer.tracks) {
+            for (const mn of track.curves) {
+                const stats = this.renderer.getCurveStats(mn);
+                if (!stats) continue;
+                const cfg = this.curveConfig[mn] || {};
+                // Compute skewness
+                const data = (this.renderer.curveData[mn] || []).filter(v => v !== null && !isNaN(v));
+                const mean = stats.mean;
+                const std = stats.std || 1e-9;
+                let skew = 0;
+                if (data.length > 2 && std > 0) {
+                    skew = data.reduce((s, v) => s + Math.pow((v - mean) / std, 3), 0) / data.length;
+                }
+                html += `<div class="stats-row">
+                    <span style="color:${cfg.color || '#58a6ff'};font-weight:600">${mn}</span>
+                    <span>${cfg.unit || ''}</span>
+                    <span>${stats.min.toFixed(3)}</span>
+                    <span>${stats.max.toFixed(3)}</span>
+                    <span>${stats.mean.toFixed(3)}</span>
+                    <span>${stats.median.toFixed(3)}</span>
+                    <span>${stats.std.toFixed(3)}</span>
+                    <span>${stats.count}</span>
+                    <span>${((stats.null_count / (stats.count + stats.null_count)) * 100).toFixed(1)}%</span>
+                    <span>${skew.toFixed(2)}</span>
+                </div>`;
+                if (data.length > 10) histograms.push({ mn, data, color: cfg.color || '#58a6ff', unit: cfg.unit || '' });
+            }
+        }
+        html += '</div>';
+
+        // Histograms
+        if (histograms.length > 0) {
+            html += '<h3 style="margin:16px 0 8px;color:#c9d1d9">Frequency Distributions</h3>';
+            html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:12px">';
+            for (const h of histograms.slice(0, 8)) {
+                html += `<div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px">
+                    <div style="color:${h.color};font-weight:600;margin-bottom:6px">${h.mn} <span style="color:#8b949e;font-weight:400;font-size:11px">${h.unit}</span></div>
+                    <canvas id="hist_${h.mn}" width="360" height="120"></canvas>
+                </div>`;
+            }
+            html += '</div>';
+        }
+        panel.innerHTML = html;
+
+        // Draw histograms
+        for (const h of histograms.slice(0, 8)) {
+            this._drawHistogram(`hist_${h.mn}`, h.data, h.color);
+        }
+    }
+
+    _drawHistogram(canvasId, data, color) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width, ht = canvas.height;
+        const margin = { top: 8, right: 12, bottom: 22, left: 36 };
+        const pw = w - margin.left - margin.right;
+        const ph = ht - margin.top - margin.bottom;
+
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, w, ht);
+
+        // Build histogram bins
+        const sorted = [...data].sort((a, b) => a - b);
+        const nBins = 25;
+        const min = sorted[Math.floor(sorted.length * 0.01)];
+        const max = sorted[Math.floor(sorted.length * 0.99)];
+        if (max <= min) return;
+        const binW = (max - min) / nBins;
+        const bins = new Array(nBins).fill(0);
+        for (const v of sorted) {
+            if (v < min || v > max) continue;
+            const idx = Math.min(nBins - 1, Math.floor((v - min) / binW));
+            bins[idx]++;
+        }
+        const maxBin = Math.max(...bins, 1);
+
+        // Draw bars
+        ctx.fillStyle = color + '88';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        const barW = pw / nBins;
+        for (let i = 0; i < nBins; i++) {
+            const bh = (bins[i] / maxBin) * ph;
+            const x = margin.left + i * barW;
+            const y = margin.top + ph - bh;
+            ctx.fillRect(x, y, barW - 1, bh);
+            ctx.strokeRect(x, y, barW - 1, bh);
+        }
+
+        // Axis labels
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '9px IBM Plex Mono';
+        ctx.textAlign = 'center';
+        ctx.fillText(min.toFixed(2), margin.left, ht - 4);
+        ctx.fillText(max.toFixed(2), w - margin.right, ht - 4);
+        ctx.textAlign = 'right';
+        ctx.fillText(maxBin.toString(), margin.left - 4, margin.top + 10);
+        ctx.fillText('0', margin.left - 4, margin.top + ph);
+    }
+
+    // ─── Sensitivity Analysis ────────────────────────────────
+    async runSensitivity() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        const iterations = parseInt(document.getElementById('sensIter')?.value || '500');
+        const pct = parseInt(document.getElementById('sensPct')?.value || '30');
+        const model = document.getElementById('satModel')?.value || 'archie';
+        const getVal = (id) => parseFloat(document.getElementById(id)?.value || '0');
+
+        GeoLoading.show('Running Monte Carlo (' + iterations + ' iterations)...');
+        try {
+            const result = await this._api(`/wells/${this.currentWell.id}/sensitivity`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    a: getVal('archA'), m: getVal('archM'), n: getVal('archN'), rw: getVal('archRw'),
+                    vsh_cutoff: getVal('cutVsh'), phie_cutoff: getVal('cutPhie'), sw_cutoff: getVal('cutSw'),
+                    saturation_model: model, iterations, variation_pct: pct,
+                }),
+            });
+
+            const panel = document.getElementById('sensResults');
+            if (!panel) return;
+
+            panel.innerHTML = `
+                <div class="petro-summary">
+                    <h4>Monte Carlo Sensitivity Results</h4>
+                    <div class="petro-stat"><span>Iterations:</span> <strong>${result.iterations}</strong></div>
+                    <div class="petro-stat"><span>Param variation:</span> <strong>±${result.variation_pct}%</strong></div>
+                    <div class="petro-stat"><span>Saturation model:</span> <strong>${model}</strong></div>
+                    <hr>
+                    <h4>Net Pay Uncertainty</h4>
+                    <div class="petro-stat"><span>P90 (conservative):</span> <strong style="color:#f85149">${result.p90_net_pay} ft</strong></div>
+                    <div class="petro-stat"><span>P50 (most likely):</span> <strong style="color:#d29922">${result.p50_net_pay} ft</strong></div>
+                    <div class="petro-stat"><span>P10 (optimistic):</span> <strong style="color:#3fb950">${result.p10_net_pay} ft</strong></div>
+                    <div class="petro-stat"><span>Mean ± Std:</span> <strong>${result.mean_net_pay} ± ${result.std_net_pay} ft</strong></div>
+                    <hr>
+                    <h4>Tornado Chart</h4>
+                    <canvas id="tornadoCanvas" width="500" height="250"></canvas>
+                    <h4 style="margin-top:12px">Distribution</h4>
+                    <canvas id="sensHistogram" width="500" height="160"></canvas>
+                </div>
+            `;
+
+            // Draw tornado chart (P90-P10 spread visualization)
+            this._drawTornado(result);
+            this._drawSensHistogram(result);
+        } catch (e) {
+            GeoToast.error('Sensitivity failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    }
+
+    _drawTornado(result) {
+        const canvas = document.getElementById('tornadoCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width, ht = canvas.height;
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, w, ht);
+
+        const margin = { top: 20, right: 30, bottom: 30, left: 100 };
+        const pw = w - margin.left - margin.right;
+        const ph = ht - margin.top - margin.bottom;
+
+        const center = result.p50_net_pay;
+        const half = Math.max(result.p10_net_pay - result.p90_net_pay, 1) / 2;
+        const labels = ['P90 (conservative)', 'P50 (base)', 'P10 (optimistic)'];
+        const values = [result.p90_net_pay, result.p50_net_pay, result.p10_net_pay];
+        const colors = ['#f85149', '#d29922', '#3fb950'];
+
+        const barH = ph / 4;
+        const xScale = (v) => margin.left + ((v - (center - half * 1.2)) / (half * 2.4)) * pw;
+
+        for (let i = 0; i < 3; i++) {
+            const y = margin.top + (i + 0.5) * barH;
+            const x = xScale(values[i]);
+            const cx = xScale(center);
+            ctx.fillStyle = colors[i] + 'cc';
+            ctx.fillRect(Math.min(x, cx), y - barH * 0.35, Math.abs(x - cx), barH * 0.7);
+
+            ctx.fillStyle = '#c9d1d9';
+            ctx.font = '12px DM Sans';
+            ctx.textAlign = 'right';
+            ctx.fillText(labels[i], margin.left - 8, y + 4);
+
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '11px IBM Plex Mono';
+            ctx.textAlign = 'left';
+            ctx.fillText(values[i].toFixed(1) + ' ft', Math.max(x, cx) + 6, y + 4);
+        }
+
+        // Center line
+        ctx.strokeStyle = '#c9d1d9';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(xScale(center), margin.top);
+        ctx.lineTo(xScale(center), margin.top + ph);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '10px IBM Plex Mono';
+        ctx.textAlign = 'center';
+        ctx.fillText('Net Pay (ft)', w / 2, ht - 6);
+    }
+
+    _drawSensHistogram(result) {
+        const canvas = document.getElementById('sensHistogram');
+        if (!canvas || !result.histogram_bins || !result.histogram_counts) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width, ht = canvas.height;
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, w, ht);
+
+        const margin = { top: 10, right: 16, bottom: 24, left: 36 };
+        const pw = w - margin.left - margin.right;
+        const ph = ht - margin.top - margin.bottom;
+        const bins = result.histogram_bins;
+        const counts = result.histogram_counts;
+        const maxCount = Math.max(...counts, 1);
+        const barW = pw / counts.length;
+
+        ctx.fillStyle = '#58a6ff88';
+        ctx.strokeStyle = '#58a6ff';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < counts.length; i++) {
+            const bh = (counts[i] / maxCount) * ph;
+            ctx.fillRect(margin.left + i * barW, margin.top + ph - bh, barW - 1, bh);
+            ctx.strokeRect(margin.left + i * barW, margin.top + ph - bh, barW - 1, bh);
+        }
+
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '9px IBM Plex Mono';
+        ctx.textAlign = 'center';
+        ctx.fillText(bins[0].toFixed(0), margin.left, ht - 4);
+        ctx.fillText(bins[bins.length - 1].toFixed(0), w - margin.right, ht - 4);
+        ctx.fillText('Net Pay Distribution (ft)', w / 2, ht - 4);
+    }
+
+    // ─── Well Comparison ─────────────────────────────────────
+    async loadWellComparison() {
+        if (!this.projects || !this.projects.length) return GeoToast.warn('No project loaded');
+        const pid = this.projects[0].id;
+        GeoLoading.show('Loading comparison...');
+        try {
+            const data = await this._api(`/projects/${pid}/well-comparison`);
+            const panel = document.getElementById('comparisonContent');
+            if (!panel) return;
+
+            if (!data.wells || data.wells.length === 0) {
+                panel.innerHTML = '<p style="color:#8b949e">No wells in this project.</p>';
+                return;
+            }
+
+            // Summary table
+            let html = '<h3 style="margin:0 0 10px;color:#c9d1d9">Well Summary</h3>';
+            html += '<div style="overflow:auto"><table class="petro-table"><thead><tr>';
+            html += '<th>Well</th><th>UWI</th><th>Operator</th><th>TD</th><th>Unit</th><th>Runs</th><th>Curves</th><th>Tops</th><th>Zones</th>';
+            html += '</tr></thead><tbody>';
+            for (const w of data.wells) {
+                html += `<tr><td><strong>${w.name}</strong></td><td>${w.uwi || '-'}</td><td>${w.operator || '-'}</td>`;
+                html += `<td>${w.total_depth?.toFixed(0) || '-'}</td><td>${w.depth_unit || '-'}</td>`;
+                html += `<td>${w.log_run_count}</td><td>${w.curve_count}</td><td>${w.top_count}</td><td>${w.zone_count}</td></tr>`;
+            }
+            html += '</tbody></table></div>';
+
+            // Curve comparison table
+            const allMnemonics = new Set();
+            for (const w of data.wells) for (const c of w.curves) allMnemonics.add(c.mnemonic);
+            if (allMnemonics.size > 0) {
+                html += '<h3 style="margin:16px 0 10px;color:#c9d1d9">Curve Statistics Comparison</h3>';
+                html += '<div style="overflow:auto"><table class="petro-table"><thead><tr><th>Curve</th>';
+                for (const w of data.wells) html += `<th colspan="3" style="text-align:center;color:#58a6ff">${w.name}</th>`;
+                html += '</tr><tr><th></th>';
+                for (const _ of data.wells) html += '<th>Mean</th><th>Min</th><th>Max</th>';
+                html += '</tr></thead><tbody>';
+                for (const mn of [...allMnemonics].sort()) {
+                    html += `<tr><td><strong>${mn}</strong></td>`;
+                    for (const w of data.wells) {
+                        const c = w.curves.find(x => x.mnemonic === mn);
+                        if (c && c.count > 0) {
+                            html += `<td>${c.mean?.toFixed(3) || '-'}</td><td>${c.min?.toFixed(3) || '-'}</td><td>${c.max?.toFixed(3) || '-'}</td>`;
+                        } else {
+                            html += '<td>-</td><td>-</td><td>-</td>';
+                        }
+                    }
+                    html += '</tr>';
+                }
+                html += '</tbody></table></div>';
+            }
+
+            panel.innerHTML = html;
+        } catch (e) {
+            GeoToast.error('Comparison failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    }
+
+    exportComparisonCSV() {
+        const table = document.querySelector('#comparisonContent table');
+        if (!table) {
+            GeoToast.warn('Load comparison first');
+            return;
+        }
+        let csv = '';
+        const rows = table.querySelectorAll('tr');
+        for (const row of rows) {
+            const cells = row.querySelectorAll('th, td');
+            csv += Array.from(cells).map(c => {
+                const txt = (c.textContent || '').trim().replace(/"/g, '""');
+                return `"${txt}"`;
+            }).join(',') + '\n';
+        }
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `well_comparison_${this.projects?.[0]?.name || 'project'}.csv`;
+        a.click();
+    }
+
+
+
+
+    // ─── Tools Panel Init ────────────────────────────────────
+    async _initToolsPanel() {
+        if (!this.currentWell) return;
+        await this._populateToolRunSelectors();
+        await this.loadAnnotations();
+        const aliasEl = document.getElementById('aliasStatus');
+        if (aliasEl) {
+            try {
+                const aliases = await this._api(`/wells/${this.currentWell.id}/aliases`);
+                aliasEl.textContent = aliases.length ? aliases.length + ' remaps saved' : 'No remaps configured';
+            } catch { aliasEl.textContent = 'No remaps'; }
+        }
+    }
+
+    async _populateToolRunSelectors() {
+        if (!this.currentWell) return;
+        try {
+            const runs = await this._api(`/wells/${this.currentWell.id}/log-runs`);
+            const selectors = ['depthShiftRun', 'spliceRunA', 'spliceRunB', 'overlayRunA', 'overlayRunB'];
+            for (const id of selectors) {
+                const el = document.getElementById(id);
+                if (!el) continue;
+                el.innerHTML = runs.map(r => '<option value="' + r.id + '">Run ' + r.run_number + ' - ' + r.filename + ' (' + r.num_points + ' pts)</option>').join('');
+            }
+        } catch { /* no runs */ }
+    }
+
+    // ─── Bulk LAS Upload ─────────────────────────────────────
+    _initBulkUpload() {
+        const input = document.getElementById('bulkFileInput');
+        if (!input || input._bound) return;
+        input._bound = true;
+        input.addEventListener('change', async () => {
+            const files = input.files;
+            if (!files || !files.length || !this.currentWell) return;
+            const status = document.getElementById('bulkUploadStatus');
+            if (status) status.textContent = 'Uploading ' + files.length + ' files...';
+            GeoLoading.show('Bulk uploading ' + files.length + ' LAS files...');
+            let uploaded = 0;
+            for (const file of files) {
+                try {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    const resp = await fetch('/api/wells/' + this.currentWell.id + '/upload-las', { method: 'POST', body: formData });
+                    if (resp.ok) uploaded++;
+                } catch {}
+            }
+            GeoLoading.hide();
+            if (status) status.textContent = uploaded + '/' + files.length + ' uploaded successfully';
+            GeoToast.success(uploaded + ' files uploaded');
+            await this.selectWell(this.currentWell.id);
+            input.value = '';
+        });
+    }
+
+    // ─── Depth Shift ─────────────────────────────────────────
+    async loadDepthShift() {
+        const runId = document.getElementById('depthShiftRun')?.value;
+        if (!runId) return;
+        try {
+            const ds = await this._api('/log-runs/' + runId + '/depth-shift');
+            const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+            set('depthShiftVal', ds.shift || 0);
+            set('depthStretchVal', ds.stretch || 1);
+        } catch {}
+    }
+
+    async saveDepthShift() {
+        const runId = document.getElementById('depthShiftRun')?.value;
+        if (!runId) return GeoToast.warn('Select a log run');
+        const shift = parseFloat(document.getElementById('depthShiftVal')?.value || '0');
+        const stretch = parseFloat(document.getElementById('depthStretchVal')?.value || '1');
+        await this._api('/log-runs/' + runId + '/depth-shift', {
+            method: 'POST',
+            body: JSON.stringify({ shift, stretch }),
+        });
+        GeoToast.success('Depth shift saved: ' + shift + ' ft, stretch ' + stretch);
+    }
+
+    // ─── Curve Splice ────────────────────────────────────────
+    async runSplice() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        const curve = document.getElementById('spliceCurve')?.value || 'GR';
+        const runA = parseInt(document.getElementById('spliceRunA')?.value || '0');
+        const runB = parseInt(document.getElementById('spliceRunB')?.value || '0');
+        const from = parseFloat(document.getElementById('spliceFrom')?.value || '0');
+        const to = parseFloat(document.getElementById('spliceTo')?.value || '0');
+        if (!runA || !runB || to <= from) return GeoToast.warn('Set valid runs and depth range');
+        GeoLoading.show('Splicing ' + curve + '...');
+        try {
+            const result = await this._api('/wells/' + this.currentWell.id + '/splice', {
+                method: 'POST',
+                body: JSON.stringify({
+                    source_runs: [runA, runB],
+                    intervals: [
+                        { start: 0, end: from, source_lr_id: runA },
+                        { start: from, end: to, source_lr_id: runB },
+                        { start: to, end: 99999, source_lr_id: runA },
+                    ],
+                    mnemonic: curve,
+                }),
+            });
+            GeoToast.success('Spliced run created: ' + result.log_run_id + ' (' + result.points + ' pts)');
+            await this.selectWell(this.currentWell.id);
+            await this._populateToolRunSelectors();
+        } catch (e) {
+            GeoToast.error('Splice failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    }
+
+    // ─── Annotations ─────────────────────────────────────────
+    async loadAnnotations() {
+        if (!this.currentWell) return;
+        try {
+            const anns = await this._api('/wells/' + this.currentWell.id + '/annotations');
+            const panel = document.getElementById('annotationsList');
+            if (!panel) return;
+            if (!anns.length) { panel.innerHTML = '<p style="color:#8b949e">No annotations</p>'; return; }
+            panel.innerHTML = anns.map(a =>
+                '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid #21262d">' +
+                '<span style="color:' + (a.color || '#f39c12') + ';font-weight:600">' + (a.depth?.toFixed(1) || '?') + ' ft</span>' +
+                '<span style="flex:1;color:#c9d1d9">' + (a.text || '') + '</span>' +
+                '<span style="color:#8b949e;font-size:10px">' + (a.annotation_type || 'note') + '</span>' +
+                '<button class="btn-icon-sm" onclick="app.deleteAnnotation(' + a.id + ')" title="Delete"><i data-lucide="x"></i></button>' +
+                '</div>'
+            ).join('');
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        } catch {}
+    }
+
+    async addAnnotation() {
+        const r = await GeoModal.show({ title: 'Add Annotation', fields: [
+            { id: 'depth', label: 'Depth (ft)', type: 'number', step: '0.1', placeholder: '5000.0' },
+            { id: 'text', label: 'Note', placeholder: 'Enter annotation text...' },
+            { id: 'type', label: 'Type', type: 'select', options: [
+                { value: 'note', label: 'Note' }, { value: 'flag', label: 'Flag' }, { value: 'pay', label: 'Pay Zone' }, { value: 'issue', label: 'Issue' },
+            ], value: 'note' },
+        ]});
+        if (!r?.text || isNaN(parseFloat(r.depth))) return;
+        await this._api('/wells/' + this.currentWell.id + '/annotations', {
+            method: 'POST',
+            body: JSON.stringify({ depth: parseFloat(r.depth), text: r.text, annotation_type: r.type || 'note' }),
+        });
+        GeoToast.success('Annotation added');
+        await this.loadAnnotations();
+    }
+
+    async deleteAnnotation(aid) {
+        await this._api('/annotations/' + aid, { method: 'DELETE' });
+        await this.loadAnnotations();
+    }
+
+    // ─── Mnemonic Remap ──────────────────────────────────────
+    async openMnemonicRemap() {
+        if (!this.currentWell || !this.renderer) return GeoToast.warn('Load a well first');
+        const currentCurves = Object.keys(this.renderer.curveData || {}).filter(k => k !== 'DEPT');
+        const standardMnemonics = ['GR', 'RT', 'RESD', 'ILD', 'NPHI', 'RHOB', 'DT', 'CALI', 'PEF', 'SP'];
+        const existing = await this._api('/wells/' + this.currentWell.id + '/aliases').catch(() => []);
+        const aliasMap = {};
+        existing.forEach(a => { aliasMap[a.original] = a.alias; });
+
+        const fields = currentCurves.map(mn => ({
+            id: 'alias_' + mn,
+            label: mn + ' → remap to',
+            type: 'select',
+            options: [{ value: '', label: '(keep as-is)' }, ...standardMnemonics.filter(s => s !== mn).map(s => ({ value: s, label: s }))],
+            value: aliasMap[mn] || '',
+        }));
+
+        const r = await GeoModal.show({ title: 'Curve Mnemonic Remap', fields });
+        if (!r) return;
+        const newAliases = [];
+        for (const mn of currentCurves) {
+            const alias = r['alias_' + mn];
+            if (alias && alias !== mn) newAliases.push({ original: mn, alias });
+        }
+        if (newAliases.length) {
+            await this._api('/wells/' + this.currentWell.id + '/aliases', {
+                method: 'POST',
+                body: JSON.stringify(newAliases),
+            });
+            GeoToast.success(newAliases.length + ' remaps saved. Reload well to apply.');
+        } else {
+            GeoToast.info('No remaps configured');
+        }
+    }
+
+    // ─── Log Run Overlay ─────────────────────────────────────
+    async renderOverlay() {
+        if (!this.currentWell) return;
+        const curve = document.getElementById('overlayCurve')?.value || 'GR';
+        const runA = parseInt(document.getElementById('overlayRunA')?.value || '0');
+        const runB = parseInt(document.getElementById('overlayRunB')?.value || '0');
+        if (!runA || !runB) return GeoToast.warn('Select two runs');
+
+        GeoLoading.show('Loading overlay data...');
+        try {
+            const [dataA, dataB] = await Promise.all([
+                this._loadRunCurveData(runA, curve),
+                this._loadRunCurveData(runB, curve),
+            ]);
+            if (!dataA || !dataB) { GeoToast.warn('Missing curve data'); return; }
+
+            const canvas = document.getElementById('overlayCanvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            canvas.width = canvas.parentElement?.clientWidth || 600;
+            canvas.height = 400;
+            const w = canvas.width, ht = canvas.height;
+            const margin = { top: 30, right: 30, bottom: 40, left: 60 };
+            const pw = w - margin.left - margin.right;
+            const ph = ht - margin.top - margin.bottom;
+
+            ctx.fillStyle = '#0d1117';
+            ctx.fillRect(0, 0, w, ht);
+
+            // Find common depth range
+            const allDepths = [...dataA.depth, ...dataB.depth].filter(v => !isNaN(v));
+            const dMin = Math.min(...allDepths);
+            const dMax = Math.max(...allDepths);
+            const allVals = [...dataA.values, ...dataB.values].filter(v => !isNaN(v) && v !== null);
+            const vMin = Math.min(...allVals);
+            const vMax = Math.max(...allVals);
+
+            const sxD = d => margin.left + ((d - dMin) / (dMax - dMin)) * pw;
+            const syV = v => margin.top + ph - ((v - vMin) / (vMax - vMin)) * ph;
+
+            // Grid
+            ctx.strokeStyle = '#21262d';
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i <= 5; i++) {
+                const y = margin.top + (ph * i / 5);
+                ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(margin.left + pw, y); ctx.stroke();
+            }
+
+            // Draw Run A
+            ctx.strokeStyle = '#58a6ff';
+            ctx.lineWidth = 1.5;
+            this._drawOverlayCurve(ctx, dataA.depth, dataA.values, sxD, syV, margin, ph);
+            // Draw Run B
+            ctx.strokeStyle = '#f85149';
+            ctx.lineWidth = 1.5;
+            this._drawOverlayCurve(ctx, dataB.depth, dataB.values, sxD, syV, margin, ph);
+
+            // Legend
+            ctx.fillStyle = '#58a6ff'; ctx.font = '12px DM Sans'; ctx.textAlign = 'left';
+            ctx.fillText('Run A', margin.left + 10, margin.top + 16);
+            ctx.fillStyle = '#f85149';
+            ctx.fillText('Run B', margin.left + 70, margin.top + 16);
+            ctx.fillStyle = '#8b949e'; ctx.fillText(curve + ' overlay', margin.left + 130, margin.top + 16);
+
+            // Axes
+            ctx.fillStyle = '#c9d1d9'; ctx.font = '11px DM Sans'; ctx.textAlign = 'center';
+            ctx.fillText('Depth (ft)', w / 2, ht - 6);
+            ctx.save(); ctx.translate(14, margin.top + ph / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(curve, 0, 0); ctx.restore();
+
+        } catch (e) {
+            GeoToast.error('Overlay failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    }
+
+    _drawOverlayCurve(ctx, depth, values, sx, sy, margin, ph) {
+        ctx.beginPath();
+        let started = false;
+        for (let i = 0; i < depth.length; i++) {
+            if (isNaN(values[i]) || values[i] === null) continue;
+            const x = sx(depth[i]);
+            const y = sy(values[i]);
+            if (y < margin.top || y > margin.top + ph) continue;
+            if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+
+    async _loadRunCurveData(runId, mnemonic) {
+        try {
+            const curves = await this._api('/log-runs/' + runId + '/curves');
+            const deptCurve = curves.find(c => ['DEPT', 'DEPTH'].includes(c.mnemonic));
+            const targetCurve = curves.find(c => c.mnemonic === mnemonic);
+            if (!deptCurve || !targetCurve) return null;
+            const data = await this._api('/log-runs/' + runId + '/data', {
+                method: 'POST',
+                body: JSON.stringify({ start: deptCurve.min_value, stop: deptCurve.max_value, curves: [deptCurve.mnemonic, mnemonic] }),
+            });
+            return { depth: data[deptCurve.mnemonic] || [], values: data[mnemonic] || [] };
+        } catch { return null; }
+    }
+
+    // ─── Print Report ────────────────────────────────────────
+    async generatePrintReport() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        GeoLoading.show('Generating report...');
+        try {
+            const data = await this._api('/wells/' + this.currentWell.id + '/report');
+            let html = '<!DOCTYPE html><html><head><meta charset="UTF-8">';
+            html += '<title>GeoLog Report - ' + (data.well?.name || 'Unknown') + '</title>';
+            html += '<style>';
+            html += 'body{font-family:Arial,sans-serif;margin:40px;color:#1a1a1a;font-size:11px}';
+            html += 'h1{font-size:20px;border-bottom:3px solid #1a1a1a;padding-bottom:8px}';
+            html += 'h2{font-size:15px;color:#333;margin-top:24px;border-bottom:1px solid #ccc;padding-bottom:4px}';
+            html += 'table{border-collapse:collapse;width:100%;margin:8px 0}';
+            html += 'th,td{border:1px solid #ccc;padding:5px 8px;text-align:left;font-size:10px}';
+            html += 'th{background:#f0f0f0;font-weight:700}';
+            html += '.header-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:12px 0}';
+            html += '.header-item{padding:6px 10px;background:#f8f8f8;border-left:3px solid #333}';
+            html += '.header-item label{font-weight:700;display:block;font-size:9px;text-transform:uppercase;color:#666}';
+            html += '.header-item span{font-size:13px;color:#1a1a1a}';
+            html += '@media print{body{margin:20px}}';
+            html += '</style></head><body>';
+            html += '<h1>Well Log Interpretation Report</h1>';
+
+            // Well info
+            html += '<div class="header-grid">';
+            const w = data.well || {};
+            const info = [
+                ['Well Name', w.name], ['UWI', w.uwi], ['Operator', w.operator],
+                ['Field', w.field_name], ['Total Depth', w.total_depth + ' ' + (w.depth_unit || 'FT')],
+                ['Spud Date', w.spud_date || 'N/A'],
+            ];
+            for (const [label, val] of info) {
+                html += '<div class="header-item"><label>' + label + '</label><span>' + (val || 'N/A') + '</span></div>';
+            }
+            html += '</div>';
+
+            // Formation Tops
+            if (data.formation_tops?.length) {
+                html += '<h2>Formation Tops</h2><table><thead><tr><th>Formation</th><th>Depth</th><th>Lithology</th><th>Color</th></tr></thead><tbody>';
+                for (const t of data.formation_tops) {
+                    html += '<tr><td>' + t.formation_name + '</td><td>' + (t.depth?.toFixed(1) || '-') + '</td><td>' + (t.lithology || '-') + '</td><td style="background:' + (t.color || '#fff') + '">' + (t.color || '-') + '</td></tr>';
+                }
+                html += '</tbody></table>';
+            }
+
+            // Zones
+            if (data.zones?.length) {
+                html += '<h2>Interpretation Zones</h2><table><thead><tr><th>Zone</th><th>Top</th><th>Base</th><th>Gross</th></tr></thead><tbody>';
+                for (const z of data.zones) {
+                    html += '<tr><td>' + z.name + '</td><td>' + z.top_depth + '</td><td>' + z.bottom_depth + '</td><td>' + (z.bottom_depth - z.top_depth).toFixed(1) + '</td></tr>';
+                }
+                html += '</tbody></table>';
+            }
+
+            // Petrophysics params
+            if (data.petro_params) {
+                const pp = data.petro_params;
+                html += '<h2>Petrophysics Parameters</h2><div class="header-grid">';
+                const pItems = [
+                    ['Model', pp.saturation_model], ['a', pp.a], ['m', pp.m], ['n', pp.n], ['Rw', pp.rw],
+                    ['Vsh cutoff', pp.vsh_cutoff], ['PHIE cutoff', pp.phie_cutoff], ['Sw cutoff', pp.sw_cutoff],
+                ];
+                for (const [label, val] of pItems) {
+                    html += '<div class="header-item"><label>' + label + '</label><span>' + val + '</span></div>';
+                }
+                html += '</div>';
+            }
+
+            // Curve summary
+            if (data.curve_summary?.length) {
+                html += '<h2>Curve Data Summary</h2><table><thead><tr><th>Run</th><th>Curve</th><th>Unit</th><th>Count</th><th>Min</th><th>Max</th><th>Mean</th></tr></thead><tbody>';
+                for (const c of data.curve_summary) {
+                    html += '<tr><td>' + c.run + '</td><td>' + c.mnemonic + '</td><td>' + (c.unit || '') + '</td><td>' + c.count + '</td><td>' + (c.min?.toFixed(4) || '-') + '</td><td>' + (c.max?.toFixed(4) || '-') + '</td><td>' + (c.mean?.toFixed(4) || '-') + '</td></tr>';
+                }
+                html += '</tbody></table>';
+            }
+
+            html += '<p style="margin-top:30px;color:#999;font-size:9px">Generated by GeoLog Professional — ' + (data.generated_at || new Date().toISOString()) + '</p>';
+            html += '</body></html>';
+
+            const blob = new Blob([html], { type: 'text/html' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = (this.currentWell.name || 'well') + '_report.html';
+            a.click();
+            GeoToast.success('Report downloaded — open in browser to print');
+        } catch (e) {
+            GeoToast.error('Report failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    }
+
+
+    // --- Electrofacies Panel ---
+    _initFaciesPanel() {
+        if (!this.renderer) return;
+        const container = document.getElementById('faciesCurveCheckboxes');
+        if (!container || container.children.length > 0) return;
+        const curves = Object.keys(this.renderer.curveData || {}).filter(k => k !== 'DEPT');
+        container.innerHTML = curves.map(mn =>
+            '<label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#c9d1d9;background:#161b22;padding:4px 8px;border-radius:4px;border:1px solid #30363d">' +
+            '<input type="checkbox" value="' + mn + '" ' + (['GR','RHOB','NPHI','RT'].includes(mn) ? 'checked' : '') + '> ' + mn + '</label>'
+        ).join('');
+    }
+
+    async runElectrofacies() {
+        if (!this.currentWell || !this.currentLogRun) return GeoToast.warn('Load a well first');
+        const n = parseInt(document.getElementById('faciesN')?.value || '4');
+        const checks = document.querySelectorAll('#faciesCurveCheckboxes input:checked');
+        const curves = Array.from(checks).map(c => c.value);
+        if (curves.length < 2) return GeoToast.warn('Select at least 2 curves');
+        GeoLoading.show('Running K-means clustering...');
+        try {
+            const result = await this._api('/wells/' + this.currentWell.id + '/electrofacies', {
+                method: 'POST',
+                body: JSON.stringify({ log_run_id: this.currentLogRun.id, n_clusters: n, curves }),
+            });
+            this._faciesData = result;
+            this.renderer.curveData['FACIES'] = result.facies_labels;
+            this.curveConfig['FACIES'] = { track: 5, color: '#a371f7', scale: [0, result.n_clusters], unit: '', name: 'Electrofacies' };
+            const panel = document.getElementById('faciesResults');
+            if (!panel) return;
+            const colors = ['#58a6ff', '#3fb950', '#f0883e', '#f85149', '#a371f7', '#f2cc60', '#79c0ff', '#d2a8ff'];
+            let html = '<div class="petro-summary"><h4>Electrofacies Classification</h4>';
+            html += '<div class="petro-stat"><span>Algorithm:</span> <strong>K-means (' + result.n_clusters + ')</strong></div>';
+            html += '<div class="petro-stat"><span>Curves:</span> <strong>' + result.curves_used.join(', ') + '</strong></div>';
+            html += '<div class="petro-stat"><span>Points:</span> <strong>' + result.facies_labels.filter(l => l >= 0).length + '</strong></div>';
+            html += '<hr><h4>Facies Summary</h4>';
+            html += '<div style="overflow:auto"><table class="petro-table"><thead><tr><th>Color</th><th>Facies</th><th>Count</th><th>Pct</th>';
+            for (const k of result.curves_used) html += '<th>' + k + '</th>';
+            html += '</tr></thead><tbody>';
+            for (let i = 0; i < result.summary.length; i++) {
+                const s = result.summary[i];
+                html += '<tr><td style="background:' + colors[i % colors.length] + '"></td>';
+                html += '<td><strong>' + s.facies + '</strong></td><td>' + s.count + '</td><td>' + s.pct + '%</td>';
+                for (const k of result.curves_used) html += '<td>' + (s.centroid[k]?.toFixed(3) || '-') + '</td>';
+                html += '</tr>';
+            }
+            html += '</tbody></table></div></div>';
+            panel.innerHTML = html;
+            this.renderer.render();
+            GeoToast.success('Electrofacies: ' + result.n_clusters + ' types');
+        } catch (e) { GeoToast.error('Clustering failed: ' + e.message); }
+        finally { GeoLoading.hide(); }
+    }
+
+    toggleLithTrack() {
+        if (!this.renderer) return;
+        this._showLithTrack = !this._showLithTrack;
+        this.renderer._showLithology = this._showLithTrack;
+        this.renderer.render();
+        GeoToast.info('Lith track: ' + (this._showLithTrack ? 'ON' : 'OFF'));
+    }
+
+    async runCurveFilter(type) {
+        if (!this.currentLogRun) return GeoToast.warn('Select a log run');
+        const curves = Object.keys(this.renderer?.curveData || {}).filter(k => !['DEPT','SW','VSH','PHIE','FACIES'].includes(k));
+        const r = await GeoModal.show({ title: type + ' filter', fields: [
+            { id: 'mnemonic', label: 'Curve', type: 'select', options: curves.map(c => ({ value: c, label: c })), value: curves[0] || 'GR' },
+            { id: 'window', label: 'Window (odd)', type: 'number', value: type === 'despike' ? '5' : '7', step: '2' },
+        ]});
+        if (!r?.mnemonic) return;
+        GeoLoading.show('Filtering...');
+        try {
+            const result = await this._api('/log-runs/' + this.currentLogRun.id + '/filter', {
+                method: 'POST', body: JSON.stringify({ mnemonic: r.mnemonic, filter: type, window: parseInt(r.window) }),
+            });
+            GeoToast.success('Created: ' + result.new_curve);
+            await this._loadCurveData();
+        } catch (e) { GeoToast.error('Filter failed: ' + e.message); }
+        finally { GeoLoading.hide(); }
+    }
+
+    async runAutoDepthMatch() {
+        if (!this.currentWell) return GeoToast.warn('No well');
+        await this._populateToolRunSelectors();
+        const sel = document.getElementById('depthShiftRun');
+        const runs = Array.from(sel?.options || []).map(o => ({ value: o.value, label: o.text }));
+        const r = await GeoModal.show({ title: 'Auto Depth Match', fields: [
+            { id: 'run_a', label: 'Reference Run', type: 'select', options: runs },
+            { id: 'run_b', label: 'Match Run', type: 'select', options: runs },
+            { id: 'mnemonic', label: 'Curve', type: 'select', options: [{value:'GR',label:'GR'},{value:'RT',label:'RT'},{value:'NPHI',label:'NPHI'},{value:'RHOB',label:'RHOB'}] },
+            { id: 'max_shift', label: 'Max shift (ft)', type: 'number', value: '50' },
+        ]});
+        if (!r?.run_a || !r?.run_b) return;
+        GeoLoading.show('Cross-correlating...');
+        try {
+            const result = await this._api('/wells/' + this.currentWell.id + '/depth-match', {
+                method: 'POST', body: JSON.stringify({ run_a: parseInt(r.run_a), run_b: parseInt(r.run_b), mnemonic: r.mnemonic, max_shift: parseFloat(r.max_shift) }),
+            });
+            GeoToast.success('Shift: ' + result.optimal_shift_ft + ' ft (r=' + result.correlation + ')', 5000);
+            const si = document.getElementById('depthShiftVal'); if (si) si.value = result.optimal_shift_ft;
+            const rs = document.getElementById('depthShiftRun'); if (rs) rs.value = r.run_b;
+        } catch (e) { GeoToast.error('Match failed: ' + e.message); }
+        finally { GeoLoading.hide(); }
+    }
+
+    async runCurveOverride() {
+        if (!this.currentLogRun) return GeoToast.warn('Select a log run');
+        const curves = Object.keys(this.renderer?.curveData || {}).filter(k => k !== 'DEPT');
+        const r = await GeoModal.show({ title: 'Curve Override', fields: [
+            { id: 'mnemonic', label: 'Curve', type: 'select', options: curves.map(c => ({ value: c, label: c })) },
+            { id: 'start', label: 'Start depth', type: 'number', step: '0.1' },
+            { id: 'end', label: 'End depth', type: 'number', step: '0.1' },
+            { id: 'value', label: 'Override value', type: 'number', step: '0.01' },
+        ]});
+        if (!r?.mnemonic || isNaN(parseFloat(r.start)) || isNaN(parseFloat(r.end))) return;
+        try {
+            await this._api('/log-runs/' + this.currentLogRun.id + '/curve-override', {
+                method: 'POST', body: JSON.stringify({ mnemonic: r.mnemonic, start: parseFloat(r.start), end: parseFloat(r.end), value: parseFloat(r.value) }),
+            });
+            GeoToast.success('Override applied');
+            await this._loadCurveData();
+        } catch (e) { GeoToast.error('Override failed: ' + e.message); }
+    }
+    // --- Multi-well Strip Log ---
+    async renderStripLog() {
+        if (!this.projects?.length) return;
+        const curve = document.getElementById('stripCurve')?.value || 'GR';
+        const refFormation = document.getElementById('stripRefFormation')?.value || '';
+        const pid = this.projects[0].id;
+        GeoLoading.show('Loading strip log data...');
+        try {
+            const data = await this._api('/projects/' + pid + '/strip-log-data?curve=' + curve);
+            if (!data.wells?.length) { GeoToast.warn('No wells with data'); return; }
+
+            // Populate formation selector
+            const sel = document.getElementById('stripRefFormation');
+            if (sel && sel.options.length <= 1) {
+                for (const fn of (data.formation_names || [])) {
+                    sel.add(new Option(fn, fn));
+                }
+            }
+
+            const canvas = document.getElementById('stripLogCanvas');
+            if (!canvas) return;
+            const wells = data.wells;
+            const nWells = wells.length;
+            const stripW = 160;
+            const nameW = 100;
+            const margin = { top: 50, right: 20, bottom: 30, left: 10 };
+            canvas.width = margin.left + nameW + nWells * stripW + margin.right;
+            canvas.height = 800;
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width, ht = canvas.height;
+            ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, w, ht);
+
+            // Find global depth range
+            let dMin = Infinity, dMax = -Infinity;
+            let vMin = Infinity, vMax = -Infinity;
+            for (const well of wells) {
+                if (refFormation) {
+                    const top = well.tops.find(t => t.name === refFormation);
+                    if (top) {
+                        const normalized = well.depth.map(d => d - top.depth);
+                        dMin = Math.min(dMin, ...normalized); dMax = Math.max(dMax, ...normalized);
+                    } else {
+                        dMin = Math.min(dMin, ...well.depth); dMax = Math.max(dMax, ...well.depth);
+                    }
+                } else {
+                    dMin = Math.min(dMin, ...well.depth); dMax = Math.max(dMax, ...well.depth);
+                }
+                const validVals = well.values.filter(v => v !== null && !isNaN(v));
+                if (validVals.length) { vMin = Math.min(vMin, ...validVals); vMax = Math.max(vMax, ...validVals); }
+            }
+            if (!isFinite(dMin)) return;
+            const plotTop = margin.top, plotBottom = ht - margin.bottom;
+            const plotH = plotBottom - plotTop;
+            const sy = d => plotTop + ((d - dMin) / (dMax - dMin)) * plotH;
+            const sx = (v, stripX) => stripX + 10 + ((v - vMin) / (vMax - vMin)) * (stripW - 20);
+
+            // Draw wells
+            const colors = ['#58a6ff', '#3fb950', '#f0883e', '#f85149', '#a371f7', '#f2cc60', '#79c0ff', '#d2a8ff'];
+            for (let wi = 0; wi < nWells; wi++) {
+                const well = wells[wi];
+                const stripX = margin.left + nameW + wi * stripW;
+
+                // Strip background
+                ctx.fillStyle = '#161b22'; ctx.fillRect(stripX, plotTop, stripW, plotH);
+                ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1; ctx.strokeRect(stripX, plotTop, stripW, plotH);
+
+                // Well name header
+                ctx.fillStyle = colors[wi % colors.length]; ctx.font = 'bold 12px DM Sans'; ctx.textAlign = 'center';
+                ctx.fillText(well.name, stripX + stripW / 2, plotTop - 20);
+                ctx.fillStyle = '#8b949e'; ctx.font = '10px DM Sans';
+                ctx.fillText(well.uwi || '', stripX + stripW / 2, plotTop - 8);
+
+                // Draw curve
+                ctx.strokeStyle = colors[wi % colors.length]; ctx.lineWidth = 1.2; ctx.beginPath();
+                let started = false;
+                for (let i = 0; i < well.depth.length; i++) {
+                    const d = refFormation ? (well.depth[i] - (well.tops.find(t => t.name === refFormation)?.depth || 0)) : well.depth[i];
+                    const v = well.values[i];
+                    if (v === null || isNaN(v)) continue;
+                    const y = sy(d); const x = sx(v, stripX);
+                    if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+
+                // Draw formation tops as horizontal lines
+                for (const top of well.tops) {
+                    const d = refFormation ? (top.depth - (well.tops.find(t => t.name === refFormation)?.depth || 0)) : top.depth;
+                    const y = sy(d);
+                    if (y < plotTop || y > plotBottom) continue;
+                    ctx.strokeStyle = top.color || '#888'; ctx.lineWidth = 1.5;
+                    ctx.beginPath(); ctx.moveTo(stripX, y); ctx.lineTo(stripX + stripW, y); ctx.stroke();
+                    ctx.fillStyle = top.color || '#888'; ctx.font = '9px DM Sans'; ctx.textAlign = 'left';
+                    ctx.fillText(top.name, stripX + 4, y - 3);
+                }
+            }
+
+            // Draw correlation lines between wells (matching formation tops)
+            const allNames = data.formation_names || [];
+            for (const fname of allNames) {
+                const points = [];
+                for (let wi = 0; wi < nWells; wi++) {
+                    const well = wells[wi];
+                    const top = well.tops.find(t => t.name === fname);
+                    if (!top) continue;
+                    const d = refFormation ? (top.depth - (well.tops.find(t => t.name === refFormation)?.depth || 0)) : top.depth;
+                    const x = margin.left + nameW + wi * stripW + stripW / 2;
+                    const y = sy(d);
+                    if (y >= plotTop && y <= plotBottom) points.push({ x, y });
+                }
+                if (points.length >= 2) {
+                    ctx.strokeStyle = '#ffffff22'; ctx.lineWidth = 0.8; ctx.setLineDash([4, 4]);
+                    ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+                    for (let p = 1; p < points.length; p++) ctx.lineTo(points[p].x, points[p].y);
+                    ctx.stroke(); ctx.setLineDash([]);
+                }
+            }
+
+            // Depth axis label
+            ctx.fillStyle = '#8b949e'; ctx.font = '10px DM Sans'; ctx.textAlign = 'center';
+            const axisLabel = refFormation ? 'Strat Depth from ' + refFormation + ' (ft)' : 'Measured Depth (ft)';
+            ctx.fillText(axisLabel, w / 2, ht - 4);
+
+            // Depth ticks
+            ctx.font = '9px IBM Plex Mono'; ctx.textAlign = 'right'; ctx.fillStyle = '#8b949e';
+            const tickInterval = Math.ceil((dMax - dMin) / 15 / 10) * 10;
+            for (let d = Math.ceil(dMin / tickInterval) * tickInterval; d <= dMax; d += tickInterval) {
+                const y = sy(d);
+                ctx.fillText(d.toFixed(0), margin.left + nameW - 6, y + 3);
+                ctx.strokeStyle = '#21262d'; ctx.lineWidth = 0.5;
+                ctx.beginPath(); ctx.moveTo(margin.left + nameW, y); ctx.lineTo(w - margin.right, y); ctx.stroke();
+            }
+
+            GeoToast.success('Strip log: ' + nWells + ' wells, curve ' + curve);
+        } catch (e) { GeoToast.error('Strip log failed: ' + e.message); }
+        finally { GeoLoading.hide(); }
+    }
+
+    // --- Auto-Pick Formation Tops ---
+    async runAutoPickTops() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        const curve = document.getElementById('autoPickCurve')?.value || 'GR';
+        const threshold = parseFloat(document.getElementById('autoPickThreshold')?.value || '2.0');
+        const minGap = parseFloat(document.getElementById('autoPickGap')?.value || '50');
+        GeoLoading.show('Auto-picking from ' + curve + '...');
+        try {
+            const result = await this._api('/wells/' + this.currentWell.id + '/auto-pick-tops', {
+                method: 'POST', body: JSON.stringify({ curve, threshold, min_gap: minGap }),
+            });
+            const panel = document.getElementById('autoPickResults');
+            if (!panel) return;
+            if (!result.picks?.length) { panel.innerHTML = '<p>No picks found. Try lower sensitivity.</p>'; return; }
+
+            panel.innerHTML = '<p><strong>' + result.picks.length + ' picks found:</strong></p>' +
+                result.picks.map(p =>
+                    '<div style="display:flex;align-items:center;gap:6px;padding:2px 0">' +
+                    '<span style="background:' + p.color + ';width:10px;height:10px;border-radius:50%"></span>' +
+                    '<span>' + p.formation_name + ' @ ' + p.depth + ' ft (z=' + p.z_score + ')</span>' +
+                    '</div>'
+                ).join('') +
+                '<button class="btn-sm" onclick="app._saveAutoPicks()" style="margin-top:8px">Save All Picks</button>';
+
+            this._autoPicks = result.picks;
+            GeoToast.success(result.picks.length + ' formation tops detected');
+        } catch (e) { GeoToast.error('Auto-pick failed: ' + e.message); }
+        finally { GeoLoading.hide(); }
+    }
+
+    async _saveAutoPicks() {
+        if (!this._autoPicks?.length || !this.currentWell) return;
+        await this._api('/wells/' + this.currentWell.id + '/save-picks', {
+            method: 'POST', body: JSON.stringify({ picks: this._autoPicks }),
+        });
+        GeoToast.success(this._autoPicks.length + ' tops saved');
+        await this._loadFormationTops();
+        this._autoPicks = null;
+    }
+
+    // --- CSV Upload ---
+    _initCSVUpload() {
+        const input = document.getElementById('csvFileInput');
+        if (!input || input._bound) return;
+        input._bound = true;
+        input.addEventListener('change', async () => {
+            const file = input.files?.[0];
+            if (!file || !this.currentWell) return;
+            const status = document.getElementById('csvUploadStatus');
+            if (status) status.textContent = 'Uploading ' + file.name + '...';
+            const formData = new FormData();
+            formData.append('file', file);
+            try {
+                const resp = await fetch('/api/wells/' + this.currentWell.id + '/upload-csv', { method: 'POST', body: formData });
+                const result = await resp.json();
+                if (resp.ok) {
+                    if (status) status.textContent = 'OK: ' + result.curves.length + ' curves, ' + result.points + ' points';
+                    GeoToast.success('CSV imported: ' + result.curves.join(', '));
+                    await this.selectWell(this.currentWell.id);
+                } else {
+                    if (status) status.textContent = 'Error: ' + (result.detail || 'Unknown');
+                }
+            } catch (e) { if (status) status.textContent = 'Error: ' + e.message; }
+            input.value = '';
+        });
+    }
+
+    // --- Well Trajectory ---
+    async openTrajectoryEditor() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        const r = await GeoModal.show({ title: 'Deviation Survey', fields: [
+            { id: 'data', label: 'Paste MD,INC,AZI (one per line)', type: 'text', placeholder: '0,0,0\n100,2,45\n200,5,90\n...' },
+        ]});
+        if (!r?.data) return;
+        const lines = r.data.split('\n').filter(l => l.trim());
+        const points = [];
+        for (const line of lines) {
+            const parts = line.split(',').map(v => parseFloat(v.trim()));
+            if (parts.length >= 3 && !isNaN(parts[0])) {
+                points.push({ md: parts[0], inc: parts[1], azi: parts[2] });
+            }
+        }
+        if (points.length < 2) return GeoToast.warn('Need at least 2 survey points');
+        GeoLoading.show('Computing TVD (minimum curvature)...');
+        try {
+            const result = await this._api('/wells/' + this.currentWell.id + '/trajectory', {
+                method: 'POST', body: JSON.stringify({ points }),
+            });
+            GeoToast.success('Trajectory saved: ' + result.points + ' points, TVD ' + result.tvd_range[0] + '-' + result.tvd_range[1]);
+            const status = document.getElementById('trajectoryStatus');
+            if (status) status.textContent = result.points + ' pts, TVD ' + result.tvd_range[0] + '-' + result.tvd_range[1] + ' ft';
+        } catch (e) { GeoToast.error('Trajectory failed: ' + e.message); }
+        finally { GeoLoading.hide(); }
+    }
+
+    async viewTrajectory() {
+        if (!this.currentWell) return;
+        try {
+            const data = await this._api('/wells/' + this.currentWell.id + '/trajectory');
+            if (!data.points?.length) { GeoToast.info('No trajectory data'); return; }
+            const panel = document.getElementById('trajectoryStatus');
+            if (panel) panel.textContent = data.points.length + ' pts, TVD range: ' + data.points[0].tvd + '-' + data.points[data.points.length - 1].tvd + ' ft';
+            GeoToast.info('Trajectory loaded: ' + data.points.length + ' points');
+        } catch { GeoToast.info('No trajectory data'); }
+    }
+
+    // ─── Sprint 21: Probability Plot ──────────────────────────────
+    async runProbabilityPlot() {
+        if (!this.currentWell) return;
+        const curve = document.getElementById('probCurve').value;
+        try {
+            const data = await this._api(`/wells/${this.currentWell.id}/probability-plot`, {
+                method: 'POST', body: JSON.stringify({ curve, n_bins: 20 })
+            });
+            this._drawProbabilityPlot(data);
+            document.getElementById('probResults').innerHTML = `
+                <div class="stat-grid">
+                    <div class="stat-item"><span class="stat-label">N</span><span class="stat-value">${data.n}</span></div>
+                    <div class="stat-item"><span class="stat-label">Mean</span><span class="stat-value">${data.mean.toFixed(3)}</span></div>
+                    <div class="stat-item"><span class="stat-label">Std Dev</span><span class="stat-value">${data.std.toFixed(3)}</span></div>
+                    <div class="stat-item"><span class="stat-label">P10</span><span class="stat-value">${data.p10.toFixed(3)}</span></div>
+                    <div class="stat-item"><span class="stat-label">P50 (Median)</span><span class="stat-value">${data.p50.toFixed(3)}</span></div>
+                    <div class="stat-item"><span class="stat-label">P90</span><span class="stat-value">${data.p90.toFixed(3)}</span></div>
+                    <div class="stat-item"><span class="stat-label">Skewness</span><span class="stat-value">${data.skewness.toFixed(3)}</span></div>
+                </div>`;
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
+    _drawProbabilityPlot(data) {
+        const canvas = document.getElementById('probabilityCanvas');
+        const ctx = canvas.getContext('2d');
+        const W = canvas.parentElement.clientWidth || 800;
+        const H = canvas.parentElement.clientHeight || 500;
+        canvas.width = W; canvas.height = H;
+        const m = {top: 40, bottom: 50, left: 70, right: 40};
+        ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, W, H);
+        const plotW = W - m.left - m.right, plotH = H - m.top - m.bottom;
+
+        if (!data.sorted_values.length) {
+            ctx.fillStyle = '#8b949e'; ctx.fillText('No data', W/2 - 20, H/2); return;
+        }
+
+        const n = data.sorted_values.length;
+        const minV = Math.min(...data.sorted_values), maxV = Math.max(...data.sorted_values);
+        const range = maxV - minV || 1;
+
+        // Y-axis: probability scale (0.01% to 99.99%)
+        function probY(p) {
+            // Inverse normal approximation for log-normal probability paper
+            const clamped = Math.max(0.0001, Math.min(0.9999, p));
+            // Simple linear for now; true prob paper uses inverse normal
+            return m.top + plotH * (1 - (Math.log(clamped/(1-clamped)) / 14 + 0.5));
+        }
+
+        // Draw grid lines for probability levels
+        const gridProbs = [0.01, 0.1, 1, 5, 10, 25, 50, 75, 90, 95, 99, 99.9, 99.99];
+        ctx.strokeStyle = '#21262d'; ctx.lineWidth = 0.5;
+        ctx.fillStyle = '#8b949e'; ctx.font = '10px IBM Plex Mono';
+        ctx.textAlign = 'right';
+        for (const pct of gridProbs) {
+            const p = pct / 100;
+            const y = probY(p);
+            if (y < m.top || y > m.top + plotH) continue;
+            ctx.beginPath(); ctx.moveTo(m.left, y); ctx.lineTo(m.left + plotW, y); ctx.stroke();
+            ctx.fillText(pct + '%', m.left - 5, y + 3);
+        }
+
+        // X-axis
+        ctx.textAlign = 'center';
+        const xStep = Math.pow(10, Math.floor(Math.log10(range / 5)));
+        for (let v = Math.floor(minV / xStep) * xStep; v <= maxV + xStep; v += xStep) {
+            const x = m.left + ((v - minV) / range) * plotW;
+            ctx.fillText(v.toFixed(1), x, H - m.bottom + 15);
+            ctx.strokeStyle = '#21262d'; ctx.beginPath(); ctx.moveTo(x, m.top); ctx.lineTo(x, m.top + plotH); ctx.stroke();
+        }
+
+        // Plot data points
+        ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        for (let i = 0; i < n; i++) {
+            const p = (i + 0.5) / n;
+            const x = m.left + ((data.sorted_values[i] - minV) / range) * plotW;
+            const y = probY(p);
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Mark P10/P50/P90
+        const marks = [{v: data.p10, l: 'P10', c: '#f0883e'}, {v: data.p50, l: 'P50', c: '#3fb950'}, {v: data.p90, l: 'P90', c: '#f85149'}];
+        for (const mk of marks) {
+            const x = m.left + ((mk.v - minV) / range) * plotW;
+            ctx.strokeStyle = mk.c; ctx.setLineDash([4,4]); ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(x, m.top); ctx.lineTo(x, m.top + plotH); ctx.stroke();
+            ctx.setLineDash([]); ctx.fillStyle = mk.c; ctx.font = 'bold 11px IBM Plex Mono';
+            ctx.fillText(mk.l + ': ' + mk.v.toFixed(2), x, m.top - 5);
+        }
+
+        // Axis labels
+        ctx.fillStyle = '#c9d1d9'; ctx.font = '12px DM Sans'; ctx.textAlign = 'center';
+        ctx.fillText(curve + ' Value', m.left + plotW/2, H - 5);
+        ctx.save(); ctx.translate(15, m.top + plotH/2); ctx.rotate(-Math.PI/2);
+        ctx.fillText('Cumulative Probability', 0, 0); ctx.restore();
+    }
+
+    // ─── Sprint 21: Moveable Oil ──────────────────────────────────
+    async runMoveableOil() {
+        if (!this.currentWell) return;
+        const rtCurve = document.getElementById('moiRt').value;
+        const rxoCurve = document.getElementById('moiRxo').value;
+        try {
+            const data = await this._api(`/wells/${this.currentWell.id}/moveable-oil`, {
+                method: 'POST', body: JSON.stringify({ rt_curve: rtCurve, rxo_curve: rxoCurve, phie_curve: 'PHIE' })
+            });
+            this._drawMoveableOilPlot(data);
+            const moiAvg = data.moi.filter(v => v != null).reduce((a,b) => a+b, 0) / (data.moi.filter(v=>v!=null).length||1);
+            document.getElementById('moiResults').innerHTML = `
+                <div class="stat-grid">
+                    <div class="stat-item"><span class="stat-label">Points</span><span class="stat-value">${data.depths.length}</span></div>
+                    <div class="stat-item"><span class="stat-label">MOI Mean</span><span class="stat-value">${data.stats.mean?.toFixed(4) ?? 'N/A'}</span></div>
+                    <div class="stat-item"><span class="stat-label">MOI Median</span><span class="stat-value">${data.stats.median?.toFixed(4) ?? 'N/A'}</span></div>
+                    <div class="stat-item"><span class="stat-label">Avg MOI</span><span class="stat-value">${moiAvg.toFixed(2)}</span></div>
+                </div>`;
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
+    _drawMoveableOilPlot(data) {
+        const canvas = document.getElementById('moveableCanvas');
+        const ctx = canvas.getContext('2d');
+        const W = canvas.parentElement.clientWidth || 800;
+        const H = canvas.parentElement.clientHeight || 500;
+        canvas.width = W; canvas.height = H;
+        const m = {top: 40, bottom: 50, left: 70, right: 40};
+        ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, W, H);
+        const plotW = W - m.left - m.right, plotH = H - m.top - m.bottom;
+
+        if (!data.depths.length) {
+            ctx.fillStyle = '#8b949e'; ctx.fillText('No data — need RT and RXO curves', W/2 - 60, H/2); return;
+        }
+
+        const depMin = Math.min(...data.depths), depMax = Math.max(...data.depths);
+        const depRange = depMax - depMin || 1;
+
+        // Get value range for Rwa/Rxo_wa (log scale)
+        const allVals = [...data.rwa, ...data.rxo_wa].filter(v => v != null && v > 0);
+        if (!allVals.length) return;
+        const logMin = Math.log10(Math.min(...allVals)), logMax = Math.log10(Math.max(...allVals));
+        const logRange = logMax - logMin || 1;
+
+        function valToX(v) { return m.left + ((Math.log10(v) - logMin) / logRange) * plotW; }
+        function depToY(d) { return m.top + ((d - depMin) / depRange) * plotH; }
+
+        // Draw Rwa curve (blue)
+        ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 1;
+        ctx.beginPath(); let started = false;
+        for (let i = 0; i < data.depths.length; i++) {
+            if (data.rwa[i] == null || data.rwa[i] <= 0) continue;
+            const x = valToX(data.rwa[i]), y = depToY(data.depths[i]);
+            if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Draw Rxo_wa curve (orange)
+        ctx.strokeStyle = '#f0883e'; ctx.lineWidth = 1;
+        ctx.beginPath(); started = false;
+        for (let i = 0; i < data.depths.length; i++) {
+            if (data.rxo_wa[i] == null || data.rxo_wa[i] <= 0) continue;
+            const x = valToX(data.rxo_wa[i]), y = depToY(data.depths[i]);
+            if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Legend
+        ctx.fillStyle = '#58a6ff'; ctx.fillRect(m.left + 10, m.top + 10, 12, 3);
+        ctx.fillStyle = '#c9d1d9'; ctx.font = '11px DM Sans'; ctx.textAlign = 'left';
+        ctx.fillText('Rwa (apparent Rw)', m.left + 28, m.top + 14);
+        ctx.fillStyle = '#f0883e'; ctx.fillRect(m.left + 10, m.top + 28, 12, 3);
+        ctx.fillStyle = '#c9d1d9'; ctx.fillText('Rxo_wa (apparent Rxo)', m.left + 28, m.top + 32);
+
+        // Depth axis
+        ctx.fillStyle = '#8b949e'; ctx.textAlign = 'right'; ctx.font = '10px IBM Plex Mono';
+        const dStep = Math.pow(10, Math.floor(Math.log10(depRange / 8)));
+        for (let d = Math.ceil(depMin / dStep) * dStep; d <= depMax; d += dStep) {
+            ctx.fillText(d.toFixed(0), m.left - 5, depToY(d) + 3);
+        }
+
+        // Title
+        ctx.fillStyle = '#c9d1d9'; ctx.textAlign = 'center'; ctx.font = '12px DM Sans';
+        ctx.fillText('Rwa vs Rxo_wa (Moveable Oil Indicator)', m.left + plotW/2, H - 5);
+    }
+
+    // ─── Sprint 21: Dip Plot ──────────────────────────────────────
+    async runDipPlot() {
+        if (!this.currentWell) return;
+        try {
+            const data = await this._api(`/wells/${this.currentWell.id}/dip-plot`, {
+                method: 'POST', body: JSON.stringify({})
+            });
+            this._drawDipPlot(data);
+            document.getElementById('dipResults').innerHTML = `
+                <div class="stat-grid">
+                    <div class="stat-item"><span class="stat-label">Survey Points</span><span class="stat-value">${data.md.length}</span></div>
+                    <div class="stat-item"><span class="stat-label">Max Inclination</span><span class="stat-value">${Math.max(...data.inc).toFixed(1)}°</span></div>
+                    <div class="stat-item"><span class="stat-label">Max Azimuth</span><span class="stat-value">${Math.max(...data.azi).toFixed(1)}°</span></div>
+                </div>`;
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
+    _drawDipPlot(data) {
+        const canvas = document.getElementById('dipCanvas');
+        const ctx = canvas.getContext('2d');
+        const W = canvas.parentElement.clientWidth || 800;
+        const H = canvas.parentElement.clientHeight || 500;
+        canvas.width = W; canvas.height = H;
+        const m = {top: 40, bottom: 50, left: 70, right: 40};
+        ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, W, H);
+        const plotW = W - m.left - m.right, plotH = H - m.top - m.bottom;
+
+        if (!data.md.length) {
+            ctx.fillStyle = '#8b949e'; ctx.fillText('No deviation survey data', W/2 - 60, H/2); return;
+        }
+
+        const depMin = Math.min(...data.md), depMax = Math.max(...data.md);
+        const depRange = depMax - depMin || 1;
+        const maxInc = Math.max(...data.inc, 10);
+
+        function depToY(d) { return m.top + ((d - depMin) / depRange) * plotH; }
+
+        // Draw tadpoles
+        for (let i = 0; i < data.md.length; i++) {
+            const y = depToY(data.md[i]);
+            const inc = data.inc[i];
+            const azi = data.azi[i];
+            const radius = (inc / maxInc) * (plotW / 2 - 20);
+            const centerX = m.left + plotW / 2;
+            const radAzi = (azi - 90) * Math.PI / 180; // rotate so North is up
+            const dotX = centerX + radius * Math.cos(radAzi);
+            const dotY = y + radius * Math.sin(radAzi);
+
+            // Tail (from center to dot, dashed)
+            ctx.strokeStyle = '#58a6ff44'; ctx.lineWidth = 0.5; ctx.setLineDash([2,2]);
+            ctx.beginPath(); ctx.moveTo(centerX, y); ctx.lineTo(dotX, dotY); ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Dot
+            ctx.fillStyle = inc > 10 ? '#f0883e' : (inc > 5 ? '#d29922' : '#3fb950');
+            ctx.beginPath(); ctx.arc(dotX, dotY, 3, 0, Math.PI * 2); ctx.fill();
+
+            // Depth label
+            ctx.fillStyle = '#8b949e'; ctx.font = '9px IBM Plex Mono'; ctx.textAlign = 'right';
+            ctx.fillText(data.md[i].toFixed(0), m.left - 5, y + 3);
+        }
+
+        // Center vertical line
+        ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(m.left + plotW/2, m.top); ctx.lineTo(m.left + plotW/2, m.top + plotH); ctx.stroke();
+
+        // Compass labels
+        ctx.fillStyle = '#c9d1d9'; ctx.font = '11px DM Sans'; ctx.textAlign = 'center';
+        ctx.fillText('N', m.left + plotW/2, m.top - 10);
+        ctx.fillText('S', m.left + plotW/2, m.top + plotH + 15);
+        ctx.fillText('E', m.left + plotW - 10, m.top + plotH/2);
+        ctx.fillText('W', m.left + 15, m.top + plotH/2);
+
+        // Title
+        ctx.fillText('Tadpole / Dip Plot', m.left + plotW/2, H - 5);
+    }
+
+    // ─── Sprint 22: Buckles Plot ─────────────────────────────────
+    async runBuckles() {
+        if (!this.currentWell) return;
+        const phie = document.getElementById('buckPhie')?.value || 'NPHI';
+        try {
+            const data = await this._api(`/wells/${this.currentWell.id}/buckles`, {
+                method: 'POST', body: JSON.stringify({ phie_curve: phie })
+            });
+            this._drawBucklesPlot(data);
+            document.getElementById('buckResults').innerHTML = `
+                <div class="stat-grid">
+                    <div class="stat-item"><span class="stat-label">Points</span><span class="stat-value">${data.depths.length}</span></div>
+                    <div class="stat-item"><span class="stat-label">Mean BVW</span><span class="stat-value">${data.stats.mean_bvw.toFixed(4)}</span></div>
+                    <div class="stat-item"><span class="stat-label">Pay Fraction</span><span class="stat-value">${(data.stats.pay_fraction * 100).toFixed(1)}%</span></div>
+                </div>`;
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
+    _drawBucklesPlot(data) {
+        const canvas = document.getElementById('bucklesCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const W = canvas.parentElement.clientWidth || 800;
+        const H = canvas.parentElement.clientHeight || 500;
+        canvas.width = W; canvas.height = H;
+        const m = {top: 40, bottom: 50, left: 70, right: 40};
+        ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, W, H);
+        const plotW = W - m.left - m.right, plotH = H - m.top - m.bottom;
+        if (!data.depths.length) { ctx.fillStyle = '#8b949e'; ctx.fillText('No data', W/2 - 20, H/2); return; }
+        const depMin = Math.min(...data.depths), depMax = Math.max(...data.depths);
+        const depRange = depMax - depMin || 1;
+        const maxBvw = Math.max(...data.bvw.filter(v => v != null), 0.2);
+        function depToY(d) { return m.top + ((d - depMin) / depRange) * plotH; }
+        function bvwToX(b) { return m.left + (b / maxBvw) * plotW; }
+        // Cutoff lines
+        for (const [val, label, color] of [[0.04, 'Tight', '#f85149'], [0.12, 'Pay', '#3fb950']]) {
+            const x = bvwToX(val);
+            ctx.strokeStyle = color; ctx.setLineDash([6,4]); ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(x, m.top); ctx.lineTo(x, m.top + plotH); ctx.stroke();
+            ctx.setLineDash([]); ctx.fillStyle = color; ctx.font = 'bold 11px IBM Plex Mono';
+            ctx.textAlign = 'center'; ctx.fillText(label + ' (' + val + ')', x, m.top - 5);
+        }
+        // Plot dots
+        for (let i = 0; i < data.depths.length; i++) {
+            if (data.bvw[i] == null) continue;
+            const x = bvwToX(data.bvw[i]), y = depToY(data.depths[i]);
+            ctx.fillStyle = data.bvw[i] > 0.12 ? '#f85149' : (data.bvw[i] > 0.04 ? '#d29922' : '#3fb950');
+            ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill();
+        }
+        // Axes
+        ctx.fillStyle = '#8b949e'; ctx.font = '10px IBM Plex Mono'; ctx.textAlign = 'center';
+        for (let v = 0; v <= maxBvw; v += 0.04) {
+            ctx.fillText(v.toFixed(2), bvwToX(v), m.top + plotH + 15);
+        }
+        ctx.textAlign = 'right';
+        const dStep = Math.pow(10, Math.floor(Math.log10(depRange / 8)));
+        for (let d = Math.ceil(depMin / dStep) * dStep; d <= depMax; d += dStep) {
+            ctx.fillText(d.toFixed(0), m.left - 5, depToY(d) + 3);
+        }
+        ctx.fillStyle = '#c9d1d9'; ctx.font = '12px DM Sans'; ctx.textAlign = 'center';
+        ctx.fillText('Bulk Volume Water (BVW)', m.left + plotW/2, H - 5);
+    }
+
+    // ─── Sprint 22: Hingle Plot ──────────────────────────────────
+    async runHingle() {
+        if (!this.currentWell) return;
+        const rt = document.getElementById('hingleRt')?.value || 'RT';
+        const phie = document.getElementById('hinglePhie')?.value || 'NPHI';
+        try {
+            const data = await this._api(`/wells/${this.currentWell.id}/hingle`, {
+                method: 'POST', body: JSON.stringify({ rt_curve: rt, phie_curve: phie })
+            });
+            this._drawHinglePlot(data);
+            document.getElementById('hingleResults').innerHTML = `
+                <div class="stat-grid">
+                    <div class="stat-item"><span class="stat-label">Points</span><span class="stat-value">${data.x.length}</span></div>
+                    <div class="stat-item"><span class="stat-label">Rw Estimate</span><span class="stat-value">${data.rw_line?.slope ? (1/data.rw_line.slope).toFixed(4) : 'N/A'}</span></div>
+                </div>`;
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
+    _drawHinglePlot(data) {
+        const canvas = document.getElementById('hingleCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const W = canvas.parentElement.clientWidth || 800;
+        const H = canvas.parentElement.clientHeight || 500;
+        canvas.width = W; canvas.height = H;
+        const m = {top: 40, bottom: 50, left: 70, right: 40};
+        ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, W, H);
+        const plotW = W - m.left - m.right, plotH = H - m.top - m.bottom;
+        if (!data.x.length) { ctx.fillStyle = '#8b949e'; ctx.fillText('No data', W/2 - 20, H/2); return; }
+        const xMin = Math.min(...data.x), xMax = Math.max(...data.x);
+        const yMin = Math.min(...data.y), yMax = Math.max(...data.y);
+        const xRange = xMax - xMin || 1, yRange = yMax - yMin || 1;
+        function xToPixel(v) { return m.left + ((v - xMin) / xRange) * plotW; }
+        function yToPixel(v) { return m.top + plotH - ((v - yMin) / yRange) * plotH; }
+        // Grid
+        ctx.strokeStyle = '#21262d'; ctx.lineWidth = 0.5;
+        for (let v = Math.ceil(xMin * 20) / 20; v <= xMax; v += Math.max(0.01, xRange / 10)) {
+            const x = xToPixel(v);
+            ctx.beginPath(); ctx.moveTo(x, m.top); ctx.lineTo(x, m.top + plotH); ctx.stroke();
+        }
+        // Plot points
+        for (let i = 0; i < data.x.length; i++) {
+            const px = xToPixel(data.x[i]), py = yToPixel(data.y[i]);
+            ctx.fillStyle = '#58a6ff88';
+            ctx.beginPath(); ctx.arc(px, py, 2.5, 0, Math.PI * 2); ctx.fill();
+        }
+        // Rw line
+        if (data.rw_line && data.rw_line.slope) {
+            ctx.strokeStyle = '#f85149'; ctx.lineWidth = 1.5; ctx.setLineDash([4,4]);
+            ctx.beginPath();
+            ctx.moveTo(xToPixel(xMin), yToPixel(data.rw_line.slope * xMin + data.rw_line.intercept));
+            ctx.lineTo(xToPixel(xMax), yToPixel(data.rw_line.slope * xMax + data.rw_line.intercept));
+            ctx.stroke(); ctx.setLineDash([]);
+            ctx.fillStyle = '#f85149'; ctx.font = 'bold 11px DM Sans'; ctx.textAlign = 'left';
+            ctx.fillText('Rw line', xToPixel(xMax) - 60, yToPixel(data.rw_line.slope * xMax + data.rw_line.intercept) - 8);
+        }
+        // Axes
+        ctx.fillStyle = '#8b949e'; ctx.font = '10px IBM Plex Mono'; ctx.textAlign = 'center';
+        const xTickStep = Math.max(0.05, Math.round(xRange * 10) / 100);
+        for (let v = Math.ceil(xMin / xTickStep) * xTickStep; v <= xMax + xTickStep; v += xTickStep) {
+            ctx.fillText(v.toFixed(2), xToPixel(v), m.top + plotH + 15);
+        }
+        ctx.textAlign = 'right';
+        const yTickStep = Math.pow(10, Math.floor(Math.log10(yRange / 6)));
+        for (let v = Math.ceil(yMin / yTickStep) * yTickStep; v <= yMax + yTickStep; v += yTickStep) {
+            ctx.fillText(v.toFixed(3), m.left - 5, yToPixel(v) + 3);
+        }
+        ctx.fillStyle = '#c9d1d9'; ctx.font = '12px DM Sans'; ctx.textAlign = 'center';
+        ctx.fillText('Porosity (v/v)', m.left + plotW/2, H - 5);
+        ctx.save(); ctx.translate(15, m.top + plotH/2); ctx.rotate(-Math.PI/2);
+        ctx.fillText('1/Rt (1/ohm.m)', 0, 0); ctx.restore();
+    }
+
+    // ─── Sprint 22: Curve Calculator ─────────────────────────────
+    async runCurveCalc() {
+        if (!this.currentWell) return;
+        const expr = document.getElementById('calcExpr')?.value;
+        const name = (document.getElementById('calcName')?.value || 'NEW_CURVE').toUpperCase();
+        if (!expr) { GeoToast.warning('Enter an expression'); return; }
+        try {
+            const data = await this._api(`/wells/${this.currentWell.id}/curve-calc`, {
+                method: 'POST', body: JSON.stringify({ expression: expr, output_name: name })
+            });
+            document.getElementById('calcResults').innerHTML = `
+                <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;margin-top:8px">
+                    <strong style="color:#3fb950">✓ Curve created</strong><br>
+                    <span style="color:#c9d1d9">${data.curve_name}</span> — ${data.points} points<br>
+                    Min: ${data.min.toFixed(3)} | Max: ${data.max.toFixed(3)} | Mean: ${data.mean.toFixed(3)}
+                </div>`;
+            GeoToast.success(`Curve ${data.curve_name} created (${data.points} points)`);
+            await this.selectLogRun(this.currentLogRun.id);
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
+    // ─── Sprint 23: Data Table ────────────────────────────────────
+    async loadDataTable() {
+        if (!this.currentWell || !this.currentLogRun) return;
+        const from = document.getElementById('dtFrom').value || '';
+        const to = document.getElementById('dtTo').value || '';
+        const limit = document.getElementById('dtLimit').value || 200;
+        try {
+            let url = `/wells/${this.currentWell.id}/data-table?limit=${limit}`;
+            if (from) url += `&from_depth=${from}`;
+            if (to) url += `&to_depth=${to}`;
+            const data = await this._api(url);
+            this._lastDataTable = data;
+            const cols = data.columns;
+            let html = `<div style="margin-bottom:8px;color:#8b949e;font-size:12px">Showing ${data.shown_points} of ${data.total_points} points</div>`;
+            html += '<div style="overflow:auto;max-height:calc(100vh - 200px)"><table style="width:100%;border-collapse:collapse;font-size:11px;font-family:IBM Plex Mono,monospace">';
+            html += '<thead><tr style="position:sticky;top:0;background:#161b22">';
+            for (const c of cols) html += `<th style="border:1px solid #30363d;padding:4px 8px;color:#58a6ff;cursor:pointer" onclick="app._sortDataTable('${c}')">${c}</th>`;
+            html += '</tr></thead><tbody>';
+            for (const row of data.rows) {
+                html += '<tr>';
+                for (const v of row) {
+                    const display = (v === null || v === undefined) ? '<span style="color:#484f58">-</span>' : (typeof v === 'number' ? v.toFixed(3) : v);
+                    html += `<td style="border:1px solid #21262d;padding:3px 8px;color:#c9d1d9">${display}</td>`;
+                }
+                html += '</tr>';
+            }
+            html += '</tbody></table></div>';
+            document.getElementById('dataTableContent').innerHTML = html;
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
+    _sortDataTable(col) {
+        if (!this._lastDataTable) return;
+        const idx = this._lastDataTable.columns.indexOf(col);
+        if (idx < 0) return;
+        this._lastDataTable.rows.sort((a, b) => {
+            const va = a[idx], vb = b[idx];
+            if (va === null && vb === null) return 0;
+            if (va === null) return 1;
+            if (vb === null) return -1;
+            return va - vb;
+        });
+        this.loadDataTable(); // re-render with sorted data (uses _lastDataTable)
+        // Actually, let's just re-render from cached data
+        const data = this._lastDataTable;
+        const cols = data.columns;
+        let html = `<div style="margin-bottom:8px;color:#8b949e;font-size:12px">Showing ${data.shown_points} of ${data.total_points} points (sorted by ${col})</div>`;
+        html += '<div style="overflow:auto;max-height:calc(100vh - 200px)"><table style="width:100%;border-collapse:collapse;font-size:11px;font-family:IBM Plex Mono,monospace">';
+        html += '<thead><tr style="position:sticky;top:0;background:#161b22">';
+        for (const c of cols) html += `<th style="border:1px solid #30363d;padding:4px 8px;color:#58a6ff;cursor:pointer" onclick="app._sortDataTable('${c}')">${c}</th>`;
+        html += '</tr></thead><tbody>';
+        for (const row of data.rows) {
+            html += '<tr>';
+            for (const v of row) {
+                const display = (v === null || v === undefined) ? '<span style="color:#484f58">-</span>' : (typeof v === 'number' ? v.toFixed(3) : v);
+                html += `<td style="border:1px solid #21262d;padding:3px 8px;color:#c9d1d9">${display}</td>`;
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table></div>';
+        document.getElementById('dataTableContent').innerHTML = html;
+    }
+
+    exportDataTableCSV() {
+        if (!this._lastDataTable) { GeoToast.warning('Load data first'); return; }
+        const data = this._lastDataTable;
+        let csv = data.columns.join(',') + '\n';
+        for (const row of data.rows) csv += row.map(v => v === null ? '' : v).join(',') + '\n';
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = `${this.currentWell?.name || 'data'}_table.csv`; a.click();
+    }
+
+    // ─── Sprint 23: Tops Management ──────────────────────────────
+    _renderTopsManagement() {
+        if (!this.currentWell) return;
+        const tops = this.formationTops || [];
+        let html = '<div style="overflow:auto">';
+        html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+        html += '<thead><tr style="background:#161b22">';
+        html += '<th style="padding:6px;border:1px solid #30363d;color:#58a6ff">Formation</th>';
+        html += '<th style="padding:6px;border:1px solid #30363d;color:#58a6ff">Depth</th>';
+        html += '<th style="padding:6px;border:1px solid #30363d;color:#58a6ff">Top</th>';
+        html += '<th style="padding:6px;border:1px solid #30363d;color:#58a6ff">Base</th>';
+        html += '<th style="padding:6px;border:1px solid #30363d;color:#58a6ff">Color</th>';
+        html += '<th style="padding:6px;border:1px solid #30363d;color:#58a6ff">Lithology</th>';
+        html += '<th style="padding:6px;border:1px solid #30363d;color:#58a6ff">Actions</th>';
+        html += '</tr></thead><tbody>';
+        for (const t of tops) {
+            html += `<tr>`;
+            html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9">${t.formation_name}</td>`;
+            html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9">${t.depth.toFixed(1)}</td>`;
+            html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9">${t.top_depth?.toFixed(1) ?? '-'}</td>`;
+            html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9">${t.base_depth?.toFixed(1) ?? '-'}</td>`;
+            html += `<td style="padding:4px 6px;border:1px solid #21262d"><span style="display:inline-block;width:16px;height:16px;border-radius:3px;background:${t.color}"></span></td>`;
+            html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9">${t.lithology || '-'}</td>`;
+            html += `<td style="padding:4px 6px;border:1px solid #21262d">`;
+            html += `<button class="btn-sm" onclick="app.editFormationTop(${t.id})" style="font-size:10px">✏️</button> `;
+            html += `<button class="btn-sm" onclick="app.deleteFormationTop(${t.id})" style="font-size:10px;color:#f85149">🗑️</button>`;
+            html += '</td></tr>';
+        }
+        html += '</tbody></table></div>';
+        if (!tops.length) html = '<p style="color:#8b949e">No formation tops. Add one from the viewer toolbar or import CSV.</p>';
+        document.getElementById('topsMgmtContent').innerHTML = html;
+    }
+
+    async exportTopsCSV() {
+        if (!this.projects?.[0]) return;
+        const pid = this.projects[0].id;
+        try {
+            const resp = await fetch(`/api/projects/${pid}/tops-export`);
+            const text = await resp.text();
+            const blob = new Blob([text], { type: 'text/csv' });
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+            a.download = `tops_project_${pid}.csv`; a.click();
+            GeoToast.success('Tops exported');
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
+    async exportTopsPetrel() {
+        if (!this.currentWell) return;
+        try {
+            const resp = await fetch(`/api/wells/${this.currentWell.id}/tops-petrel`);
+            const text = await resp.text();
+            const blob = new Blob([text], { type: 'text/csv' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `tops_petrel_${this.currentWell.name}.csv`;
+            a.click();
+            GeoToast.success('Petrel-format tops exported');
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
+    async importTopsCSV() {
+        if (!this.currentWell) { GeoToast.warning('Select a well first'); return; }
+        const input = document.createElement('input');
+        input.type = 'file'; input.accept = '.csv';
+        input.onchange = async () => {
+            const file = input.files[0]; if (!file) return;
+            const text = await file.text();
+            try {
+                const result = await this._api(`/wells/${this.currentWell.id}/tops-import`, {
+                    method: 'POST', body: JSON.stringify({ csv_data: text })
+                });
+                GeoToast.success(`Imported ${result.imported} tops, ${result.skipped} skipped`);
+                this.formationTops = await this._api(`/wells/${this.currentWell.id}/tops`);
+                this._renderTopsManagement();
+                if (this.renderer) this.renderer.formationTops = this.formationTops;
+            } catch (e) { GeoToast.error(e.message); }
+        };
+        input.click();
+    }
+
+    async deleteFormationTop(id) {
+        if (!confirm('Delete this formation top?')) return;
+        try {
+            await this._api(`/tops/${id}`, { method: 'DELETE' });
+            this.formationTops = await this._api(`/wells/${this.currentWell.id}/tops`);
+            this._renderTopsManagement();
+            if (this.renderer) this.renderer.formationTops = this.formationTops;
+            GeoToast.success('Top deleted');
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
+    // ─── Sprint 24: Well Location Map ─────────────────────────────
+    async renderWellMap() {
+        if (!this.projects?.[0]) return;
+        const canvas = document.getElementById('mapCanvas');
+        const results = document.getElementById('mapResults');
+        if (!canvas || !results) return;
+
+        const container = canvas.parentElement;
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const rect = container?.getBoundingClientRect();
+        const width = Math.max(320, Math.floor(rect?.width || 800));
+        const height = Math.max(280, Math.floor(rect?.height || 420));
+        canvas.width = Math.floor(width * dpr);
+        canvas.height = Math.floor(height * dpr);
+        canvas.style.width = width + 'px';
+        canvas.style.height = height + 'px';
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        const drawPlaceholder = (msg) => {
+            ctx.fillStyle = '#0d1117';
+            ctx.fillRect(0, 0, width, height);
+            ctx.strokeStyle = '#30363d';
+            ctx.strokeRect(0.5, 0.5, width - 1, height - 1);
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '14px DM Sans';
+            ctx.textAlign = 'center';
+            ctx.fillText(msg, width / 2, height / 2);
+        };
+
+        try {
+            const pid = this.projects[0].id;
+            const rows = await this._api(`/projects/${pid}/well-locations`);
+            const wells = (rows || []).filter(w => Number.isFinite(Number(w.latitude)) && Number.isFinite(Number(w.longitude)));
+
+            if (!wells.length) {
+                drawPlaceholder('No well coordinates available. Edit wells to add lat/lon.');
+                results.innerHTML = '<p style="color:#8b949e">No well coordinates available. Edit wells to add lat/lon.</p>';
+                canvas.onclick = null;
+                return;
+            }
+
+            const lats = wells.map(w => Number(w.latitude));
+            const lons = wells.map(w => Number(w.longitude));
+            const minLat = Math.min(...lats);
+            const maxLat = Math.max(...lats);
+            const minLon = Math.min(...lons);
+            const maxLon = Math.max(...lons);
+            const latRange = Math.max(1e-9, maxLat - minLat);
+            const lonRange = Math.max(1e-9, maxLon - minLon);
+            const pad = 32;
+            const plotW = width - pad * 2;
+            const plotH = height - pad * 2;
+
+            const points = wells.map(w => {
+                const lon = Number(w.longitude);
+                const lat = Number(w.latitude);
+                const x = pad + ((lon - minLon) / lonRange) * plotW;
+                const y = height - pad - ((lat - minLat) / latRange) * plotH;
+                return { ...w, x, y };
+            });
+
+            ctx.fillStyle = '#0d1117';
+            ctx.fillRect(0, 0, width, height);
+            ctx.strokeStyle = '#30363d';
+            ctx.strokeRect(0.5, 0.5, width - 1, height - 1);
+
+            ctx.strokeStyle = '#21262d';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 4; i++) {
+                const gx = pad + (plotW * i / 3);
+                const gy = pad + (plotH * i / 3);
+                ctx.beginPath(); ctx.moveTo(gx, pad); ctx.lineTo(gx, height - pad); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(pad, gy); ctx.lineTo(width - pad, gy); ctx.stroke();
+            }
+
+            for (const p of points) {
+                const isCurrent = this.currentWell?.id === p.id;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, isCurrent ? 5 : 3.5, 0, Math.PI * 2);
+                ctx.fillStyle = isCurrent ? '#3fb950' : '#ffffff';
+                ctx.fill();
+
+                ctx.font = '11px DM Sans';
+                ctx.textAlign = 'left';
+                ctx.fillStyle = isCurrent ? '#3fb950' : '#c9d1d9';
+                ctx.fillText(p.name || `Well ${p.id}`, p.x + 7, p.y - 6);
+            }
+
+            results.innerHTML = `
+                <div style="display:flex;gap:12px;flex-wrap:wrap;color:#8b949e;font-size:12px">
+                    <span><strong style="color:#c9d1d9">Wells:</strong> ${points.length}</span>
+                    <span><strong style="color:#c9d1d9">Latitude:</strong> ${minLat.toFixed(5)} to ${maxLat.toFixed(5)}</span>
+                    <span><strong style="color:#c9d1d9">Longitude:</strong> ${minLon.toFixed(5)} to ${maxLon.toFixed(5)}</span>
+                </div>`;
+
+            canvas.onclick = async (e) => {
+                const r = canvas.getBoundingClientRect();
+                const mx = e.clientX - r.left;
+                const my = e.clientY - r.top;
+                let nearest = null;
+                let best = 12;
+                for (const p of points) {
+                    const d = Math.hypot(mx - p.x, my - p.y);
+                    if (d < best) {
+                        nearest = p;
+                        best = d;
+                    }
+                }
+                if (nearest?.id && nearest.id !== this.currentWell?.id) {
+                    await this.selectWell(nearest.id);
+                    this.renderWellMap();
+                }
+            };
+        } catch (e) {
+            GeoToast.error(e.message);
+            drawPlaceholder('Failed to load well locations.');
+            results.innerHTML = '<p style="color:#f0883e">Failed to load well locations.</p>';
+            canvas.onclick = null;
+        }
+    }
+
+    // ─── Sprint 24: Project Summary Dashboard ─────────────────────
+    async loadDashboard() {
+        if (!this.projects?.[0]) return;
+        try {
+            const data = await this._api(`/projects/${this.projects[0].id}/summary`);
+            let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">';
+            const cards = [
+                ['Wells', data.total_wells, '#58a6ff'],
+                ['Log Runs', data.total_log_runs, '#3fb950'],
+                ['Formation Tops', data.total_tops, '#f0883e'],
+                ['Zones', data.total_zones, '#d29922'],
+                ['Unique Formations', (data.unique_formations || []).length, '#bc8cff']
+            ];
+            for (const [label, value, color] of cards) {
+                html += `<div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:16px;text-align:center">
+                    <div style="font-size:28px;font-weight:700;color:${color}">${value ?? 0}</div>
+                    <div style="font-size:12px;color:#8b949e;margin-top:4px">${label}</div>
+                </div>`;
+            }
+            html += '</div>';
+            if (data.wells?.length) {
+                html += '<h3 style="color:#c9d1d9;margin:12px 0 8px">Well Details</h3>';
+                html += '<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">';
+                html += '<thead><tr style="background:#161b22">';
+                for (const h of ['Well', 'UWI', 'Runs', 'Tops', 'Zones', 'Gross (ft)', 'TD (ft)']) {
+                    html += `<th style="padding:6px;border:1px solid #30363d;color:#58a6ff;text-align:left">${h}</th>`;
+                }
+                html += '</tr></thead><tbody>';
+                for (const w of data.wells) {
+                    html += '<tr>';
+                    html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9">${w.name || '-'}</td>`;
+                    html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#8b949e">${w.uwi || '-'}</td>`;
+                    html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9;text-align:center">${w.log_runs ?? 0}</td>`;
+                    html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9;text-align:center">${w.tops ?? 0}</td>`;
+                    html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9;text-align:center">${w.zones ?? 0}</td>`;
+                    html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9;text-align:right">${Number(w.gross_ft || 0).toFixed(1)}</td>`;
+                    html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9;text-align:right">${w.total_depth !== null && w.total_depth !== undefined ? Number(w.total_depth).toFixed(1) : '-'}</td>`;
+                    html += '</tr>';
+                }
+                html += '</tbody></table></div>';
+            }
+            if (data.unique_formations?.length) {
+                html += '<h3 style="color:#c9d1d9;margin:16px 0 8px">Formations</h3>';
+                html += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+                for (const f of data.unique_formations) {
+                    html += `<span style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:4px 10px;font-size:12px;color:#c9d1d9">${f}</span>`;
+                }
+                html += '</div>';
+            }
+            document.getElementById('dashboardContent').innerHTML = html;
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
+    // ─── Sprint 23: Formation Matrix ─────────────────────────────
+    async loadFormationMatrix() {
+        if (!this.projects?.[0]) return;
+        const pid = this.projects[0].id;
+        try {
+            const data = await this._api(`/projects/${pid}/formation-matrix`);
+            let html = '<div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px">';
+            html += '<thead><tr style="background:#161b22">';
+            html += '<th style="padding:6px 12px;border:1px solid #30363d;color:#58a6ff;text-align:left">Formation</th>';
+            for (const w of data.wells) {
+                html += `<th style="padding:6px 12px;border:1px solid #30363d;color:#58a6ff;text-align:center">${w.name}</th>`;
+            }
+            html += '</tr></thead><tbody>';
+            for (const form of data.formations) {
+                html += '<tr>';
+                html += `<td style="padding:4px 12px;border:1px solid #21262d;color:#c9d1d9;font-weight:500">${form}</td>`;
+                for (const w of data.wells) {
+                    const depth = w.tops[form];
+                    if (depth !== undefined && depth !== null) {
+                        html += `<td style="padding:4px 12px;border:1px solid #21262d;color:#3fb950;text-align:center">${depth.toFixed(1)}</td>`;
+                    } else {
+                        html += '<td style="padding:4px 12px;border:1px solid #21262d;color:#484f58;text-align:center">-</td>';
+                    }
+                }
+                html += '</tr>';
+            }
+            html += '</tbody></table></div>';
+            if (!data.formations.length) html = '<p style="color:#8b949e">No formation tops found in this project.</p>';
+            document.getElementById('formationMatrixContent').innerHTML = html;
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
+    // ─── Sprint 23: Batch Petrophysics ────────────────────────────
+    async runBatchPetro() {
+        if (!this.projects?.[0]) return;
+        const pid = this.projects[0].id;
+        const params = {
+            saturation_model: document.getElementById('batchSatModel').value,
+            a: parseFloat(document.getElementById('batchA').value),
+            m: parseFloat(document.getElementById('batchM').value),
+            n: parseFloat(document.getElementById('batchN').value),
+            rw: parseFloat(document.getElementById('batchRw').value),
+            vsh_cutoff: parseFloat(document.getElementById('batchVshCut').value),
+            phie_cutoff: parseFloat(document.getElementById('batchPhieCut').value),
+            sw_cutoff: parseFloat(document.getElementById('batchSwCut').value),
+            template: document.getElementById('batchTemplate').value
+        };
+        try {
+            const result = await this._api(`/projects/${pid}/batch-petro`, {
+                method: 'POST', body: JSON.stringify(params)
+            });
+            document.getElementById('batchResults').innerHTML = `
+                <div style="background:#161b22;border:1px solid #3fb95033;border-radius:8px;padding:12px;margin-top:8px">
+                    <strong style="color:#3fb950">✓ Applied to ${result.updated} wells</strong><br>
+                    <span style="color:#c9d1d9">${result.wells.join(', ')}</span>
+                </div>`;
+            GeoToast.success(`Parameters applied to ${result.updated} wells`);
+        } catch (e) { GeoToast.error(e.message); }
+    }
+
+}
 // Initialize
 const app = new GeoLogApp();
 
@@ -1675,7 +4401,7 @@ document.addEventListener('keydown', (e) => {
     // Don't trigger if typing in input/textarea
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
 
-    const views = ['viewer', 'crossplot', 'pickett', 'mnplot', 'petrophysics', 'qc', 'correlation', 'statistics'];
+    const views = ['viewer', 'crossplot', 'pickett', 'mnplot', 'petrophysics', 'qc', 'correlation', 'statistics', 'sensitivity', 'comparison', 'striplog', 'facies', 'tools', 'probability', 'moveable', 'dipplot', 'buckles', 'hingle', 'calculator', 'datatable', 'topsmgmt', 'formation', 'batch', 'map', 'dashboard'];
 
     switch (e.key) {
         case '1': case '2': case '3': case '4':
@@ -1720,8 +4446,18 @@ document.addEventListener('keydown', (e) => {
             }
             break;
         case 'Escape':
-            if (GeoModal._instance && GeoModal._instance._overlay) {
-                GeoModal._instance.close(null);
+            if (GeoModal._resolve) { GeoModal.close(); }
+            break;
+        case 'z':
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                app.undoZone();
+            }
+            break;
+        case 'y':
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                app.redoZone();
             }
             break;
         case 'r':
@@ -1736,7 +4472,7 @@ document.addEventListener('keydown', (e) => {
 // Show keyboard shortcut help on first visit
 if (!localStorage.getItem('geolog_shortcuts_seen')) {
     setTimeout(() => {
-        GeoToast.info('Keyboard: 1-8 panels, ↑↓ scroll, +/- zoom, R refresh, Esc close', 6000);
+        GeoToast.info('Keyboard: 1-8 panels, ↑↓ scroll, +/- zoom, Ctrl+Z/Y zone undo/redo, R refresh, Esc close', 6000);
         localStorage.setItem('geolog_shortcuts_seen', '1');
     }, 2000);
 }

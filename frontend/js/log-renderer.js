@@ -293,8 +293,16 @@ class LogRenderer {
         // Draw zones (background)
         this._drawZones(ctx, startX, totalTrackWidth, plotTop, plotBottom);
 
+        // Draw lithology track (if enabled)
+        if (this._showLithology && this.curveData['VSH']) {
+            this._drawLithTrack(ctx, startX - 30, 28, plotTop, plotBottom);
+        }
+
         // Draw depth ruler
         this._drawDepthRuler(ctx, this.margin.left, this.depthTrackWidth, plotTop, plotBottom);
+
+        // Draw formation column in depth track area
+        this._drawFormationColumn(ctx, this.margin.left, this.depthTrackWidth, plotTop, plotBottom);
 
         // Draw tracks
         let trackX = startX;
@@ -329,6 +337,71 @@ class LogRenderer {
 
         // Draw formation top labels
         this._drawFormationTopLabels(ctx, startX, totalTrackWidth, plotTop, plotBottom);
+    }
+
+    _drawFormationColumn(ctx, x, width, plotTop, plotBottom) {
+        const plotHeight = plotBottom - plotTop;
+
+        // Draw empty track if no tops
+        if (!this.formationTops || !this.formationTops.length) {
+            ctx.save();
+            ctx.fillStyle = 'rgba(13,17,23,0.25)';
+            ctx.fillRect(x, plotTop, width, plotHeight);
+            ctx.strokeStyle = this.colors.trackBorder;
+            ctx.strokeRect(x, plotTop, width, plotHeight);
+            ctx.restore();
+            return;
+        }
+
+        const sorted = [...this.formationTops]
+            .filter(t => Number.isFinite(Number(t.depth)))
+            .sort((a, b) => Number(a.depth) - Number(b.depth));
+        if (!sorted.length) return;
+
+        const alphaColor = (hex, alpha = '4d') => {
+            if (!hex || typeof hex !== 'string') return null;
+            const c = hex.trim();
+            if (c.startsWith('#') && c.length === 7) return c + alpha;
+            if (c.startsWith('#') && c.length === 4) {
+                const r = c[1], g = c[2], b = c[3];
+                return `#${r}${r}${g}${g}${b}${b}${alpha}`;
+            }
+            return null;
+        };
+
+        const fallback = ['#ffb74d4d', '#81c7844d', '#90caf94d', '#ce93d84d', '#ff8a804d', '#ffd54f4d', '#4dd0e54d', '#ba68c84d'];
+
+        ctx.save();
+        for (let i = 0; i < sorted.length; i++) {
+            const top = sorted[i];
+            const topY = this._depthToY(Number(top.depth));
+            const nextDepth = i + 1 < sorted.length ? Number(sorted[i + 1].depth) : this.viewStop;
+            const bottomY = this._depthToY(nextDepth);
+            const y1 = Math.max(plotTop, Math.min(topY, bottomY));
+            const y2 = Math.min(plotBottom, Math.max(topY, bottomY));
+            if (y2 <= y1) continue;
+
+            ctx.fillStyle = alphaColor(top.color, '4d') || fallback[i % fallback.length];
+            ctx.fillRect(x, y1, width, y2 - y1);
+
+            const name = top.formation_name || top.name || '';
+            if (name && (y2 - y1) > 26) {
+                ctx.save();
+                ctx.translate(x + width / 2, (y1 + y2) / 2);
+                ctx.rotate(-Math.PI / 2);
+                ctx.fillStyle = top.color || '#c9d1d9';
+                ctx.font = 'bold 9px DM Sans';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(name, 0, 0);
+                ctx.restore();
+            }
+        }
+
+        ctx.strokeStyle = this.colors.trackBorder;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, plotTop, width, plotHeight);
+        ctx.restore();
     }
 
     _drawDepthRuler(ctx, x, width, plotTop, plotBottom) {
@@ -530,6 +603,25 @@ class LogRenderer {
     }
 
     _drawFormationTops(ctx, startX, totalWidth, plotTop, plotBottom) {
+        // Draw colored zone fills between consecutive tops
+        const sorted = [...this.formationTops].sort((a, b) => a.depth - b.depth);
+        const zoneColors = [
+            'rgba(255,183,77,0.10)', 'rgba(129,199,132,0.10)', 'rgba(144,202,249,0.10)',
+            'rgba(206,147,216,0.10)', 'rgba(255,138,128,0.10)', 'rgba(255,213,79,0.10)',
+            'rgba(77,208,225,0.10)', 'rgba(186,104,200,0.10)',
+        ];
+        for (let i = 0; i < sorted.length; i++) {
+            const topY = this._depthToY(sorted[i].depth);
+            const bottomY = (i + 1 < sorted.length) ? this._depthToY(sorted[i + 1].depth) : plotBottom;
+            const y1 = Math.max(Math.min(topY, plotBottom), plotTop);
+            const y2 = Math.max(Math.min(bottomY, plotBottom), plotTop);
+            if (y2 > y1) {
+                ctx.fillStyle = zoneColors[i % zoneColors.length];
+                ctx.fillRect(startX, y1, totalWidth, y2 - y1);
+            }
+        }
+
+        // Draw top lines
         for (const top of this.formationTops) {
             const y = this._depthToY(top.depth);
             if (y < plotTop || y > plotBottom) continue;
@@ -604,6 +696,38 @@ class LogRenderer {
     }
 
     // ─── Export ──────────────────────────────────────────────
+    _drawLithTrack(ctx, x, width, plotTop, plotBottom) {
+        if (!this.curveData["VSH"] || !this.depthData.length) return;
+        const vsh = this.curveData["VSH"];
+        const facies = this.curveData["FACIES"];
+        ctx.fillStyle = "#0d1117";
+        ctx.fillRect(x, plotTop, width, plotBottom - plotTop);
+        ctx.strokeStyle = "#30363d";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, plotTop, width, plotBottom - plotTop);
+        const faciesColors = ["#58a6ff", "#3fb950", "#f0883e", "#f85149", "#a371f7", "#f2cc60", "#79c0ff", "#d2a8ff"];
+        for (let i = 0; i < this.depthData.length; i++) {
+            const depth = this.depthData[i];
+            if (depth < this.viewStart || depth > this.viewStop) continue;
+            const y = this._depthToY(depth);
+            const step = Math.abs(this._depthToY(depth + (this.depthData[1] - this.depthData[0])) - y);
+            const bh = Math.max(step, 1);
+            let color;
+            if (facies && facies[i] >= 0) {
+                color = faciesColors[facies[i] % faciesColors.length] + "cc";
+            } else if (vsh[i] !== null && vsh[i] !== undefined && !isNaN(vsh[i])) {
+                if (vsh[i] < 0.2) color = "#f2cc60cc";
+                else if (vsh[i] < 0.5) color = "#f0883ecc";
+                else color = "#8b949ecc";
+            } else { continue; }
+            ctx.fillStyle = color;
+            ctx.fillRect(x + 1, y - bh / 2, width - 2, bh);
+        }
+        ctx.fillStyle = "#8b949e";
+        ctx.font = "9px DM Sans";
+        ctx.textAlign = "center";
+        ctx.fillText("LITH", x + width / 2, plotTop - 4);
+    }
     exportPNG() {
         // Create high-res export canvas
         const exportScale = 2;

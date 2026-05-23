@@ -42,6 +42,7 @@ class Well(Base):
     project = relationship("Project", back_populates="wells")
     log_runs = relationship("LogRun", back_populates="well", cascade="all, delete-orphan")
     formation_tops = relationship("FormationTop", back_populates="well", cascade="all, delete-orphan")
+    zones = relationship("Zone", back_populates="well", cascade="all, delete-orphan")
 
 
 class LogRun(Base):
@@ -110,3 +111,108 @@ class Annotation(Base):
     annotation_type = Column(String(50), default="note")  # note, flag, zone
     color = Column(String(20), default="#f39c12")
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class Zone(Base):
+    __tablename__ = "zones"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False)
+    name = Column(String(200), nullable=False)
+    top_depth = Column(Float, nullable=False)
+    bottom_depth = Column(Float, nullable=False)
+    color = Column(String(20), default="#1f6feb")
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    well = relationship("Well", back_populates="zones")
+
+
+class CorrelationMarker(Base):
+    __tablename__ = "correlation_markers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_a_id = Column(Integer, ForeignKey("wells.id"), nullable=False)
+    well_b_id = Column(Integer, ForeignKey("wells.id"), nullable=False)
+    a_depth = Column(Float, nullable=False)
+    b_depth = Column(Float, nullable=False)
+    label = Column(String(100), default="")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class CorrelationProfile(Base):
+    __tablename__ = "correlation_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_a_id = Column(Integer, ForeignKey("wells.id"), nullable=False)
+    well_b_id = Column(Integer, ForeignKey("wells.id"), nullable=False)
+    curve = Column(String(50), default="GR")
+    depth_shift = Column(Float, default=0.0)
+    stretch = Column(Float, default=1.0)
+    snap_to_tops = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class PetroParams(Base):
+    """Saved petrophysics parameters + template preset per well."""
+    __tablename__ = "petro_params"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, unique=True)
+    saturation_model = Column(String(50), default="archie")  # archie / simandoux / indonesian / dual_water
+    a = Column(Float, default=1.0)
+    m = Column(Float, default=2.0)
+    n = Column(Float, default=2.0)
+    rw = Column(Float, default=0.1)
+    vsh_cutoff = Column(Float, default=0.35)
+    phie_cutoff = Column(Float, default=0.10)
+    sw_cutoff = Column(Float, default=0.60)
+    template = Column(String(50), default="custom")  # sandstone / carbonate / shaly_sand / custom
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    well = relationship("Well")
+
+
+class LogRunDepthShift(Base):
+    __tablename__ = "log_run_depth_shifts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    log_run_id = Column(Integer, ForeignKey("log_runs.id"), nullable=False, unique=True)
+    shift = Column(Float, default=0.0)
+    stretch = Column(Float, default=1.0)
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    log_run = relationship("LogRun")
+
+
+class CurveAlias(Base):
+    __tablename__ = "curve_aliases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False)
+    original_mnemonic = Column(String(50), nullable=False)
+    alias_mnemonic = Column(String(50), nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    well = relationship("Well")
+
+
+class DeviationSurvey(Base):
+    __tablename__ = "deviation_surveys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False)
+    md = Column(Float, nullable=False)
+    inc = Column(Float, nullable=False)
+    azi = Column(Float, nullable=False)
+    tvd = Column(Float, nullable=True)
+    northing = Column(Float, nullable=True)
+    easting = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    well = relationship("Well")

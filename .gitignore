@@ -40,3 +40,7 @@ Thumbs.db
 .antigravity-server/
 .hermes/
 *.lfs
+test-data/
+data/public/
+*.db
+__pycache__/
