@@ -138,13 +138,14 @@ class LogRenderer {
     setView(start, stop) {
         this.viewStart = start;
         this.viewStop = stop;
-        this.render();
+        this.requestRender();
+        if (typeof this.onViewChanged === 'function') this.onViewChanged(this.viewStart, this.viewStop);
     }
 
     setScale(scale) {
         this.scale = scale;
         this.pixelsPerFoot = (this.height - this.margin.top - this.margin.bottom) / scale;
-        this.render();
+        this.requestRender();
     }
 
     // ─── Mouse Events ───────────────────────────────────────
@@ -153,7 +154,7 @@ class LogRenderer {
         this.mouseX = e.clientX - rect.left;
         this.mouseY = e.clientY - rect.top;
         this.hoverDepth = this._yToDepth(this.mouseY);
-        this.render();
+        this.requestRender();
         this._showTooltip(e);
     }
 
@@ -161,7 +162,7 @@ class LogRenderer {
         this.mouseY = -1;
         this.mouseX = -1;
         this.hoverDepth = -1;
-        this.render();
+        this.requestRender();
         this._hideTooltip();
     }
 
@@ -174,8 +175,9 @@ class LogRenderer {
         if (newStart >= this.depthData[0] && newStop <= this.depthData[this.depthData.length - 1]) {
             this.viewStart = newStart;
             this.viewStop = newStop;
-            this.render();
+            this.requestRender();
             this._updateDepthInputs();
+            if (typeof this.onViewChanged === 'function') this.onViewChanged(this.viewStart, this.viewStop);
         }
     }
 
@@ -198,8 +200,9 @@ class LogRenderer {
             if (this.viewStart < dataStart) { this.viewStart = dataStart; this.viewStop = dataStart + range; }
             if (this.viewStop > dataEnd) { this.viewStop = dataEnd; this.viewStart = dataEnd - range; }
             this._dragStart = null;
-            this.render();
+            this.requestRender();
             this._updateDepthInputs();
+            if (typeof this.onViewChanged === 'function') this.onViewChanged(this.viewStart, this.viewStop);
         }
     }
 
@@ -279,6 +282,21 @@ class LogRenderer {
     _depthUnit() {
         const wells = document.getElementById('depthUnit');
         return wells?.textContent || 'FT';
+    }
+
+    requestRender() {
+        if (this._rafPending) return;
+        this._rafPending = true;
+        requestAnimationFrame(() => {
+            this._rafPending = false;
+            this.render();
+        });
+    }
+
+    _computeRenderStride(visibleCount) {
+        if (!Number.isFinite(visibleCount) || visibleCount <= 0) return 1;
+        const targetSamples = Math.max(300, Math.floor((this.height - this.margin.top - this.margin.bottom) * 1.2));
+        return Math.max(1, Math.ceil(visibleCount / targetSamples));
     }
 
     // ─── Rendering ──────────────────────────────────────────
@@ -626,13 +644,15 @@ class LogRenderer {
         if (!data || data.length === 0) return;
 
         const plotHeight = plotBottom - plotTop;
+        const visible = this.depthData.filter(d => d >= this.viewStart && d <= this.viewStop).length;
+        const stride = this._computeRenderStride(visible);
 
         ctx.strokeStyle = color;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
 
         let started = false;
-        for (let i = 0; i < this.depthData.length; i++) {
+        for (let i = 0; i < this.depthData.length; i += stride) {
             const depth = this.depthData[i];
             if (depth < this.viewStart || depth > this.viewStop) continue;
 
@@ -643,30 +663,24 @@ class LogRenderer {
             }
 
             const y = plotTop + ((depth - this.viewStart) / (this.viewStop - this.viewStart)) * plotHeight;
+            if (y < plotTop || y > plotBottom) continue;
             let x;
 
             if (useLog) {
-                // Logarithmic scale
                 const logMin = Math.log10(Math.max(scale[0], 0.001));
                 const logMax = Math.log10(Math.max(scale[1], 0.001));
                 const logVal = Math.log10(Math.max(val, 0.001));
                 const normalized = (logVal - logMin) / (logMax - logMin);
-                // Right-to-left for resistivity (standard)
                 x = trackX + width - normalized * width;
             } else {
-                // Linear scale
                 let normalized;
-                if (scale[0] > scale[1]) {
-                    // Reversed scale (e.g., NPHI 0.45 to -0.15, DT 140 to 40)
-                    normalized = (scale[0] - val) / (scale[0] - scale[1]);
-                } else {
-                    normalized = (val - scale[0]) / (scale[1] - scale[0]);
-                }
+                if (scale[0] > scale[1]) normalized = (scale[0] - val) / (scale[0] - scale[1]);
+                else normalized = (val - scale[0]) / (scale[1] - scale[0]);
                 x = trackX + normalized * width;
             }
 
-            // Clamp
             x = Math.max(trackX, Math.min(trackX + width, x));
+            if (x < trackX || x > trackX + width) continue;
 
             if (!started) {
                 ctx.moveTo(x, y);

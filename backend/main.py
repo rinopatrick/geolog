@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request, UploadFile, File, Depends, HTTPException, 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import text
@@ -23,6 +24,8 @@ from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from threading import Lock
 import uuid
+import hashlib
+from email.utils import format_datetime, parsedate_to_datetime
 
 try:
     from database import engine, Base, get_db, SessionLocal
@@ -125,7 +128,13 @@ def _extract_las_coordinates(las):
 
     return lat, lon
 
-app = FastAPI(title="GeoLog", version="2.0.0", description="Oil & Gas Well Log Viewer")
+app = FastAPI(
+    title="GeoLog",
+    description="Oil & Gas Well Log Viewer",
+    version="2.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
 
 JOB_EXECUTOR = ThreadPoolExecutor(max_workers=2)
 JOBS = {}
@@ -198,6 +207,82 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+def _httpdate(dt: datetime.datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    else:
+        dt = dt.astimezone(datetime.timezone.utc)
+    return format_datetime(dt, usegmt=True)
+
+
+def _parse_if_modified_since(value: str):
+    if not value:
+        return None
+    try:
+        dt = parsedate_to_datetime(value)
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.astimezone(datetime.timezone.utc)
+    except Exception:
+        return None
+
+
+def _build_curve_cache_headers(lr_id: int, mnemonics, start, stop, step, max_points=None):
+    key = f"{lr_id}|{','.join(sorted([str(m) for m in (mnemonics or [])]))}|{start}|{stop}|{step}|{max_points}"
+    etag = f'W/"{hashlib.sha1(key.encode("utf-8")).hexdigest()}"'
+    return {
+        "ETag": etag,
+        "Cache-Control": "private, max-age=60",
+    }
+
+
+def _lttb_indices(x: np.ndarray, y: np.ndarray, threshold: int):
+    n = len(y)
+    if threshold >= n or threshold <= 2 or n <= 2:
+        return np.arange(n, dtype=np.int64)
+
+    sampled = np.zeros(threshold, dtype=np.int64)
+    sampled[0] = 0
+    sampled[-1] = n - 1
+    every = (n - 2) / float(threshold - 2)
+    a = 0
+
+    for i in range(threshold - 2):
+        avg_start = int(np.floor((i + 1) * every)) + 1
+        avg_end = int(np.floor((i + 2) * every)) + 1
+        avg_end = min(avg_end, n)
+        if avg_start < avg_end:
+            avg_x = np.nanmean(x[avg_start:avg_end])
+            avg_y = np.nanmean(y[avg_start:avg_end])
+        else:
+            idx = min(avg_start, n - 1)
+            avg_x = x[idx]
+            avg_y = y[idx]
+
+        range_offs = int(np.floor(i * every)) + 1
+        range_to = int(np.floor((i + 1) * every)) + 1
+        range_to = min(range_to, n - 1)
+
+        if range_offs >= range_to:
+            sampled[i + 1] = min(range_offs, n - 2)
+            a = sampled[i + 1]
+            continue
+
+        ax = x[a]
+        ay = y[a]
+        bx = x[range_offs:range_to]
+        by = y[range_offs:range_to]
+        area = np.abs((ax - avg_x) * (by - ay) - (ax - bx) * (avg_y - ay)) * 0.5
+        idx = int(np.nanargmax(area))
+        a = range_offs + idx
+        sampled[i + 1] = a
+
+    return np.unique(np.clip(sampled, 0, n - 1))
 
 
 class RBACWriteGuardMiddleware(BaseHTTPMiddleware):
@@ -709,8 +794,14 @@ def list_curves(lr_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/log-runs/{lr_id}/data")
-def get_curve_data(lr_id: int, req: dict, db: Session = Depends(get_db)):
-    """Get curve data for specified mnemonics."""
+def get_curve_data(
+    lr_id: int,
+    req: dict,
+    if_none_match: str = Header(default=None),
+    if_modified_since: str = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Get curve data for specified mnemonics with optional depth-range pagination."""
     mnemonics = req.get("curve_mnemonics", [])
     start = req.get("start_depth")
     stop = req.get("stop_depth")
@@ -723,6 +814,16 @@ def get_curve_data(lr_id: int, req: dict, db: Session = Depends(get_db)):
     if not lr:
         raise HTTPException(404, "Log run not found")
 
+    headers = _build_curve_cache_headers(lr_id, mnemonics, start, stop, step)
+    last_modified_dt = (lr.uploaded_at or datetime.datetime.utcnow()).replace(tzinfo=datetime.timezone.utc)
+    headers["Last-Modified"] = _httpdate(last_modified_dt)
+
+    if if_none_match and if_none_match.strip() == headers["ETag"]:
+        return JSONResponse(status_code=304, content=None, headers=headers)
+    ims = _parse_if_modified_since(if_modified_since)
+    if ims is not None and last_modified_dt <= ims:
+        return JSONResponse(status_code=304, content=None, headers=headers)
+
     # Get depth curve with fallback candidates, then first curve in run
     depth_curve = db.query(CurveData).filter(
         CurveData.log_run_id == lr_id,
@@ -731,15 +832,15 @@ def get_curve_data(lr_id: int, req: dict, db: Session = Depends(get_db)):
     if not depth_curve:
         depth_curve = db.query(CurveData).filter(CurveData.log_run_id == lr_id).order_by(CurveData.id.asc()).first()
 
-    # Build unified depth mask ONCE
     depth_arr = None
+    mask = None
     if depth_curve and depth_curve.data_binary:
         depth_arr = np.frombuffer(depth_curve.data_binary, dtype=np.float64).copy()
         mask = np.ones(len(depth_arr), dtype=bool)
         if start is not None:
-            mask &= (depth_arr >= start)
+            mask &= (depth_arr >= float(start))
         if stop is not None:
-            mask &= (depth_arr <= stop)
+            mask &= (depth_arr <= float(stop))
 
     curves = db.query(CurveData).filter(
         CurveData.log_run_id == lr_id,
@@ -749,7 +850,7 @@ def get_curve_data(lr_id: int, req: dict, db: Session = Depends(get_db)):
     result = {}
     for c in curves:
         arr = np.frombuffer(c.data_binary, dtype=np.float64).copy()
-        if depth_arr is not None and len(arr) == len(depth_arr):
+        if mask is not None and len(arr) == len(depth_arr):
             arr = arr[mask]
         if step > 1:
             arr = arr[::step]
@@ -758,14 +859,13 @@ def get_curve_data(lr_id: int, req: dict, db: Session = Depends(get_db)):
             for v in arr
         ]
 
-    # Also return depth (same mask + decimation)
     if depth_arr is not None:
         d = depth_arr[mask] if mask is not None else depth_arr
         if step > 1:
             d = d[::step]
         result["DEPTH"] = [round(float(v), 2) for v in d]
 
-    return result
+    return JSONResponse(content=result, headers=headers)
 
 
 # ─── Formation Tops ───────────────────────────────────────────
@@ -3728,8 +3828,16 @@ def crossplot_matrix(pid: int, curve_x: str = "GR", curve_y: str = "RT",
 
 # ─── Performance: Decimated Curve Data ────────────────────────
 @app.get("/api/log-runs/{lr_id}/data-decimated")
-def get_decimated_data(lr_id: int, max_points: int = 3000, db: Session = Depends(get_db)):
-    """Return curve data decimated to <= max_points for performance."""
+def get_decimated_data(
+    lr_id: int,
+    max_points: int = 3000,
+    start_depth: float = None,
+    stop_depth: float = None,
+    if_none_match: str = Header(default=None),
+    if_modified_since: str = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Return curve data decimated to <= max_points using LTTB."""
     lr = db.query(LogRun).filter(LogRun.id == lr_id).first()
     if not lr:
         raise HTTPException(404, "Log run not found")
@@ -3737,13 +3845,40 @@ def get_decimated_data(lr_id: int, max_points: int = 3000, db: Session = Depends
     max_points = max(200, min(int(max_points or 3000), 50000))
     curves = db.query(CurveData).filter(CurveData.log_run_id == lr_id).all()
 
+    headers = _build_curve_cache_headers(lr_id, [c.mnemonic for c in curves], start_depth, stop_depth, 1, max_points=max_points)
+    last_modified_dt = (lr.uploaded_at or datetime.datetime.utcnow()).replace(tzinfo=datetime.timezone.utc)
+    headers["Last-Modified"] = _httpdate(last_modified_dt)
+
+    if if_none_match and if_none_match.strip() == headers["ETag"]:
+        return JSONResponse(status_code=304, content=None, headers=headers)
+    ims = _parse_if_modified_since(if_modified_since)
+    if ims is not None and last_modified_dt <= ims:
+        return JSONResponse(status_code=304, content=None, headers=headers)
+
+    depth_curve = db.query(CurveData).filter(
+        CurveData.log_run_id == lr_id,
+        CurveData.mnemonic.in_(["DEPT", "DEPTH", "MD", "TVD"])
+    ).first()
+    if not depth_curve:
+        depth_curve = db.query(CurveData).filter(CurveData.log_run_id == lr_id).order_by(CurveData.id.asc()).first()
+    depth_arr = np.frombuffer(depth_curve.data_binary, dtype=np.float64).copy() if depth_curve and depth_curve.data_binary else None
+
+    mask = None
+    if depth_arr is not None and (start_depth is not None or stop_depth is not None):
+        mask = np.ones(len(depth_arr), dtype=bool)
+        if start_depth is not None:
+            mask &= (depth_arr >= float(start_depth))
+        if stop_depth is not None:
+            mask &= (depth_arr <= float(stop_depth))
+
     result = {}
     original_points = 0
     output_points = 0
     decimated = False
 
     for cd in curves:
-        arr = np.frombuffer(cd.data_binary, dtype=np.float64)
+        full_arr = np.frombuffer(cd.data_binary, dtype=np.float64).copy()
+        arr = full_arr[mask] if (mask is not None and len(full_arr) == len(depth_arr)) else full_arr
         n = int(len(arr))
         if n > original_points:
             original_points = n
@@ -3751,21 +3886,22 @@ def get_decimated_data(lr_id: int, max_points: int = 3000, db: Session = Depends
         if n <= max_points:
             sampled = arr.tolist()
         else:
-            step = int(np.ceil(n / max_points))
-            sampled = [float(arr[i]) for i in range(0, n, step)]
+            x_axis = (depth_arr[mask] if mask is not None else depth_arr) if (depth_arr is not None and len(full_arr) == len(depth_arr)) else np.arange(n, dtype=np.float64)
+            indices = _lttb_indices(np.asarray(x_axis, dtype=np.float64), np.asarray(arr, dtype=np.float64), max_points)
+            sampled = [float(arr[i]) for i in indices]
             decimated = True
 
         if len(sampled) > output_points:
             output_points = len(sampled)
         result[cd.mnemonic] = sampled
 
-    return {
+    return JSONResponse(content={
         "curves": result,
         "decimated": decimated,
         "original_points": original_points,
         "output_points": output_points,
         "max_points": max_points,
-    }
+    }, headers=headers)
 
 
 # ─── Sprint 27: Dual-Water Saturation Model ─────────────────

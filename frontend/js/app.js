@@ -99,6 +99,12 @@ class GeoLogApp {
         this.jobIds = JSON.parse(localStorage.getItem('geolog_job_ids') || '[]');
         this.dstData = [];
         this.rftData = [];
+        this.apiTimeoutMs = 30000;
+        this._apiPendingRequests = new Map();
+        this.curveRangeCache = new Map();
+        this._curveLoadDebounceTimer = null;
+        this._viewportPaddingFactor = 0.5;
+        this._suppressViewportLoad = false;
 
         this.curveEditState = {
             enabled: false,
@@ -240,6 +246,7 @@ class GeoLogApp {
 
     async init() {
         this.renderer = new LogRenderer('logCanvas');
+        this.renderer.onViewChanged = (start, stop) => this._onViewportChanged(start, stop);
         this._bindUI();
         await this.loadCurveConfig();
         await this.loadProjects();
@@ -652,25 +659,73 @@ class GeoLogApp {
 
     // ─── API ─────────────────────────────────────────────────
     async _api(path, opts = {}) {
+        const method = (opts.method || 'GET').toUpperCase();
+        const dedupe = opts.dedupe !== false;
+        const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : this.apiTimeoutMs;
+        const key = `${method}:${path}`;
+        const externalSignal = opts.signal;
+        const controller = new AbortController();
+        let timeoutId = null;
+        let externalAbortListener = null;
+
+        if (dedupe && this._apiPendingRequests.has(key)) {
+            this._apiPendingRequests.get(key).abort('dedupe');
+        }
+        this._apiPendingRequests.set(key, controller);
+
+        if (externalSignal) {
+            if (externalSignal.aborted) controller.abort();
+            else {
+                externalAbortListener = () => controller.abort();
+                externalSignal.addEventListener('abort', externalAbortListener, { once: true });
+            }
+        }
+
+        if (timeoutMs > 0) {
+            timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        }
+
         try {
             const resp = await fetch('/api' + path, {
                 headers: { 'Content-Type': 'application/json', 'X-User-Role': this.currentRole || 'viewer', ...opts.headers },
                 ...opts,
+                signal: controller.signal,
             });
             if (!resp.ok) {
                 let detail = `API error: ${resp.status}`;
-                try { const j = await resp.json(); if (j.detail) detail = j.detail; } catch {}
+                try {
+                    const j = await resp.json();
+                    detail = j?.detail || j?.message || j?.error || detail;
+                } catch {}
                 throw new Error(detail);
             }
             if (resp.status === 204) return null;
             return resp.json();
         } catch (e) {
-            if (e.message !== 'Failed to fetch') {
+            if (e.name === 'AbortError') {
+                if (controller.signal?.reason === 'dedupe') {
+                    throw new Error('Request superseded by a newer call');
+                }
+                const msg = timeoutMs > 0 ? `Request timed out after ${Math.round(timeoutMs / 1000)}s` : 'Request was cancelled';
+                GeoToast.error(msg);
+                throw new Error(msg);
+            }
+            if (!navigator.onLine) {
+                GeoToast.error('You appear to be offline. Check your network connection.');
+            } else if (e.message !== 'Failed to fetch') {
                 GeoToast.error(e.message || 'Network error');
             } else {
                 GeoToast.error('Cannot reach server — is it running?');
             }
             throw e;
+        } finally {
+            if (timeoutId) clearTimeout(timeoutId);
+            if (externalSignal && externalAbortListener) {
+                externalSignal.removeEventListener('abort', externalAbortListener);
+            }
+            if (this._apiPendingRequests.get(key) === controller) {
+                this._apiPendingRequests.delete(key);
+            }
         }
     }
 
@@ -745,6 +800,7 @@ class GeoLogApp {
             const chosen = (well.log_runs || []).find(r => r.id === logRunId);
             if (!chosen) return;
             this.currentLogRun = this._normalizeLogRunVersion(chosen);
+            this.curveRangeCache.clear();
             this._populateLogRunSelector(well.log_runs || [], chosen.id);
             // Auto-populate depth inputs with log run bounds
             const topInput = document.getElementById('depthTop');
@@ -799,59 +855,104 @@ class GeoLogApp {
         if (!this.currentLogRun.version) this.currentLogRun.version = versionLabel;
     }
 
-    async _loadCurveData() {
+    _curveRangeKey(start, stop, mode = 'full') {
+        return `${this.currentLogRun?.id || 0}:${mode}:${start.toFixed(2)}:${stop.toFixed(2)}`;
+    }
+
+    _normalizeWindow(start, stop) {
+        const s = Number.isFinite(start) ? start : Number(this.currentLogRun?.start_depth || 0);
+        const e = Number.isFinite(stop) ? stop : Number(this.currentLogRun?.stop_depth || s + 100);
+        const span = Math.max(1, e - s);
+        const pad = span * this._viewportPaddingFactor;
+        const minDepth = Number(this.currentLogRun?.start_depth ?? s);
+        const maxDepth = Number(this.currentLogRun?.stop_depth ?? e);
+        return {
+            start: Math.max(minDepth, s - pad),
+            stop: Math.min(maxDepth, e + pad),
+            viewStart: s,
+            viewStop: e,
+        };
+    }
+
+    async _fetchCurveRange(curves, start, stop, { decimated = false } = {}) {
+        const mode = decimated ? `decimated-${this.maxPoints}` : 'full';
+        const key = this._curveRangeKey(start, stop, mode);
+        if (this.curveRangeCache.has(key)) return this.curveRangeCache.get(key);
+
+        const mnemonics = curves.map(c => c.mnemonic);
+        let data;
+        if (decimated) {
+            const dec = await this._api(`/log-runs/${this.currentLogRun.id}/data-decimated?max_points=${this.maxPoints}&start_depth=${encodeURIComponent(start)}&stop_depth=${encodeURIComponent(stop)}`);
+            data = { ...(dec?.curves || {}) };
+        } else {
+            data = await this._api(`/log-runs/${this.currentLogRun.id}/data`, {
+                method: 'POST',
+                body: JSON.stringify({ curve_mnemonics: mnemonics, start_depth: start, stop_depth: stop }),
+            });
+        }
+        if (data.DEPT && !data.DEPTH) data.DEPTH = data.DEPT;
+        this.curveRangeCache.set(key, data);
+        return data;
+    }
+
+    _applyCurveDataToRenderer(data, curves) {
+        const depth = data.DEPTH || [];
+        const curveData = {};
+        for (const c of curves) {
+            if (data[c.mnemonic]) curveData[c.mnemonic] = data[c.mnemonic];
+        }
+        this.renderer.setData(depth, curveData, this.formationTops, this.curveConfig);
+        const scale = parseInt(document.getElementById('scaleSelect')?.value || '100', 10);
+        this.renderer.scale = scale;
+        this._renderCurvePanel(curves);
+        this._populateCurveSelectors(curves);
+        this._populateEditCurveSelector(curves);
+    }
+
+    _onViewportChanged(start, stop) {
+        if (!this.currentLogRun || this._suppressViewportLoad) return;
+        clearTimeout(this._curveLoadDebounceTimer);
+        this._curveLoadDebounceTimer = setTimeout(() => this._loadCurveData({ viewportStart: start, viewportStop: stop, preserveInputs: true }), 300);
+    }
+
+    async _loadCurveData({ viewportStart = null, viewportStop = null, preserveInputs = false } = {}) {
         if (!this.currentLogRun) return;
 
         try {
             const curves = await this._api(`/log-runs/${this.currentLogRun.id}/curves`);
-            const mnemonics = curves.map(c => c.mnemonic);
-
             const topInput = document.getElementById('depthTop');
             const bottomInput = document.getElementById('depthBottom');
-            const start = topInput ? parseFloat(topInput.value) : this.currentLogRun.start_depth;
-            const stop = bottomInput ? parseFloat(bottomInput.value) : this.currentLogRun.stop_depth;
+            const inputStart = topInput ? parseFloat(topInput.value) : Number(this.currentLogRun.start_depth);
+            const inputStop = bottomInput ? parseFloat(bottomInput.value) : Number(this.currentLogRun.stop_depth);
+            const visibleStart = Number.isFinite(viewportStart) ? viewportStart : inputStart;
+            const visibleStop = Number.isFinite(viewportStop) ? viewportStop : inputStop;
+            const { start, stop, viewStart, viewStop } = this._normalizeWindow(visibleStart, visibleStop);
 
-            let data;
             if (this.performanceMode) {
-                const dec = await this._api(`/log-runs/${this.currentLogRun.id}/data-decimated?max_points=${this.maxPoints}`);
-                data = { ...(dec?.curves || {}) };
-                if (data.DEPT && !data.DEPTH) data.DEPTH = data.DEPT;
-                const points = data.DEPTH?.length || data.DEPT?.length || 0;
+                const quick = await this._fetchCurveRange(curves, start, stop, { decimated: true });
+                this._applyCurveDataToRenderer(quick, curves);
+                const points = quick.DEPTH?.length || quick.DEPT?.length || 0;
                 GeoToast.info(`Performance mode ON: ${points} pts`);
+                this._fetchCurveRange(curves, start, stop, { decimated: false })
+                    .then(full => {
+                        this._applyCurveDataToRenderer(full, curves);
+                        this._suppressViewportLoad = true;
+                        this.renderer.setView(viewStart, viewStop);
+                        this._suppressViewportLoad = false;
+                    })
+                    .catch((e) => console.warn('Background full-resolution load failed:', e?.message || e));
             } else {
-                data = await this._api(`/log-runs/${this.currentLogRun.id}/data`, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        curve_mnemonics: mnemonics,
-                        start_depth: start,
-                        stop_depth: stop,
-                    }),
-                });
+                const data = await this._fetchCurveRange(curves, start, stop, { decimated: false });
+                this._applyCurveDataToRenderer(data, curves);
             }
 
-            const depth = data.DEPTH || [];
-            const curveData = {};
-            for (const c of curves) {
-                if (data[c.mnemonic]) {
-                    curveData[c.mnemonic] = data[c.mnemonic];
-                }
+            this._suppressViewportLoad = true;
+            this.renderer.setView(viewStart, viewStop);
+            this._suppressViewportLoad = false;
+            if (!preserveInputs) {
+                if (topInput) topInput.value = viewStart?.toFixed(1) || '';
+                if (bottomInput) bottomInput.value = viewStop?.toFixed(1) || '';
             }
-
-            // Update renderer
-            this.renderer.setData(depth, curveData, this.formationTops, this.curveConfig);
-
-            // Set scale
-            const scale = parseInt(document.getElementById('scaleSelect')?.value || '100');
-            this.renderer.scale = scale;
-
-            // Update depth inputs
-            if (topInput) topInput.value = start?.toFixed(1) || '';
-            if (bottomInput) bottomInput.value = stop?.toFixed(1) || '';
-
-            // Update curve panel
-            this._renderCurvePanel(curves);
-            this._populateCurveSelectors(curves);
-            this._populateEditCurveSelector(curves);
         } catch (e) { console.error('Failed to load curve data:', e); }
     }
 
@@ -1892,6 +1993,7 @@ class GeoLogApp {
             if (!file) return;
             const formData = new FormData();
             formData.append('file', file);
+            GeoLoading.show(`Uploading ${file.name}...`);
             try {
                 const resp = await fetch(`/api/wells/${this.currentWell.id}/upload-las`, {
                     method: 'POST',
@@ -1903,6 +2005,7 @@ class GeoLogApp {
                 GeoToast.success(`Uploaded ${result.filename} — ${result.curves.length} curves, ${result.num_points} points`);
                 await this.loadWells(this.projects[0].id);
             } catch (e) { GeoToast.error('Upload failed: ' + e.message); }
+            finally { GeoLoading.hide(); }
         };
         input.click();
     }
@@ -1916,6 +2019,7 @@ class GeoLogApp {
             if (!file) return;
             const formData = new FormData();
             formData.append('file', file);
+            GeoLoading.show(`Uploading ${file.name}...`);
             try {
                 const resp = await fetch(`/api/wells/${wellId}/upload-las`, {
                     method: 'POST',
@@ -1927,6 +2031,7 @@ class GeoLogApp {
                 GeoToast.success(`Uploaded ${result.filename} — ${result.curves.length} curves, ${result.num_points} points`);
                 if (this.projects.length > 0) await this.loadWells(this.projects[0].id);
             } catch (e) { GeoToast.error('Upload failed: ' + e.message); }
+            finally { GeoLoading.hide(); }
         };
         input.click();
     }
@@ -2047,37 +2152,42 @@ class GeoLogApp {
         this._renderBulkImportRows(rows);
 
         let createdWells = 0, uploadedFiles = 0, errors = 0;
-        for (const row of rows) {
-            try {
-                row.status = 'parsing'; row.progress = 5; this._renderBulkImportRows(rows);
-                const text = await row.file.text();
-                row.wellName = this._parseLASWellName(text, row.file.name);
-                const found = await this._ensureWellByName(row.wellName);
-                if (found.created) createdWells += 1;
+        GeoLoading.show(`Bulk importing ${validFiles.length} LAS file(s)...`);
+        try {
+            for (const row of rows) {
+                try {
+                    row.status = 'parsing'; row.progress = 5; this._renderBulkImportRows(rows);
+                    const text = await row.file.text();
+                    row.wellName = this._parseLASWellName(text, row.file.name);
+                    const found = await this._ensureWellByName(row.wellName);
+                    if (found.created) createdWells += 1;
 
-                row.status = 'uploading'; row.progress = 10; this._renderBulkImportRows(rows);
-                const result = await this._uploadLASWithProgress(found.well.id, row.file, (pct) => {
-                    row.progress = Math.max(10, pct);
-                    this._renderBulkImportRows(rows);
-                });
+                    row.status = 'uploading'; row.progress = 10; this._renderBulkImportRows(rows);
+                    const result = await this._uploadLASWithProgress(found.well.id, row.file, (pct) => {
+                        row.progress = Math.max(10, pct);
+                        this._renderBulkImportRows(rows);
+                    });
 
-                row.status = 'done';
-                row.progress = 100;
-                row.pointsCount = result?.num_points ?? row.pointsCount;
-                uploadedFiles += 1;
-            } catch (e) {
-                row.status = 'error';
-                row.progress = 100;
-                row.error = e.message || String(e);
-                errors += 1;
+                    row.status = 'done';
+                    row.progress = 100;
+                    row.pointsCount = result?.num_points ?? row.pointsCount;
+                    uploadedFiles += 1;
+                } catch (e) {
+                    row.status = 'error';
+                    row.progress = 100;
+                    row.error = e.message || String(e);
+                    errors += 1;
+                }
+                this._renderBulkImportRows(rows);
             }
-            this._renderBulkImportRows(rows);
-        }
 
-        const summary = document.getElementById('bulkImportSummary');
-        if (summary) summary.innerHTML = `Done — <b>${createdWells}</b> wells created, <b>${uploadedFiles}</b> files uploaded, <b>${errors}</b> errors.`;
-        GeoToast.info(`Bulk import done: ${uploadedFiles} uploaded, ${errors} errors`);
-        if (this.projects?.length) await this.loadWells(this.projects[0].id);
+            const summary = document.getElementById('bulkImportSummary');
+            if (summary) summary.innerHTML = `Done — <b>${createdWells}</b> wells created, <b>${uploadedFiles}</b> files uploaded, <b>${errors}</b> errors.`;
+            GeoToast.info(`Bulk import done: ${uploadedFiles} uploaded, ${errors} errors`);
+            if (this.projects?.length) await this.loadWells(this.projects[0].id);
+        } finally {
+            GeoLoading.hide();
+        }
     }
 
     // ─── Export ──────────────────────────────────────────────
@@ -3848,6 +3958,7 @@ class GeoLogApp {
 
     async loadDST() {
         if (!this.currentWell) return;
+        GeoLoading.show('Loading DST data...');
         try {
             const rows = await this._api('/wells/' + this.currentWell.id + '/dst');
             this.dstData = Array.isArray(rows) ? rows : [];
@@ -3866,6 +3977,7 @@ class GeoLogApp {
                 this.renderer.render();
             }
         } catch {}
+        finally { GeoLoading.hide(); }
     }
 
     async addDST() {
@@ -3888,6 +4000,7 @@ class GeoLogApp {
 
     async loadRFT() {
         if (!this.currentWell) return;
+        GeoLoading.show('Loading RFT data...');
         try {
             const rows = await this._api('/wells/' + this.currentWell.id + '/rft');
             this.rftData = Array.isArray(rows) ? rows : [];
@@ -3897,6 +4010,7 @@ class GeoLogApp {
             }
             await this._drawRFTCrossplot();
         } catch {}
+        finally { GeoLoading.hide(); }
     }
 
     async addRFT() {
@@ -3929,16 +4043,25 @@ class GeoLogApp {
             if (status) status.textContent = 'Uploading ' + file.name + '...';
             const formData = new FormData();
             formData.append('file', file);
-            const resp = await fetch('/api/wells/' + this.currentWell.id + '/rft/upload-csv', { method: 'POST', body: formData });
-            const result = await resp.json();
-            if (resp.ok) {
-                if (status) status.textContent = 'Inserted ' + (result.inserted || 0) + ' RFT rows';
-                GeoToast.success('RFT CSV uploaded');
-                await this.loadRFT();
-            } else if (status) {
-                status.textContent = 'Upload failed';
+            GeoLoading.show(`Uploading ${file.name}...`);
+            try {
+                const resp = await fetch('/api/wells/' + this.currentWell.id + '/rft/upload-csv', { method: 'POST', body: formData });
+                const result = await resp.json();
+                if (resp.ok) {
+                    if (status) status.textContent = 'Inserted ' + (result.inserted || 0) + ' RFT rows';
+                    GeoToast.success('RFT CSV uploaded');
+                    await this.loadRFT();
+                } else {
+                    if (status) status.textContent = 'Upload failed';
+                    GeoToast.error(result?.detail || result?.message || 'RFT CSV upload failed');
+                }
+            } catch (e) {
+                if (status) status.textContent = 'Upload failed';
+                GeoToast.error('RFT CSV upload failed: ' + (e.message || e));
+            } finally {
+                GeoLoading.hide();
+                input.value = '';
             }
-            input.value = '';
         });
     }
 
@@ -4280,6 +4403,7 @@ class GeoLogApp {
         const checks = document.querySelectorAll('#faciesCurveCheckboxes input:checked');
         const curves = Array.from(checks).map(c => c.value);
         if (curves.length < 2) return GeoToast.warn('Select at least 2 curves');
+        GeoLoading.show('Queueing electrofacies job...');
         try {
             const res = await this._api('/wells/' + this.currentWell.id + '/electrofacies-async', {
                 method: 'POST', body: JSON.stringify({ log_run_id: this.currentLogRun.id, n_clusters: n, curves })
@@ -4287,6 +4411,7 @@ class GeoLogApp {
             this._trackJob(res.job_id);
             GeoToast.success('Electrofacies job queued: ' + res.job_id);
         } catch (e) { GeoToast.error('Queue failed: ' + e.message); }
+        finally { GeoLoading.hide(); }
     }
 
     toggleLithTrack() {
@@ -4514,6 +4639,7 @@ class GeoLogApp {
         if (!this.currentLogRun || !this.curveEditState.mnemonic) return;
         const edits = Object.values(this.curveEditState.edits).map(e => ({ depth: e.depth, new_value: e.newValue }));
         if (!edits.length) return;
+        GeoLoading.show('Saving curve edits...');
         try {
             const res = await this._api('/log-runs/' + this.currentLogRun.id + '/curve-edit', {
                 method: 'POST', body: JSON.stringify({ mnemonic: this.curveEditState.mnemonic, edits }),
@@ -4523,6 +4649,7 @@ class GeoLogApp {
             this.resetCurveEditSession();
             this.refreshCurveEditUI();
         } catch (e) { GeoToast.error('Save edits failed: ' + e.message); }
+        finally { GeoLoading.hide(); }
     }
 
     async cancelCurveEdits() {
@@ -5578,6 +5705,7 @@ class GeoLogApp {
             sw_cutoff: parseFloat(document.getElementById('batchSwCut').value),
             template: document.getElementById('batchTemplate').value
         };
+        GeoLoading.show('Running batch petrophysics...');
         try {
             const result = await this._api(`/projects/${pid}/batch-petro`, {
                 method: 'POST', body: JSON.stringify(params)
@@ -5589,6 +5717,7 @@ class GeoLogApp {
                 </div>`;
             GeoToast.success(`Parameters applied to ${result.updated} wells`);
         } catch (e) { GeoToast.error(e.message); }
+        finally { GeoLoading.hide(); }
     }
 
     async runBatchPetroAsync() {
@@ -5605,6 +5734,7 @@ class GeoLogApp {
             sw_cutoff: parseFloat(document.getElementById('batchSwCut').value),
             template: document.getElementById('batchTemplate').value
         };
+        GeoLoading.show('Queueing batch petrophysics job...');
         try {
             const res = await this._api(`/projects/${pid}/batch-petro-async`, {
                 method: 'POST', body: JSON.stringify(params)
@@ -5612,6 +5742,7 @@ class GeoLogApp {
             this._trackJob(res.job_id);
             GeoToast.success('Batch petro job queued: ' + res.job_id);
         } catch (e) { GeoToast.error('Queue failed: ' + e.message); }
+        finally { GeoLoading.hide(); }
     }
 
     _trackJob(jobId) {
@@ -6452,18 +6583,14 @@ class GeoLogApp {
         const freq = document.getElementById('seismicFreq')?.value || 30;
         GeoLoading.show('Generating synthetic seismogram...');
         try {
-            const resp = await fetch(`/api/wells/${this.currentWell}/synthetic-seismogram`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
+            const data = await this._api(`/wells/${this.currentWell}/synthetic-seismogram`, {
+                method: 'POST',
                 body: JSON.stringify({ frequency: parseFloat(freq) })
             });
-            const data = await resp.json();
-            GeoLoading.hide();
-            if (data.detail) { GeoToast.error(data.detail); return; }
             this._renderSeismic(data);
         } catch (e) {
-            GeoLoading.hide();
             GeoToast.error('Seismogram failed: ' + e.message);
-        }
+        } finally { GeoLoading.hide(); }
     }
 
     _renderSeismic(data) {

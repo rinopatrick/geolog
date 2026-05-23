@@ -3,11 +3,13 @@ services:
     build: .
     ports:
       - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
     volumes:
-      - geolog-data:/app/backend
+      - geolog-data:/app/backend/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3

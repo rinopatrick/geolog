@@ -1,181 +1,285 @@
-# GeoLog — Oil & Gas Well Log Viewer
+# GeoLog — Advanced Well Log Interpretation Platform
 
-Open-source, production-style well log viewer for petroleum geophysicists and petrophysicists. Built with FastAPI + SQLite backend and Canvas-based frontend.
+Comprehensive, production-style subsurface interpretation platform for oil & gas workflows. GeoLog combines high-performance log visualization, petrophysical computation, correlation, zonation, quality control, and export/reporting in a FastAPI + SQLite + Canvas-based stack.
+
+![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?style=flat-square&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-Framework-009688?style=flat-square&logo=fastapi&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)
+![SQLite](https://img.shields.io/badge/SQLite-Database-003B57?style=flat-square&logo=sqlite&logoColor=white)
 
 ![GeoLog Screenshot](screenshot.png)
 
+---
+
 ## Features
 
-### Data Ingest
-- **LAS 2.0 parser** with robust field-LAS handling:
-  - `MNEM.UNIT` and `MNEM .UNIT` header formats
-  - Null sentinel (`-999.25`) → NaN conversion
-  - Depth fallback: `DEPT` / `DEPTH` / `MD` / `TVD` → first curve
-  - Curve alias normalization: `CALI→CAL`, `RESD→RT`, `ILD→RILD`, `DTP→DT`
-- Multi-log-run per well (upload multiple LAS files)
-- Formation tops with depth, color, lithology
-- Zone picking for interval analysis
+GeoLog currently includes **35+ analysis views/panels** and **100+ API capabilities** spanning ingestion, interpretation, QC, analytics, collaboration, and export.
 
-### Multi-Track Log Viewer
-- **Canvas-rendered** for performance with large datasets
-- 4-track layout: GR/SP/CAL | Resistivity (log-scale) | Porosity | Saturation
-- Depth ruler with adaptive tick intervals
-- Hover readout showing all curve values at cursor depth
-- Formation tops overlay with labels
-- Scroll-to-zoom, drag-to-pan
+### 1) Data Ingest
+- LAS **2.0/3.0** parser with robust field-file handling
+- Supports whitespace and **comma-delimited** LAS variants
+- Vendor mnemonic normalization/fallback (e.g., DEPTH/DEPT/MD, ILD/RESD/RT families)
+- Multi-run per well upload and management
+- **Bulk import wizard** for multi-file ingestion with progress feedback
+- CSV upload utilities for selected workflows (e.g., tops/RFT)
 
-### Interpretation Workflow
-- **Petrophysics Quicklook**: Vsh (GR), PHIE (NPHI-RHOB), Sw (Archie)
-- **Cutoff editor**: Vsh max, PHIE min, Sw max with instant net pay recalculation
-- **Reservoir interval table**: zone-by-zone Top/Base/Gross/PHIE/Sw/Vsh
-- **Crossplot RHOB-NPHI** with dynamic curve selectors
-- **Pickett plot** (log-log Rt vs PHIE) with Archie Sw guide lines
-- **M-N plot** with lithology anchors (sandstone/limestone/dolomite)
-- **Curve family fallback**: vendor mnemonics (ILD, RESD, RILD) auto-resolve to canonical families
+### 2) Multi-Track Log Viewer
+- High-performance **Canvas-rendered** viewer
+- Standard **4-track layout** (GR/SP/CAL, resistivity, porosity, saturation)
+- Adaptive depth ruler and synchronized hover readout
+- Overlay support: formation tops, zones, DST intervals, RFT points, annotations
+- Interactive navigation: **scroll zoom**, **drag pan**, jump-to-top/bottom
+- Optional details/advanced controls and fullscreen workflow mode
 
-### Well Correlation
-- Two-well depth correlation panel
-- **Manual marker tie picking**: click A-depth, click B-depth, labeled Δ per marker
-- Marker summary table with aggregate shifts
-- **Apply Median Shift** / **Apply Mean Shift** from markers
-- **AutoTie**: cross-correlation based automatic depth shift with confidence scoring
+### 3) Petrophysics
+- Archie-based quicklook petrophysics
+- **Dual-Water** saturation model endpoint/workflow
+- VCL models:
+  - **Larionov**
+  - **Clavier**
+  - **Steiber**
+- Cutoff-based net pay evaluation and zone summaries
+- Batch petrophysics workflows (sync + async)
+- **Multi-mineral solver workflows** via calculator/derived-curve tooling
 
-### QC / Data Quality
-- Per-curve: missing %, z-score outlier %, mean, std
-- **Reliability tags**: HIGH / MEDIUM / LOW
-- Sample size confidence warning for small datasets
+### 4) Well Correlation
+- Interactive **2-well correlation panel**
+- Manual marker tie picking with marker table/summary
+- **AutoTie** (cross-correlation based shift recommendation)
+- Shift/stretch controls with profile persistence
+- Top-snap assistance and overlayed top matching cues
 
-### Export
-- **Export LAS**: generates LAS 2.0 file from current view
-- **Export Summary CSV**: wells, cutoffs, net pay, QC metrics, formation tops
-- **Export PNG**: high-res canvas export
+### 5) Cross-Section
+- Project-level **well-to-well structural cross-section**
+- Curve rendering/fill between wells
+- Formation-top correlation lines across wells
+- Stratigraphic normalization to reference formations
+- Cross-section interaction helpers and export helpers
+
+### 6) Formation Tops
+- Full CRUD for formation tops
+- Project/well-level import-export support
+- **Petrel-compatible tops export**
+- Auto-pick tops workflow with review and save
+- Top overlays available in viewer and correlation/cross-section contexts
+
+### 7) Zonation
+- Manual zone editing + persistence
+- **Auto-zone from tops**
+- Zone statistics endpoints and panels
+- Zonation report export (zone gross/net and averaged properties)
+- Zone editing operations (split/merge/reorder) with undo/redo-aware workflow
+
+### 8) QC & Data Quality
+- Per-curve QC metrics (missing %, outlier %, mean/std)
+- Reliability tagging (HIGH / MEDIUM / LOW)
+- QC recommendations and anomaly notes
+- **QC Auto-fix** API to patch common quality issues
+- Small-sample confidence handling and warnings
+
+### 9) Crossplots & Interpretation Plots
+- **RHOB–NPHI crossplot**
+- **Pickett plot**
+- **M–N plot**
+- **Hingle plot**
+- **Buckles plot**
+- **Probability plot**
+- Crossplot matrix at project level
+
+### 10) Sensitivity & Uncertainty
+- Parameter sweep workflows for petrophysical uncertainty
+- Scenario comparison summaries
+- **Tornado chart** output for spread/impact visualization
+
+### 11) Electrofacies
+- Electrofacies clustering and facies assignment
+- Supports **k-means / GMM-style** clustering workflows
+- Facies distribution summaries and visualization
+- Async electrofacies job execution with job monitor
+
+### 12) DST / RFT
+- DST interval entry/listing and viewer overlay
+- RFT point entry/listing + CSV upload
+- Pressure-depth crossplot canvas
+- Pressure gradient computation endpoint
+
+### 13) Curve Editing
+- Interactive click-based curve editing workflows
+- Curve overrides and filtering endpoints
+- Edit persistence with history-aware interactions
+- **Undo/redo** support for interactive interpretation actions
+
+### 14) Core Calibration
+- Core-log calibration workflows
+- Depth matching utilities
+- Porosity/permeability transform endpoints and derived properties
+
+### 15) Export & Reporting
+- Export **LAS** from selected/active data context
+- Export **CSV** (summary tables, zonation, tops, data table)
+- Export **PDF** report endpoint
+- Export viewer **PNG**
+- Export bulk JSON package for project handoff
+- **Petrel-compatible tops** export
+
+### 16) User Management & Governance
+- Role-based access control (**viewer / interpreter / admin**)
+- Header-driven role enforcement on API operations
+- Built-in **audit trail** endpoint and UI panel
+- User CRUD endpoints
+
+### 17) Performance & Scalability
+- LTTB-based data **decimation** endpoint
+- Viewport-based loading for large logs
+- Debounced curve fetch and selective rendering
+- FastAPI **GZip compression** middleware
+- Async job queue pattern for heavy workflows
+
+---
 
 ## Quick Start
 
-### Prerequisites
-- Python 3.9+
-- pip
-
-### Setup
-
+### Method 1 — One-command local run (`run.sh`)
 ```bash
-cd geolog-app/backend
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Seed demo data (optional)
-python seed.py
-
-# Start server
-python -m uvicorn main:app --host 0.0.0.0 --port 8000
+cd /home/patrick/geolog-app
+chmod +x run.sh
+./run.sh
 ```
+- Starts GeoLog at: `http://localhost:8000`
+- Swagger: `http://localhost:8000/docs`
 
-Open http://localhost:8000 in your browser.
-
-### Docker
-
+### Method 2 — Docker
 ```bash
+cd /home/patrick/geolog-app
 docker compose up --build
 ```
+Then open `http://localhost:8000`.
 
-Then open http://localhost:8000.
+### Method 3 — Manual (Python)
+```bash
+cd /home/patrick/geolog-app
+python3 -m pip install -r requirements.txt
+python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+---
+
+## API Documentation
+
+Interactive OpenAPI docs are available when server is running:
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+
+---
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `1` | Switch to Log Viewer |
+| `2` | Switch to Cross Plot |
+| `3` | Switch to Pickett Plot |
+| `4` | Switch to Petrophysics |
+| `5` | Switch to QC |
+| `6` | Switch to Statistics |
+| `7` | Switch to Correlation |
+| `8` | Switch to Sensitivity |
+| `9` | Switch to Facies |
+| `Arrow Up` | Pan depth window upward |
+| `Arrow Down` | Pan depth window downward |
+| `+` / `=` | Zoom in |
+| `-` | Zoom out |
+| `Home` | Jump to top boundary |
+| `End` | Jump to bottom boundary |
+| `Esc` | Close modals/help/palette/nav groups |
+| `?` | Open keyboard shortcut help |
+| `Ctrl/Cmd + K` | Open command palette |
+| `Ctrl/Cmd + Z` | Undo |
+| `Ctrl/Cmd + Shift + Z` | Redo |
+| `Ctrl/Cmd + Y` | Redo |
+| `Ctrl/Cmd + S` | Save annotations |
+| `Ctrl/Cmd + E` | Export LAS |
+| `Ctrl/Cmd + U` | Upload LAS |
+| `F` | Toggle fullscreen viewer |
+| `L` | Toggle lithology track |
+| `D` | Toggle details panels |
+| `A` | Toggle advanced controls |
+| `R` | Refresh render |
+
+---
 
 ## Project Structure
 
-```
+```text
 geolog-app/
 ├── backend/
-│   ├── main.py           # FastAPI app + all API routes
-│   ├── las_parser.py     # LAS 2.0 parser with alias normalization
-│   ├── models.py         # SQLAlchemy ORM models
-│   ├── schemas.py        # Pydantic schemas
-│   ├── database.py       # DB engine + session
-│   ├── seed.py           # Demo data seeder
-│   └── requirements.txt
+│   ├── __init__.py
+│   ├── database.py
+│   ├── las_parser.py
+│   ├── main.py
+│   ├── models.py
+│   ├── schemas.py
+│   ├── seed.py
+│   ├── demo.las
+│   ├── requirements.txt
+│   └── routers/
 ├── frontend/
-│   ├── index.html        # Main HTML shell
-│   ├── css/style.css     # Dark theme (GitHub-style)
+│   ├── index.html
+│   ├── assets/
+│   ├── css/
+│   │   ├── style.css
+│   │   └── sprint26.css
 │   └── js/
-│       ├── app.js        # Application logic + all panels
-│       └── log-renderer.js  # Canvas-based multi-track renderer
+│       ├── app.js
+│       └── log-renderer.js
 ├── data/
 │   ├── public_sample.las
-│   └── hawkins_01.las    # 800-pt synthetic field LAS
+│   ├── hawkins_01.las
+│   └── public/
+├── tests/
+│   └── test_parser.py
+├── test-data/
+├── test_data/
 ├── Dockerfile
 ├── docker-compose.yml
+├── run.py
+├── run.sh
+├── requirements.txt
 ├── LICENSE
 └── README.md
 ```
 
-## API Endpoints
+---
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/health` | Health check |
-| GET/POST | `/api/projects/` | List / create projects |
-| DELETE | `/api/projects/{id}` | Delete project |
-| GET/POST | `/api/wells/` | List / create wells |
-| GET | `/api/wells/{id}` | Well detail + log runs + tops |
-| DELETE | `/api/wells/{id}` | Delete well |
-| POST | `/api/wells/{id}/upload-las` | Upload LAS file |
-| GET/POST | `/api/wells/{id}/tops` | List / create formation tops |
-| GET | `/api/log-runs/{id}/curves` | List curves for a log run |
-| POST | `/api/log-runs/{id}/data` | Get curve data (with depth filter) |
-| GET | `/api/curve-config` | Standard curve track configurations |
-| DELETE | `/api/tops/{id}` | Delete formation top |
+## Testing
 
-## Curve Alias Normalization
+### Parser + API smoke tests script
+```bash
+cd /home/patrick/geolog-app
+python3 tests/test_parser.py
+```
 
-The parser normalizes vendor mnemonics to canonical forms:
+### With pytest
+```bash
+cd /home/patrick/geolog-app
+pytest -q tests/test_parser.py
+```
 
-| Vendor | Canonical | Family |
-|--------|-----------|--------|
-| DEPTH | DEPT | Depth |
-| CALI | CAL | Caliper |
-| RESD | RT | Resistivity |
-| ILD | RILD | Resistivity |
-| DTP | DT | Sonic |
+Notes:
+- Parser tests run without server.
+- API tests in `test_parser.py` require GeoLog running at `http://localhost:8000`.
 
-Interpretation panels use **family fallback** — selecting "RT" will also search for `RESD`, `RILD`, `ILD`, `ILM`, `RXO`, `SFLU`, `SFLA`, etc.
-
-## Petrophysics Methods
-
-- **Vsh**: GR linear (Larionov for tertiary rocks)
-- **PHIE**: NPHI-RHOB average, corrected for Vsh
-- **Sw**: Archie equation: `Sw = (a / (φᵐ × Rt / Rw))^(1/n)`
-- **Cutoffs**: user-editable Vsh max, PHIE min, Sw max
-- **Net pay**: flag-based with minimum zone thickness filter
+---
 
 ## License
 
 MIT License — see [LICENSE](LICENSE).
 
-## Testing
-
-```bash
-# Parser tests (no server needed)
-python tests/test_parser.py
-
-# Full suite (parser + API — server must be running)
-python tests/test_parser.py
-```
-
-16 tests: 10 parser (always) + 6 API (needs server).
-
-## Contributing
-
-1. Fork the repo
-2. Create a feature branch
-3. Submit a PR
-
-For major changes, open an issue first to discuss.
-
 ---
 
 ## Sponsor
 
-If this project helps you, you can support ongoing development:
+If this project helps you, support ongoing development:
 
 [![Saweria](https://img.shields.io/badge/Support-Saweria-FF5722?style=flat-square&logo=wallet)](https://saweria.co/rinopatrick)
 [![Ko-fi](https://img.shields.io/badge/Support-Ko--fi-FF5E5B?style=flat-square&logo=kofi)](https://ko-fi.com/rinopatrick)
