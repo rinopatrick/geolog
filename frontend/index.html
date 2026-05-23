@@ -75,6 +75,10 @@
                     <button class="nav-btn" data-view="dashboard" title="Project-level summary metrics dashboard"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></button>
                     <button class="nav-btn" data-view="matrix" title="Multi-well cross-plot matrix for formation comparison"><i data-lucide="grid-3x3"></i><span>Matrix</span></button>
                     <button class="nav-btn" data-view="audit" title="Audit trail — track all project activity"><i data-lucide="file-text"></i><span>Audit</span></button>
+                    <button class="nav-btn" data-view="seismic" title="Synthetic seismogram from DT and RHOB"><i data-lucide="activity"></i><span>Seismic</span></button>
+                    <button class="nav-btn" data-view="imagelog" title="Resistivity image log display (FMI/OBI lite)"><i data-lucide="image"></i><span>Image Log</span></button>
+                    <button class="nav-btn" data-view="analogs" title="Offset-well analog recommendation"><i data-lucide="git-branch"></i><span>Analogs</span></button>
+                    <button class="nav-btn" data-view="users" title="Manage users and roles"><i data-lucide="users"></i><span>Users</span></button>
                 </div>
             </details>
         </nav>
@@ -813,6 +817,81 @@
                     <div class="empty-state-icon"><i data-lucide="sparkles"></i></div>
                     <h3>Quality Control & Auto-Fix</h3>
                     <p>Automatically detect data quality issues (spikes, nulls, stuck sensors, depth gaps) and suggest fixes.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Synthetic Seismogram Panel -->
+        <div id="seismicPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group">
+                    <label>Synthetic Seismogram</label>
+                    <span class="toolbar-hint">AI × RC convolution with Ricker wavelet from DT + RHOB</span>
+                </div>
+                <div class="toolbar-group">
+                    <label>Freq (Hz)</label>
+                    <input type="number" id="seismicFreq" value="30" min="5" max="100" style="width:60px">
+                </div>
+                <button class="btn-primary" onclick="app.runSeismic()"><i data-lucide="refresh-cw"></i> Generate</button>
+            </div>
+            <div style="padding:20px">
+                <div id="seismicResults" class="empty-state">
+                    <div class="empty-state-icon"><i data-lucide="activity"></i></div>
+                    <h3>Synthetic Seismogram</h3>
+                    <p>Generate synthetic trace from sonic (DT) and density (RHOB). Requires both curves.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Image Log Panel -->
+        <div id="imagelogPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group">
+                    <label>Resistivity Image Log</label>
+                    <span class="toolbar-hint">FMI/OBI-lite display — borehole resistivity image from RT curve</span>
+                </div>
+                <button class="btn-primary" onclick="app.runImageLog()"><i data-lucide="refresh-cw"></i> Render</button>
+            </div>
+            <div style="padding:20px">
+                <canvas id="imageLogCanvas" style="width:100%;height:calc(100vh - 200px);background:var(--bg-primary);border-radius:8px;display:none"></canvas>
+                <div id="imageLogEmpty" class="empty-state">
+                    <div class="empty-state-icon"><i data-lucide="image"></i></div>
+                    <h3>Borehole Image Log</h3>
+                    <p>Generate a resistivity image display. Maps RT values to blue-white-red color scale around borehole circumference.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Offset-Well Analogs Panel -->
+        <div id="analogsPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group">
+                    <label>Offset-Well Analogs</label>
+                    <span class="toolbar-hint">Find wells with similar log signatures based on curve statistics</span>
+                </div>
+                <button class="btn-primary" onclick="app.runAnalogs()"><i data-lucide="refresh-cw"></i> Find Analogs</button>
+            </div>
+            <div style="padding:20px">
+                <div id="analogsResults" class="empty-state">
+                    <div class="empty-state-icon"><i data-lucide="git-branch"></i></div>
+                    <h3>Well Analog Recommendation</h3>
+                    <p>Compare GR, RT, NPHI, RHOB statistics across wells to find the most similar offset wells.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Users Panel -->
+        <div id="usersPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group">
+                    <label>User Management</label>
+                    <span class="toolbar-hint">Manage users and roles (admin, interpreter, viewer)</span>
+                </div>
+                <button class="btn-primary" onclick="app.createUser()"><i data-lucide="user-plus"></i> Add User</button>
+            </div>
+            <div style="padding:20px">
+                <div id="usersResults">
+                    <p style="color:var(--text-muted)">Loading users...</p>
                 </div>
             </div>
         </div>

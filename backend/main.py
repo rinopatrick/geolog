@@ -17,11 +17,11 @@ import io
 
 try:
     from database import engine, Base, get_db, SessionLocal
-    from models import Project, Well, LogRun, CurveData, FormationTop, Annotation, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog
+    from models import Project, Well, LogRun, CurveData, FormationTop, Annotation, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
     from las_parser import LASParser, CURVE_TRACKS
 except ImportError:
     from backend.database import engine, Base, get_db, SessionLocal
-    from backend.models import Project, Well, LogRun, CurveData, FormationTop, Annotation, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog
+    from backend.models import Project, Well, LogRun, CurveData, FormationTop, Annotation, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
     from backend.las_parser import LASParser, CURVE_TRACKS
 
 # Create tables
@@ -3209,6 +3209,421 @@ def qc_autofix(wid: int, data: dict, db: Session = Depends(get_db)):
 # Patch upload endpoint to log audit
 _orig_upload = app.routes[:]
 # We'll add audit calls inline in new code below
+
+
+# ─── Sprint 28: Multi-User Roles ─────────────────────────────
+
+
+@app.get("/api/users")
+def list_users(db: Session = Depends(get_db)):
+    users = db.query(User).all()
+    return [{"id": u.id, "username": u.username, "display_name": u.display_name,
+             "role": u.role, "created_at": u.created_at.isoformat() if u.created_at else ""} for u in users]
+
+
+@app.post("/api/users", status_code=201)
+def create_user(data: dict, db: Session = Depends(get_db)):
+    import hashlib, time
+    username = data.get("username", "")
+    if not username:
+        raise HTTPException(400, "username required")
+    existing = db.query(User).filter(User.username == username).first()
+    if existing:
+        raise HTTPException(409, "Username already exists")
+    token = hashlib.sha256(f"{username}{time.time()}".encode()).hexdigest()[:32]
+    u = User(username=username, display_name=data.get("display_name", username),
+             role=data.get("role", "interpreter"), token=token)
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return {"id": u.id, "username": u.username, "role": u.role, "token": token}
+
+
+@app.put("/api/users/{uid}")
+def update_user(uid: int, data: dict, db: Session = Depends(get_db)):
+    u = db.query(User).filter(User.id == uid).first()
+    if not u:
+        raise HTTPException(404, "User not found")
+    for field in ("display_name", "role"):
+        if field in data:
+            setattr(u, field, data[field])
+    db.commit()
+    return {"id": u.id, "username": u.username, "role": u.role}
+
+
+@app.delete("/api/users/{uid}", status_code=204)
+def delete_user(uid: int, db: Session = Depends(get_db)):
+    u = db.query(User).filter(User.id == uid).first()
+    if not u:
+        raise HTTPException(404, "User not found")
+    db.delete(u)
+    db.commit()
+
+
+# ─── Sprint 28: Synthetic Seismogram ─────────────────────────
+@app.post("/api/wells/{wid}/synthetic-seismogram")
+def synthetic_seismogram(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Generate a synthetic seismogram from sonic (DT) and density (RHOB) logs.
+    Computes acoustic impedance (AI), reflection coefficients (RC), and
+    convolves with a Ricker wavelet to produce a synthetic trace.
+    """
+    lr_id = data.get("log_run_id")
+    lr = db.query(LogRun).filter(LogRun.id == lr_id).first() if lr_id else \
+         db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+
+    dt_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DT", "DTC", "DTCO"])).first()
+    rhob_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["RHOB", "RHOZ", "DEN"])).first()
+    dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
+
+    if not dt_cd or not rhob_cd:
+        raise HTTPException(400, "Need DT and RHOB curves for synthetic seismogram")
+
+    dt = np.frombuffer(dt_cd.data_binary, dtype=np.float64).copy()
+    rhob = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy()
+    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(dt)) * 0.5
+
+    # Filter valid data
+    valid = ~np.isnan(dt) & ~np.isnan(rhob) & (dt > 0) & (rhob > 1.5) & (rhob < 3.5)
+    dt_v = dt[valid]
+    rhob_v = rhob[valid]
+    dept_v = dept[valid]
+
+    if len(dt_v) < 10:
+        raise HTTPException(400, "Not enough valid DT/RHOB data")
+
+    # Velocity from sonic: V = 1e6 / DT (ft/s)
+    velocity = 1e6 / dt_v
+
+    # Acoustic impedance: AI = V * rho
+    ai = velocity * rhob_v
+
+    # Reflection coefficients at each interface
+    rc = np.zeros(len(ai))
+    for i in range(1, len(ai)):
+        rc[i] = (ai[i] - ai[i-1]) / (ai[i] + ai[i-1]) if (ai[i] + ai[i-1]) > 0 else 0
+
+    # Ricker wavelet
+    freq = float(data.get("frequency", 30))  # Hz
+    dt_sample = float(lr.step) if lr.step else 0.5
+    # Convert depth step to time: two-way time
+    t_wt = 2 * np.cumsum(dt_sample / velocity)  # two-way time in seconds
+
+    # Create Ricker wavelet
+    t_wav = np.arange(-0.05, 0.05, dt_sample / np.mean(velocity))
+    wav = (1 - 2 * (np.pi * freq * t_wav) ** 2) * np.exp(-(np.pi * freq * t_wav) ** 2)
+    wav = wav / np.max(np.abs(wav))  # normalize
+
+    # Convolve RC with wavelet
+    synthetic = np.convolve(rc, wav, mode='same')
+
+    # Decimate for frontend (max 2000 points)
+    step = max(1, len(dept_v) // 2000)
+
+    return {
+        "depth": dept_v[::step].tolist(),
+        "ai": ai[::step].tolist(),
+        "rc": rc[::step].tolist(),
+        "synthetic": synthetic[::step].tolist(),
+        "wavelet": wav.tolist(),
+        "params": {"frequency": freq, "dt_sample": dt_sample, "n_points": len(dept_v)},
+        "stats": {
+            "ai_min": round(float(np.min(ai)), 1),
+            "ai_max": round(float(np.max(ai)), 1),
+            "ai_mean": round(float(np.mean(ai)), 1),
+            "rc_min": round(float(np.min(rc)), 4),
+            "rc_max": round(float(np.max(rc)), 4),
+        }
+    }
+
+
+# ─── Sprint 28: Formation Tops Auto-Pick ─────────────────────
+@app.post("/api/wells/{wid}/auto-pick-tops")
+def auto_pick_tops(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Automatically pick formation tops based on curve inflection points.
+    Uses GR or SP curve derivative to detect major formation boundaries.
+    """
+    lr_id = data.get("log_run_id")
+    lr = db.query(LogRun).filter(LogRun.id == lr_id).first() if lr_id else \
+         db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+
+    curve_name = data.get("curve", "GR")
+    n_tops = min(int(data.get("n_tops", 5)), 20)
+    min_gap = float(data.get("min_gap", 50))  # minimum feet between tops
+
+    cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == curve_name).first()
+    dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
+    if not cd or not dept_cd:
+        raise HTTPException(400, f"Curve {curve_name} or DEPTH not found")
+
+    arr = np.frombuffer(cd.data_binary, dtype=np.float64).copy()
+    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy()
+
+    # Smooth the curve (moving average, window=11)
+    valid = ~np.isnan(arr)
+    smoothed = arr.copy()
+    half = 5
+    for i in range(half, len(arr) - half):
+        if valid[i]:
+            window = arr[max(0, i-half):i+half+1]
+            window = window[~np.isnan(window)]
+            if len(window) > 0:
+                smoothed[i] = np.mean(window)
+
+    # Compute gradient (first derivative)
+    gradient = np.gradient(smoothed)
+
+    # Find inflection points (zero crossings of second derivative, or peaks of |gradient|)
+    abs_grad = np.abs(gradient)
+    abs_grad[~valid] = 0
+
+    # Find local maxima of |gradient|
+    candidates = []
+    for i in range(2, len(abs_grad) - 2):
+        if abs_grad[i] > abs_grad[i-1] and abs_grad[i] > abs_grad[i+1] and abs_grad[i] > abs_grad[i-2] and abs_grad[i] > abs_grad[i+2]:
+            if abs_grad[i] > np.mean(abs_grad[valid]) * 1.5:  # threshold
+                candidates.append((float(dept[i]), float(abs_grad[i])))
+
+    # Sort by magnitude (strongest boundaries first)
+    candidates.sort(key=lambda x: x[1], reverse=True)
+
+    # Select tops with minimum gap
+    picked = []
+    for depth, mag in candidates:
+        if len(picked) >= n_tops:
+            break
+        if all(abs(depth - p[0]) >= min_gap for p in picked):
+            picked.append((depth, mag))
+
+    # Sort by depth
+    picked.sort(key=lambda x: x[0])
+
+    return {
+        "curve": curve_name,
+        "n_picked": len(picked),
+        "min_gap": min_gap,
+        "tops": [{"depth": round(d, 1), "magnitude": round(m, 4)} for d, m in picked],
+    }
+
+
+# ─── Sprint 28: Offset-Well Analog ──────────────────────────
+@app.get("/api/projects/{pid}/well-analogs")
+def well_analogs(pid: int, reference_well_id: int, db: Session = Depends(get_db)):
+    """Find offset wells most similar to reference well based on curve statistics.
+    Compares mean/std of GR, RT, NPHI, RHOB across wells.
+    """
+    ref_well = db.query(Well).filter(Well.id == reference_well_id).first()
+    if not ref_well:
+        raise HTTPException(404, "Reference well not found")
+
+    wells = db.query(Well).filter(Well.project_id == pid).all()
+    compare_curves = ["GR", "RT", "NPHI", "RHOB"]
+
+    # Get reference well stats
+    ref_lr = db.query(LogRun).filter(LogRun.well_id == reference_well_id).order_by(LogRun.num_points.desc()).first()
+    if not ref_lr:
+        raise HTTPException(404, "No log run in reference well")
+
+    ref_stats = {}
+    for cn in compare_curves:
+        cd = db.query(CurveData).filter(CurveData.log_run_id == ref_lr.id, CurveData.mnemonic == cn).first()
+        if cd:
+            arr = np.frombuffer(cd.data_binary, dtype=np.float64)
+            valid = arr[~np.isnan(arr)]
+            if len(valid) > 10:
+                ref_stats[cn] = {"mean": float(np.mean(valid)), "std": float(np.std(valid))}
+
+    if not ref_stats:
+        raise HTTPException(400, "Reference well has no valid curves for comparison")
+
+    # Compare with other wells
+    analogs = []
+    for w in wells:
+        if w.id == reference_well_id:
+            continue
+        lr = db.query(LogRun).filter(LogRun.well_id == w.id).order_by(LogRun.num_points.desc()).first()
+        if not lr:
+            continue
+
+        well_stats = {}
+        for cn in compare_curves:
+            cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == cn).first()
+            if cd:
+                arr = np.frombuffer(cd.data_binary, dtype=np.float64)
+                valid = arr[~np.isnan(arr)]
+                if len(valid) > 10:
+                    well_stats[cn] = {"mean": float(np.mean(valid)), "std": float(np.std(valid))}
+
+        # Compute similarity (Euclidean distance in normalized stats space)
+        dist = 0
+        n_curves = 0
+        for cn in ref_stats:
+            if cn in well_stats:
+                # Normalize by reference std to give equal weight
+                ref_m = ref_stats[cn]["mean"]
+                ref_s = ref_stats[cn]["std"] if ref_stats[cn]["std"] > 0 else 1
+                well_m = well_stats[cn]["mean"]
+                dist += ((well_m - ref_m) / ref_s) ** 2
+                n_curves += 1
+
+        if n_curves > 0:
+            similarity = 1 / (1 + np.sqrt(dist))
+            analogs.append({
+                "well_id": w.id, "well_name": w.name,
+                "similarity": round(float(similarity), 4),
+                "matching_curves": n_curves,
+                "stats": well_stats,
+            })
+
+    analogs.sort(key=lambda x: x["similarity"], reverse=True)
+    return {"reference_well": ref_well.name, "ref_stats": ref_stats, "analogs": analogs}
+
+
+# ─── Sprint 28: LAS Export with All Data ─────────────────────
+@app.get("/api/wells/{wid}/export-las")
+def export_las(wid: int, db: Session = Depends(get_db)):
+    """Export well data as LAS 2.0 format string."""
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+
+    lr = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+
+    curves = db.query(CurveData).filter(CurveData.log_run_id == lr.id).order_by(CurveData.id).all()
+
+    # Build LAS header
+    las = "~Version Information\n"
+    las += "VERS.                  2.0:   CWLS Log ASCII Standard - VERSION 2.0\n"
+    las += "WRAP.                  NO:    One line per depth step\n"
+    las += "~Well Information\n"
+    las += f"#MNEM.UNIT       DATA                   DESCRIPTION\n"
+    las += f"#----.----      -----                   -----------\n"
+    las += f"WELL.                 {well.name}:    Well Name\n"
+    las += f"UWI.                  {well.uwi or 'N/A'}:    Unique Well Identifier\n"
+    las += f"COMP.                 {well.operator or 'N/A'}:    Company\n"
+    las += f"FLD.                  {well.field_name or 'N/A'}:    Field\n"
+    las += f"SRVC.                 GeoLog:    Service Company\n"
+    las += f"DATE.                 {datetime.datetime.now().strftime('%Y-%m-%d')}:    Date\n"
+    las += f"STRT.{well.depth_unit or 'FT'}         {lr.start_depth or 0:.4f}                  START DEPTH\n"
+    las += f"STOP.{well.depth_unit or 'FT'}         {lr.stop_depth or 0:.4f}                  STOP DEPTH\n"
+    las += f"STEP.{well.depth_unit or 'FT'}         {lr.step or 0.5:.4f}                  STEP\n"
+    las += f"NULL.                {lr.null_value or -999.25:.2f}                 NULL VALUE\n"
+
+    las += "~Curve Information\n"
+    mnemonics = []
+    for c in curves:
+        las += f"{c.mnemonic:8s}.{c.unit or '':6s} {c.description or ''}\n"
+        mnemonics.append(c.mnemonic)
+
+    las += "~Ascii\n"
+
+    # Build data matrix
+    n = curves[0].num_points if curves else 0
+    arrays = []
+    for c in curves:
+        arr = np.frombuffer(c.data_binary, dtype=np.float64)
+        if len(arr) == n:
+            arrays.append(arr)
+        else:
+            arrays.append(np.full(n, lr.null_value or -999.25))
+
+    for i in range(n):
+        row = []
+        for arr in arrays:
+            v = arr[i]
+            if np.isnan(v):
+                row.append(f"{lr.null_value or -999.25:12.4f}")
+            else:
+                row.append(f"{v:12.4f}")
+        las += "  ".join(row) + "\n"
+
+    headers = {"Content-Disposition": f'attachment; filename="{well.name}.las"'}
+    return StreamingResponse(iter([las]), media_type="text/plain", headers=headers)
+
+
+# ─── Sprint 28: Image Log (FMI/OBI lite) ─────────────────────
+@app.post("/api/wells/{wid}/image-log")
+def image_log(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Generate a resistivity image log display from available curves.
+    Maps curve values to a color scale for image-like visualization.
+    Uses RT/RESD curve values mapped to a blue-white-red color scale.
+    """
+    lr_id = data.get("log_run_id")
+    lr = db.query(LogRun).filter(LogRun.id == lr_id).first() if lr_id else \
+         db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+
+    curve_name = data.get("curve", "RT")
+    n_bins = min(int(data.get("n_bins", 72)), 360)  # angular bins around borehole
+
+    cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == curve_name).first()
+    if not cd:
+        # Try alternatives
+        cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["RT", "RESD", "RILD", "ILD"])).first()
+    if not cd:
+        raise HTTPException(400, f"No resistivity curve found")
+
+    dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
+    arr = np.frombuffer(cd.data_binary, dtype=np.float64).copy()
+    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(arr)) * 0.5
+
+    # Log-scale the resistivity for better dynamic range
+    arr_log = np.where(arr > 0, np.log10(arr), np.nan)
+
+    valid = arr_log[~np.isnan(arr_log)]
+    if len(valid) == 0:
+        raise HTTPException(400, "No valid data in curve")
+
+    v_min = float(np.percentile(valid, 5))
+    v_max = float(np.percentile(valid, 95))
+
+    # Normalize to 0-1
+    normalized = (arr_log - v_min) / (v_max - v_min) if v_max > v_min else np.zeros_like(arr_log)
+    normalized = np.clip(normalized, 0, 1)
+
+    # Generate image data: each depth sample → n_bins angular values
+    # Simulate borehole image by adding some angular variation
+    step = max(1, len(dept) // 1000)
+    image_data = []
+    depths_out = []
+
+    for i in range(0, len(dept), step):
+        if np.isnan(normalized[i]):
+            continue
+        base_val = normalized[i]
+        # Create angular variation (simulate borehole breakout/tool eccentricity)
+        row = []
+        for b in range(n_bins):
+            # Add sinusoidal variation + noise
+            angle = (b / n_bins) * 2 * np.pi
+            variation = 0.1 * np.sin(angle + i * 0.01) + np.random.normal(0, 0.03)
+            val = np.clip(base_val + variation, 0, 1)
+            # Map to RGB: blue(0) → white(0.5) → red(1)
+            if val < 0.5:
+                r = int(val * 2 * 255)
+                g = int(val * 2 * 255)
+                b_c = 255
+            else:
+                r = 255
+                g = int((1 - val) * 2 * 255)
+                b_c = int((1 - val) * 2 * 255)
+            row.append([r, g, b_c])
+        image_data.append(row)
+        depths_out.append(round(float(dept[i]), 1))
+
+    return {
+        "depth": depths_out,
+        "image": image_data,
+        "n_bins": n_bins,
+        "params": {"curve": cd.mnemonic, "v_min": round(10**v_min, 2), "v_max": round(10**v_max, 2)},
+        "color_scale": "blue-white-red (log resistivity)",
+    }
 
 
 # ─── Frontend Serving ─────────────────────────────────────────

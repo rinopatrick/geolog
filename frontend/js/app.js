@@ -249,11 +249,16 @@ class GeoLogApp {
         document.getElementById('vclmodelsPanel').style.display = view === 'vclmodels' ? 'block' : 'none';
         document.getElementById('corecalPanel').style.display = view === 'corecal' ? 'block' : 'none';
         document.getElementById('qcautofixPanel').style.display = view === 'qcautofix' ? 'block' : 'none';
+        document.getElementById('seismicPanel').style.display = view === 'seismic' ? 'block' : 'none';
+        document.getElementById('imagelogPanel').style.display = view === 'imagelog' ? 'block' : 'none';
+        document.getElementById('analogsPanel').style.display = view === 'analogs' ? 'block' : 'none';
+        document.getElementById('usersPanel').style.display = view === 'users' ? 'block' : 'none';
 
         // Sprint 26: Update status bar + trigger panel-specific loads
         this._updateStatusBar(view);
         if (view === 'matrix') this.loadCrossPlotMatrix();
         if (view === 'audit') this._renderAuditPanel();
+        if (view === 'users') this.loadUsers();
 
         if (view === 'crossplot') this._renderCrossPlot();
         if (view === 'pickett') this._renderPickettPlot();
@@ -5142,7 +5147,6 @@ class GeoLogApp {
         if (data.issues.length === 0) {
             html += '<div style="color:var(--success);font-size:14px;padding:20px;text-align:center">✓ No issues found — data quality is excellent</div>';
         } else {
-            // Issues table
             html += '<h4 style="color:var(--text-primary);margin-bottom:10px">Issues Found</h4>';
             html += '<table class="petro-table"><tr><th>Curve</th><th>Type</th><th>Severity</th><th>Detail</th></tr>';
             data.issues.forEach(i => {
@@ -5151,7 +5155,6 @@ class GeoLogApp {
             });
             html += '</table>';
 
-            // Fixes
             if (data.fixes.length) {
                 html += '<h4 style="color:var(--accent);margin:16px 0 10px">Recommended Fixes</h4>';
                 html += '<table class="petro-table"><tr><th>Curve</th><th>Action</th><th>Detail</th></tr>';
@@ -5167,6 +5170,334 @@ class GeoLogApp {
         container.style.padding = '0';
     }
 
+    // ─── Sprint 28: Synthetic Seismogram ────────────────────────
+    async runSeismic() {
+        if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
+        const freq = document.getElementById('seismicFreq')?.value || 30;
+        GeoLoading.show('Generating synthetic seismogram...');
+        try {
+            const resp = await fetch(`/api/wells/${this.currentWell}/synthetic-seismogram`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frequency: parseFloat(freq) })
+            });
+            const data = await resp.json();
+            GeoLoading.hide();
+            if (data.detail) { GeoToast.error(data.detail); return; }
+            this._renderSeismic(data);
+        } catch (e) {
+            GeoLoading.hide();
+            GeoToast.error('Seismogram failed: ' + e.message);
+        }
+    }
+
+    _renderSeismic(data) {
+        const container = document.getElementById('seismicResults');
+        if (!container) return;
+
+        let html = `<div style="display:flex;gap:20px;margin-bottom:16px">
+            <div class="stats-card" style="flex:1">
+                <h4 style="color:var(--accent)">Acoustic Impedance</h4>
+                <div class="petro-stat"><span>Min</span><strong>${data.stats.ai_min}</strong></div>
+                <div class="petro-stat"><span>Max</span><strong>${data.stats.ai_max}</strong></div>
+                <div class="petro-stat"><span>Mean</span><strong>${data.stats.ai_mean}</strong></div>
+            </div>
+            <div class="stats-card" style="flex:1">
+                <h4 style="color:var(--accent)">Reflection Coefficients</h4>
+                <div class="petro-stat"><span>Min</span><strong>${data.stats.rc_min}</strong></div>
+                <div class="petro-stat"><span>Max</span><strong>${data.stats.rc_max}</strong></div>
+                <div class="petro-stat"><span>Points</span><strong>${data.params.n_points}</strong></div>
+            </div>
+            <div class="stats-card" style="flex:1">
+                <h4 style="color:var(--accent)">Wavelet</h4>
+                <div class="petro-stat"><span>Frequency</span><strong>${data.params.frequency} Hz</strong></div>
+                <div class="petro-stat"><span>Type</span><strong>Ricker</strong></div>
+            </div>
+        </div>`;
+        html += '<canvas id="seismicCanvas" style="width:100%;height:500px;background:var(--bg-primary);border-radius:8px"></canvas>';
+
+        container.innerHTML = html;
+        container.className = '';
+        container.style.padding = '0';
+
+        // Render traces
+        setTimeout(() => {
+            const canvas = document.getElementById('seismicCanvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const W = canvas.parentElement.getBoundingClientRect().width;
+            canvas.width = W * 2;
+            canvas.height = 1000;
+            ctx.scale(2, 2);
+            const H = 500;
+            const pad = { top: 20, right: 20, bottom: 40, left: 60 };
+            const pw = W - pad.left - pad.right;
+            const ph = H - pad.top - pad.bottom;
+
+            ctx.fillStyle = '#0a0e14';
+            ctx.fillRect(0, 0, W, H);
+
+            const depth = data.depth;
+            const dMin = Math.min(...depth);
+            const dMax = Math.max(...depth);
+
+            // Grid
+            ctx.strokeStyle = 'rgba(42,52,70,0.5)';
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i <= 5; i++) {
+                const y = pad.top + (ph / 5) * i;
+                ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + pw, y); ctx.stroke();
+                ctx.fillStyle = '#6b7a8d';
+                ctx.font = '10px JetBrains Mono';
+                ctx.textAlign = 'right';
+                ctx.fillText((dMin + (dMax - dMin) / 5 * i).toFixed(0), pad.left - 8, y + 4);
+            }
+
+            // AI track (left third)
+            const aiW = pw / 3;
+            const aiMin = data.stats.ai_min;
+            const aiMax = data.stats.ai_max;
+            ctx.strokeStyle = '#5b8fb9';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            for (let i = 0; i < depth.length; i++) {
+                const x = pad.left + ((data.ai[i] - aiMin) / (aiMax - aiMin)) * aiW;
+                const y = pad.top + ((depth[i] - dMin) / (dMax - dMin)) * ph;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Synthetic trace (center) — wiggle display
+            const synthW = pw / 3;
+            const synthCenter = pad.left + aiW + synthW / 2;
+            const synthMax = Math.max(...data.synthetic.map(Math.abs));
+            ctx.strokeStyle = '#d4a853';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            for (let i = 0; i < depth.length; i++) {
+                const x = synthCenter + (data.synthetic[i] / synthMax) * synthW / 2;
+                const y = pad.top + ((depth[i] - dMin) / (dMax - dMin)) * ph;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Fill positive
+            ctx.fillStyle = 'rgba(212,168,83,0.15)';
+            ctx.beginPath();
+            ctx.moveTo(synthCenter, pad.top);
+            for (let i = 0; i < depth.length; i++) {
+                const x = synthCenter + (data.synthetic[i] / synthMax) * synthW / 2;
+                const y = pad.top + ((depth[i] - dMin) / (dMax - dMin)) * ph;
+                ctx.lineTo(x, y);
+            }
+            ctx.lineTo(synthCenter, pad.top + ph);
+            ctx.closePath();
+            ctx.fill();
+
+            // Labels
+            ctx.fillStyle = '#9aa8b8';
+            ctx.font = '12px Geologica';
+            ctx.textAlign = 'center';
+            ctx.fillText('AI', pad.left + aiW / 2, pad.top - 5);
+            ctx.fillText('Synthetic', synthCenter, pad.top - 5);
+        }, 100);
+    }
+
+    // ─── Sprint 28: Image Log ───────────────────────────────────
+    async runImageLog() {
+        if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
+        GeoLoading.show('Generating borehole image...');
+        try {
+            const resp = await fetch(`/api/wells/${this.currentWell}/image-log`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            const data = await resp.json();
+            GeoLoading.hide();
+            if (data.detail) { GeoToast.error(data.detail); return; }
+            this._renderImageLog(data);
+        } catch (e) {
+            GeoLoading.hide();
+            GeoToast.error('Image log failed');
+        }
+    }
+
+    _renderImageLog(data) {
+        const canvas = document.getElementById('imageLogCanvas');
+        const empty = document.getElementById('imageLogEmpty');
+        if (!canvas) return;
+        canvas.style.display = 'block';
+        if (empty) empty.style.display = 'none';
+
+        const ctx = canvas.getContext('2d');
+        const W = canvas.parentElement.getBoundingClientRect().width;
+        const nDepths = data.depth.length;
+        const nBins = data.n_bins;
+        const cellW = Math.max(1, (W - 80) / nBins);
+        const cellH = Math.max(1, 2);
+        const H = Math.max(400, nDepths * cellH + 80);
+
+        canvas.width = W * 2;
+        canvas.height = H * 2;
+        ctx.scale(2, 2);
+        ctx.fillStyle = '#0a0e14';
+        ctx.fillRect(0, 0, W, H);
+
+        const startX = 60;
+
+        // Draw image
+        for (let d = 0; d < nDepths; d++) {
+            for (let b = 0; b < nBins; b++) {
+                const [r, g, bC] = data.image[d][b];
+                ctx.fillStyle = `rgb(${r},${g},${bC})`;
+                ctx.fillRect(startX + b * cellW, 20 + d * cellH, cellW + 0.5, cellH + 0.5);
+            }
+            // Depth labels (every 20th)
+            if (d % 20 === 0) {
+                ctx.fillStyle = '#6b7a8d';
+                ctx.font = '9px JetBrains Mono';
+                ctx.textAlign = 'right';
+                ctx.fillText(data.depth[d].toFixed(0), startX - 5, 20 + d * cellH + 3);
+            }
+        }
+
+        // Color scale legend
+        const legendX = startX + nBins * cellW + 10;
+        const legendH = 200;
+        for (let i = 0; i < legendH; i++) {
+            const val = i / legendH;
+            let r, g, bC;
+            if (val < 0.5) {
+                r = val * 2 * 255; g = val * 2 * 255; bC = 255;
+            } else {
+                r = 255; g = (1 - val) * 2 * 255; bC = (1 - val) * 2 * 255;
+            }
+            ctx.fillStyle = `rgb(${r},${g},${bC})`;
+            ctx.fillRect(legendX, 20 + i, 15, 1);
+        }
+        ctx.fillStyle = '#6b7a8d';
+        ctx.font = '10px JetBrains Mono';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${data.params.v_max} Ωm`, legendX + 18, 25);
+        ctx.fillText(`${data.params.v_min} Ωm`, legendX + 18, 20 + legendH);
+        ctx.fillText('High', legendX + 18, 20 + legendH / 2 - 10);
+        ctx.fillText('Low', legendX + 18, 20 + legendH / 2 + 15);
+    }
+
+    // ─── Sprint 28: Offset-Well Analogs ─────────────────────────
+    async runAnalogs() {
+        if (!this.currentWell || !this.projects.length) { GeoToast.warn('Select a well first'); return; }
+        GeoLoading.show('Finding analog wells...');
+        try {
+            const pid = this.projects[0]?.id;
+            const resp = await fetch(`/api/projects/${pid}/well-analogs?reference_well_id=${this.currentWell}`);
+            const data = await resp.json();
+            GeoLoading.hide();
+            if (data.detail) { GeoToast.error(data.detail); return; }
+            this._renderAnalogs(data);
+        } catch (e) {
+            GeoLoading.hide();
+            GeoToast.error('Analog search failed');
+        }
+    }
+
+    _renderAnalogs(data) {
+        const container = document.getElementById('analogsResults');
+        if (!container) return;
+
+        let html = `<div style="margin-bottom:16px"><span style="color:var(--accent);font-weight:600">Reference: ${data.reference_well}</span></div>`;
+
+        if (!data.analogs.length) {
+            html += '<div style="color:var(--text-muted);padding:20px;text-align:center">No other wells with matching curves found</div>';
+        } else {
+            html += '<table class="petro-table"><tr><th>Well</th><th>Similarity</th><th>Curves</th><th>GR Mean</th><th>RT Mean</th><th>NPHI Mean</th><th>RHOB Mean</th></tr>';
+            data.analogs.forEach(a => {
+                const sim = (a.similarity * 100).toFixed(1);
+                const simColor = a.similarity > 0.8 ? 'var(--success)' : a.similarity > 0.5 ? 'var(--warning)' : 'var(--text-muted)';
+                html += `<tr>
+                    <td style="font-weight:600">${a.well_name}</td>
+                    <td style="color:${simColor};font-weight:600">${sim}%</td>
+                    <td>${a.matching_curves}</td>
+                    <td>${a.stats.GR?.mean?.toFixed(1) || '—'}</td>
+                    <td>${a.stats.RT?.mean?.toFixed(1) || '—'}</td>
+                    <td>${a.stats.NPHI?.mean?.toFixed(3) || '—'}</td>
+                    <td>${a.stats.RHOB?.mean?.toFixed(2) || '—'}</td>
+                </tr>`;
+            });
+            html += '</table>';
+        }
+
+        container.innerHTML = html;
+        container.className = '';
+        container.style.padding = '0';
+    }
+
+    // ─── Sprint 28: Users Management ────────────────────────────
+    async loadUsers() {
+        try {
+            const resp = await fetch('/api/users');
+            const users = await resp.json();
+            this._renderUsers(users);
+        } catch { }
+    }
+
+    _renderUsers(users) {
+        const container = document.getElementById('usersResults');
+        if (!container) return;
+
+        if (!users.length) {
+            container.innerHTML = `<div class="empty-state">
+                <div class="empty-state-icon"><i data-lucide="users"></i></div>
+                <h3>No Users</h3>
+                <p>Add users to manage access and track who makes changes.</p>
+            </div>`;
+            if (typeof lucide !== 'undefined') lucide.createIcons({ attrs: { 'stroke-width': 1.5 } });
+            return;
+        }
+
+        const roleColors = { admin: 'var(--danger)', interpreter: 'var(--accent)', viewer: 'var(--text-muted)' };
+        let html = '<table class="petro-table"><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Created</th><th>Actions</th></tr>';
+        users.forEach(u => {
+            html += `<tr>
+                <td style="font-weight:600">${u.username}</td>
+                <td>${u.display_name || '—'}</td>
+                <td style="color:${roleColors[u.role] || 'var(--text-muted)'};font-weight:600">${u.role}</td>
+                <td style="font-size:10px">${new Date(u.created_at).toLocaleDateString()}</td>
+                <td><button class="btn-sm" onclick="app.deleteUser(${u.id})"><i data-lucide="trash-2"></i></button></td>
+            </tr>`;
+        });
+        html += '</table>';
+        container.innerHTML = html;
+        if (typeof lucide !== 'undefined') lucide.createIcons({ attrs: { 'stroke-width': 1.5 } });
+    }
+
+    createUser() {
+        GeoModal.show({
+            title: 'Add User',
+            fields: [
+                { id: 'username', label: 'Username', type: 'text', placeholder: 'jsmith' },
+                { id: 'display_name', label: 'Display Name', type: 'text', placeholder: 'John Smith' },
+                { id: 'role', label: 'Role', type: 'select', value: 'interpreter', options: [
+                    { value: 'admin', label: 'Admin' },
+                    { value: 'interpreter', label: 'Interpreter' },
+                    { value: 'viewer', label: 'Viewer' },
+                ]},
+            ],
+            onConfirm: async (vals) => {
+                try {
+                    await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(vals) });
+                    GeoToast.success('User created');
+                    this.loadUsers();
+                } catch { GeoToast.error('Failed to create user'); }
+            }
+        });
+    }
+
+    async deleteUser(uid) {
+        if (!confirm('Delete this user?')) return;
+        await fetch(`/api/users/${uid}`, { method: 'DELETE' });
+        GeoToast.success('User deleted');
+        this.loadUsers();
+    }
 }
 // Initialize
 const app = new GeoLogApp();
@@ -5176,7 +5507,7 @@ document.addEventListener('keydown', (e) => {
     // Don't trigger if typing in input/textarea
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
 
-    const views = ['viewer', 'crossplot', 'pickett', 'mnplot', 'petrophysics', 'qc', 'correlation', 'statistics', 'sensitivity', 'comparison', 'striplog', 'facies', 'tools', 'probability', 'moveable', 'dipplot', 'buckles', 'hingle', 'calculator', 'datatable', 'topsmgmt', 'formation', 'batch', 'map', 'dashboard', 'matrix', 'audit', 'tornado', 'vclmodels', 'corecal', 'qcautofix'];
+    const views = ['viewer', 'crossplot', 'pickett', 'mnplot', 'petrophysics', 'qc', 'correlation', 'statistics', 'sensitivity', 'comparison', 'striplog', 'facies', 'tools', 'probability', 'moveable', 'dipplot', 'buckles', 'hingle', 'calculator', 'datatable', 'topsmgmt', 'formation', 'batch', 'map', 'dashboard', 'matrix', 'audit', 'tornado', 'vclmodels', 'corecal', 'qcautofix', 'seismic', 'imagelog', 'analogs', 'users'];
 
     switch (e.key) {
         case '1': case '2': case '3': case '4':

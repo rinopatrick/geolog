@@ -231,3 +231,15 @@ class AuditLog(Base):
     details = Column(Text, default="")  # JSON details of what changed
     user_label = Column(String(100), default="local")  # user identifier
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class User(Base):
+    """Multi-user roles for enterprise access control."""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(100), unique=True, nullable=False)
+    display_name = Column(String(200), default="")
+    role = Column(String(50), default="interpreter")  # admin, interpreter, viewer
+    token = Column(String(200), default="")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
