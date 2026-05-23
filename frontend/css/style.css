@@ -1,48 +1,76 @@
-/* ─── GeoLog — Oil & Gas Well Log Viewer Theme ─────────── */
+/* ─── GeoLog — Petroleum Industry Well Log Viewer ─────────── */
+/* Design: Industrial Scientific — Schlumberger Techlog meets Bloomberg Terminal */
 
 :root {
-    --bg-primary: #0d1117;
-    --bg-secondary: #161b22;
-    --bg-tertiary: #1c2128;
-    --bg-surface: #21262d;
-    --border: #3d444d;
-    --border-light: #21262d;
-    --text-primary: #e6edf3;
-    --text-secondary: #a0adb8;
-    --text-muted: #848d97;
-    --accent: #58a6ff;
-    --accent-emphasis: #1f6feb;
-    --success: #3fb950;
-    --warning: #d29922;
-    --danger: #f85149;
-    --green: #2ecc71;
-    --blue: #3498db;
-    --red: #e74c3c;
-    --orange: #e67e22;
-    --purple: #9b59b6;
-    --cyan: #1abc9c;
-    --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-mono: 'IBM Plex Mono', 'Fira Code', monospace;
+    /* Petroleum-industry palette: deep crude navy + amber oil accents */
+    --bg-primary: #0a0e14;
+    --bg-secondary: #111720;
+    --bg-tertiary: #171d28;
+    --bg-surface: #1c2433;
+    --bg-elevated: #222b3a;
+    --border: #2a3446;
+    --border-light: #1e2738;
+    --border-accent: #3d4f6a;
+    --text-primary: #e8ddd0;
+    --text-secondary: #9aa8b8;
+    --text-muted: #6b7a8d;
+    --text-accent: #d4a853;
+    /* Accent: crude oil amber/gold — NOT generic blue */
+    --accent: #d4a853;
+    --accent-hover: #e8be6a;
+    --accent-emphasis: #b8912e;
+    --accent-subtle: rgba(212, 168, 83, 0.12);
+    --accent-glow: rgba(212, 168, 83, 0.25);
+    /* Semantic colors — muted, professional */
+    --success: #4caf7d;
+    --success-bg: rgba(76, 175, 125, 0.1);
+    --warning: #d4a853;
+    --warning-bg: rgba(212, 168, 83, 0.1);
+    --danger: #c75a5a;
+    --danger-bg: rgba(199, 90, 90, 0.1);
+    /* Curve colors — petroleum industry standard */
+    --green: #4caf7d;
+    --blue: #5b8fb9;
+    --red: #c75a5a;
+    --orange: #d48a4a;
+    --purple: #8b6fb0;
+    --cyan: #5ba8a0;
+    /* Typography — distinctive, NOT generic */
+    --font-sans: 'Geologica', 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+    --font-data: 'Fira Code', 'JetBrains Mono', monospace;
+    /* Layout */
     --sidebar-width: 280px;
     --topbar-height: 52px;
+    /* Depth layers */
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+    --shadow-lg: 0 8px 32px rgba(0,0,0,0.5);
+    --shadow-glow: 0 0 20px rgba(212, 168, 83, 0.15);
+    /* Transitions */
+    --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
     font-family: var(--font-sans);
-    font-size: 15px;
-    line-height: 1.5;
     background: var(--bg-primary);
     color: var(--text-primary);
     overflow: hidden;
     height: 100vh;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 /* ─── Top Bar ──────────────────────────────────────────── */
 .topbar {
     height: var(--topbar-height);
-    background: var(--bg-secondary);
+    background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
@@ -50,6 +78,7 @@ body {
     padding: 0 16px;
     z-index: 100;
     position: relative;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
 
 .topbar-left { display: flex; align-items: center; gap: 16px; }
@@ -91,10 +120,19 @@ body {
     display: flex;
     align-items: center;
     gap: 6px;
-    transition: all 0.15s;
+    transition: all var(--transition-fast);
+    position: relative;
 }
-.nav-btn:hover { background: var(--bg-surface); color: var(--text-primary); }
-.nav-btn.active { background: var(--accent-emphasis); color: white; }
+.nav-btn:hover { 
+    background: var(--bg-surface); 
+    color: var(--text-primary);
+    transform: translateY(-1px);
+}
+.nav-btn.active { 
+    background: var(--accent-subtle);
+    color: var(--accent);
+    box-shadow: inset 0 -2px 0 var(--accent);
+}
 .nav-btn i { width: 16px; height: 16px; }
 
 .topbar-actions { display: flex; gap: 6px; }
@@ -110,10 +148,16 @@ body {
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 5px;
-    transition: all 0.15s;
+    gap: 6px;
+    transition: all var(--transition-fast);
 }
-.btn-action:hover { background: var(--border); color: var(--text-primary); }
+.btn-action:hover {
+    background: var(--bg-elevated);
+    border-color: var(--border-accent);
+    color: var(--text-primary);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
 .btn-action i { width: 14px; height: 14px; }
 
 /* ─── Sidebar ──────────────────────────────────────────── */
@@ -919,3 +963,249 @@ label,
   .topbar-nav { overflow-x: auto; flex-wrap: nowrap; }
 }
 
+
+
+/* ═══════════════════════════════════════════════════════════
+   PETROLEUM INDUSTRY VISUAL OVERHAUL — Anti-AI-Slop
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── Sidebar depth ──────────────────────────────────────── */
+.sidebar {
+    background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%) !important;
+    box-shadow: 2px 0 12px rgba(0,0,0,0.3);
+}
+
+.sidebar-header h2 {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    letter-spacing: 2px;
+    font-size: 11px;
+    color: var(--accent);
+    text-transform: uppercase;
+}
+
+/* ─── Well cards in sidebar ──────────────────────────────── */
+.well-item {
+    transition: all var(--transition-fast);
+    border-left: 3px solid transparent;
+}
+.well-item:hover {
+    background: var(--bg-surface);
+    border-left-color: var(--accent);
+}
+.well-item.active {
+    background: var(--accent-subtle);
+    border-left-color: var(--accent);
+}
+
+/* ─── Cards and panels ───────────────────────────────────── */
+.card, .panel-card, .petro-card {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--shadow-sm);
+    transition: border-color var(--transition-fast);
+}
+.card:hover, .panel-card:hover {
+    border-color: var(--border-accent);
+}
+
+/* ─── Form controls ──────────────────────────────────────── */
+input[type="number"], input[type="text"], select, textarea {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    transition: all var(--transition-fast);
+}
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+/* ─── Buttons — distinctive amber accent ─────────────────── */
+.btn-primary, .btn-accent {
+    background: linear-gradient(135deg, var(--accent-emphasis) 0%, var(--accent) 100%);
+    color: #0a0e14;
+    font-weight: 600;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    box-shadow: 0 2px 8px rgba(212, 168, 83, 0.2);
+}
+.btn-primary:hover, .btn-accent:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(212, 168, 83, 0.35);
+    filter: brightness(1.1);
+}
+
+/* ─── Tables ─────────────────────────────────────────────── */
+table {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: 100%;
+}
+th {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--accent);
+    padding: 10px 12px;
+    border-bottom: 2px solid var(--border);
+    background: var(--bg-tertiary);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+td {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-light);
+    color: var(--text-primary);
+}
+tr:hover td {
+    background: var(--accent-subtle);
+}
+
+/* ─── Scrollbars — refined ───────────────────────────────── */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+    border: 2px solid var(--bg-primary);
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--border-accent);
+}
+
+/* ─── Data values — monospace with subtle glow ───────────── */
+.data-value, .stat-value {
+    font-family: var(--font-data);
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+.data-label {
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+/* ─── QC badges ──────────────────────────────────────────── */
+.badge-high { color: var(--success); background: var(--success-bg); padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+.badge-medium { color: var(--warning); background: var(--warning-bg); padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+.badge-low { color: var(--danger); background: var(--danger-bg); padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+
+/* ─── Grade display ──────────────────────────────────────── */
+.qc-grade {
+    font-family: var(--font-sans);
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -1px;
+}
+.qc-grade-a { color: var(--success); text-shadow: 0 0 20px rgba(76, 175, 125, 0.3); }
+.qc-grade-b { color: var(--warning); text-shadow: 0 0 20px rgba(212, 168, 83, 0.3); }
+.qc-grade-c { color: var(--danger); text-shadow: 0 0 20px rgba(199, 90, 90, 0.3); }
+
+/* ─── Panel transitions ──────────────────────────────────── */
+.panel-view {
+    animation: panelFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes panelFadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Logo refinement ────────────────────────────────────── */
+.logo-text {
+    font-family: var(--font-sans) !important;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 50%, var(--orange) 100%) !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+}
+
+/* ─── Canvas area — subtle grid texture ──────────────────── */
+.log-canvas-container, .canvas-area {
+    background: 
+        radial-gradient(circle at 50% 50%, rgba(212, 168, 83, 0.02) 0%, transparent 70%),
+        var(--bg-primary);
+}
+
+/* ─── Tooltip refinement ─────────────────────────────────── */
+[title] {
+    position: relative;
+}
+
+/* ─── Help modal — gold accent ───────────────────────────── */
+.help-modal {
+    border-top: 3px solid var(--accent) !important;
+}
+.help-modal-header h3 {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+/* ─── Nav group dropdown — refined ───────────────────────── */
+.nav-group-menu {
+    background: var(--bg-tertiary) !important;
+    border: 1px solid var(--border-accent) !important;
+    box-shadow: var(--shadow-lg) !important;
+    backdrop-filter: blur(12px);
+}
+.nav-group-menu .nav-btn:hover {
+    background: var(--accent-subtle);
+    color: var(--accent);
+}
+
+/* ─── Responsive fine-tuning ─────────────────────────────── */
+@media (max-width: 1366px) {
+    :root { --sidebar-width: 240px; --topbar-height: 48px; }
+    .nav-btn { font-size: 11px; padding: 4px 6px; }
+}
+
+@media (min-width: 1920px) {
+    :root { --sidebar-width: 320px; }
+    body { font-size: 15px; }
+}
+
+@media (min-width: 2560px) {
+    :root { --sidebar-width: 360px; }
+    body { font-size: 16px; }
+}
+
+@media (max-width: 1024px) {
+    .sidebar { display: none; }
+    :root { --sidebar-width: 0px; }
+    .topbar-nav { overflow-x: auto; flex-wrap: nowrap; }
+}
+
+/* ─── Selection color ────────────────────────────────────── */
+::selection {
+    background: var(--accent-subtle);
+    color: var(--accent);
+}
+
+/* ─── Focus visible — accessibility ──────────────────────── */
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
