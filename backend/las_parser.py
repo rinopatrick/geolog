@@ -18,24 +18,74 @@ CURVE_ALIASES = {
 
     # Caliper
     'CALI': 'CAL',
+    'HCAL': 'CAL',
+    'DCAL': 'CAL',
+
+    # Gamma Ray family
+    'GRGC': 'GR',       # KGS: GR corrected
+    'CGR': 'GR',        # Corrected GR
+    'SGR': 'GR',        # Spectral GR
 
     # Resistivity family (canonical deep target)
     'RESD': 'RT',
     'ILD': 'RILD',
+    'RILD': 'RILD',
+    'RILM': 'RILM',
+    'RES': 'RT',
+    'CILD': 'RT',       # KGS: Conductivity converted
+    'CILM': 'RILM',     # KGS: Medium conductivity
+    'RLL3': 'RLL3',
+    'RXORT': 'RXO',
 
     # Sonic family
     'DTP': 'DT',
+    'DT35': 'DT',       # KGS: DT variant
+    'SPOR': 'DT',       # KGS: Sonic porosity (proxy)
+
+    # Density family
+    'DEN': 'RHOB',      # KGS: Density
+    'DPOR': 'DPOR',     # KGS: Density porosity (separate track)
+    'CNLS': 'NPHI',     # KGS: Compensated neutron → neutron porosity
+    'NPRL': 'NPHI',     # KGS: Neutron porosity
+    'RHOC': 'RHOB',     # Corrected density
+    'DGA': 'DGA',       # KGS: Density (gamma-gamma) — keep separate
+
+    # SP family
+    'SPCG': 'SP',       # KGS: SP corrected
+    'SPRL': 'SP',       # KGS: SP
+
+    # Misc
+    'CLDC': 'CAL',      # KGS: Caliper
+    'DCOR': 'DRHO',     # KGS: Density correction
+    'PDPE': 'PE',       # KGS: Photoelectric
+    'DPRL': 'NPHI',     # KGS: Density porosity (neutron proxy)
+    'FEFE': 'PE',       # KGS: Iron/PE
 
     # Common no-op canonical mnemonics (explicit for readability)
     'GR': 'GR',
     'SP': 'SP',
+    'SPC': 'SP',
     'CAL': 'CAL',
     'RT': 'RT',
-    'RILD': 'RILD',
     'RXO': 'RXO',
     'NPHI': 'NPHI',
     'RHOB': 'RHOB',
     'DT': 'DT',
+    'PE': 'PE',
+    'PEF': 'PE',
+    'DRHO': 'DRHO',
+    'DPOR': 'DPOR',
+    'DGA': 'DGA',
+    'MI': 'MI',
+    'MN': 'MN',
+}
+
+# Additional curve track configs for non-standard canonical names
+EXTRA_CURVE_TRACKS = {
+    'DPOR': {'track': 3, 'color': '#f39c12', 'scale': (0.45, -0.15), 'unit': 'PU', 'name': 'Density Porosity'},
+    'DGA':  {'track': 3, 'color': '#e67e22', 'scale': (1.95, 2.95), 'unit': 'GM/CC', 'name': 'Gamma-Gamma Density'},
+    'RLL3': {'track': 2, 'color': '#f39c12', 'scale': (0.2, 2000), 'log': True, 'unit': 'OHMM', 'name': 'Laterolog 3'},
+    'RILM': {'track': 2, 'color': '#e67e22', 'scale': (0.2, 2000), 'log': True, 'unit': 'OHMM', 'name': 'Medium Induction'},
 }
 
 DEPTH_CANDIDATES = ('DEPT', 'DEPTH', 'MD', 'TVD')
@@ -145,7 +195,7 @@ class LASFile:
 
 class LASParser:
     """
-    Parse LAS 2.0 files.
+    Parse LAS 2.0/3.0 files.
 
     LAS format sections:
         ~V - Version info
@@ -154,6 +204,9 @@ class LASParser:
         ~P - Parameters
         ~A - Data (ASCII)
         ~O - Other (comments)
+
+    Also handles non-standard sections (KGS, IQ, Tops, etc.)
+    and comma-delimited LAS 3.0 files.
     """
 
     # Regex to parse a LAS line: mnemonic.unit value : description
@@ -185,8 +238,10 @@ class LASParser:
         """Parse a LAS file from a file-like object."""
         result = LASFile()
         current_section = None
+        in_curve_section = False   # True only while inside ~C section
         data_lines = []
         wrap = False
+        delimiter = None  # None = whitespace (default), ',' = comma, '\t' = tab
 
         for line in f:
             line = line.rstrip('\n\r')
@@ -196,24 +251,32 @@ class LASParser:
             if not stripped or stripped.startswith('#'):
                 continue
 
-            # Section header
+            # Section header — ANY ~X line ends the previous section
             if stripped.startswith('~'):
-                section_char = stripped[1].upper()
+                section_char = stripped[1].upper() if len(stripped) > 1 else ''
                 if section_char == 'V':
                     current_section = 'version'
                 elif section_char == 'W':
                     current_section = 'well'
                 elif section_char == 'C':
                     current_section = 'curves'
+                    in_curve_section = True
                 elif section_char == 'P':
                     current_section = 'parameters'
+                    in_curve_section = False
                 elif section_char == 'A':
                     current_section = 'data'
-                    # Check for WRAP
+                    in_curve_section = False
                     if 'WRAP' in stripped.upper() or 'YES' in stripped.upper():
                         wrap = True
                 elif section_char == 'O':
                     current_section = 'other'
+                    in_curve_section = False
+                else:
+                    # Non-standard section (Tops, IQ, Geo_Report, etc.)
+                    # Treat as unknown — don't continue parsing as curves
+                    current_section = 'unknown'
+                    in_curve_section = False
                 continue
 
             # Parse based on current section
@@ -232,17 +295,31 @@ class LASParser:
                             result.version = value
                         elif mnemonic.upper() == 'WRAP':
                             wrap = value.upper() == 'YES'
+                        elif mnemonic.upper() == 'DLM':
+                            # LAS 3.0 delimiter
+                            dl = value.strip().upper()
+                            if dl == 'COMMA':
+                                delimiter = ','
+                            elif dl == 'TAB':
+                                delimiter = '\t'
 
                     elif current_section == 'well':
                         LASParser._parse_well_field(result.well, mnemonic, value)
 
-                    elif current_section == 'curves':
-                        result.curves.append(LASCurve(
-                            mnemonic=mnemonic.upper(),
-                            unit=unit,
-                            value=value,
-                            description=description,
-                        ))
+                    elif current_section == 'curves' and in_curve_section:
+                        # Only accept valid curve mnemonics:
+                        # must start with a letter (not numeric-only)
+                        mnem_upper = mnemonic.upper()
+                        if mnem_upper and mnem_upper[0].isalpha():
+                            # Deduplicate: skip if canonical name already exists
+                            existing = [c.mnemonic for c in result.curves]
+                            if mnem_upper not in existing:
+                                result.curves.append(LASCurve(
+                                    mnemonic=mnem_upper,
+                                    unit=unit,
+                                    value=value,
+                                    description=description,
+                                ))
 
                     elif current_section == 'parameters':
                         result.parameters.append(LASParameter(
@@ -258,7 +335,7 @@ class LASParser:
             result.depth_key = next((m for m in DEPTH_CANDIDATES if m in mnems), result.curves[0].mnemonic)
 
         # Parse data section
-        LASParser._parse_data(result, data_lines, wrap)
+        LASParser._parse_data(result, data_lines, wrap, delimiter)
 
         return result
 
@@ -293,18 +370,24 @@ class LASParser:
                 setattr(well, attr, value)
 
     @staticmethod
-    def _parse_data(las: LASFile, data_lines: List[str], wrap: bool):
+    def _parse_data(las: LASFile, data_lines: List[str], wrap: bool, delimiter=None):
         """Parse the ~A data section into numpy arrays."""
         num_curves = len(las.curves)
         if num_curves == 0 or not data_lines:
             return
+
+        def split_line(line: str) -> list:
+            """Split a data line using the detected delimiter or whitespace."""
+            if delimiter:
+                return line.split(delimiter)
+            return line.split()
 
         if wrap:
             # Wrapped format: data continues on next line
             all_values = []
             current_row = []
             for line in data_lines:
-                values = line.split()
+                values = split_line(line)
                 current_row.extend(values)
                 if len(current_row) >= num_curves:
                     all_values.append(current_row[:num_curves])
@@ -312,7 +395,7 @@ class LASParser:
         else:
             all_values = []
             for line in data_lines:
-                values = line.split()
+                values = split_line(line)
                 if len(values) >= num_curves:
                     all_values.append(values[:num_curves])
 
@@ -384,3 +467,6 @@ TRACK_CONFIG = {
     3: {'name': 'Porosity', 'width': 80},
     4: {'name': 'Saturation', 'width': 80},
 }
+
+# Merge extra tracks into CURVE_TRACKS at module load
+CURVE_TRACKS.update(EXTRA_CURVE_TRACKS)
