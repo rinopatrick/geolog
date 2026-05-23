@@ -29,6 +29,8 @@ class LogRenderer {
         this.curveData = {};
         this.formationTops = [];
         this.zones = [];              // Picked zones [{name, top, bottom, color}]
+        this.dstIntervals = [];
+        this.rftPoints = [];
 
         // View state
         this.viewStart = 5000;
@@ -43,6 +45,15 @@ class LogRenderer {
 
         // Curve config (from backend)
         this.curveConfig = {};
+
+        // Manual edit overlay state
+        this.editOverlay = {
+            enabled: false,
+            mnemonic: null,
+            selected: [],
+            edited: [],
+            ghosts: [],
+        };
 
         // Colors
         this.colors = {
@@ -290,6 +301,9 @@ class LogRenderer {
         // Draw formation tops (background)
         this._drawFormationTops(ctx, startX, totalTrackWidth, plotTop, plotBottom);
 
+        // Draw DST intervals (background)
+        this._drawDSTIntervals(ctx, startX, totalTrackWidth, plotTop, plotBottom);
+
         // Draw zones (background)
         this._drawZones(ctx, startX, totalTrackWidth, plotTop, plotBottom);
 
@@ -311,6 +325,9 @@ class LogRenderer {
             this._drawTrack(ctx, track, t, trackX, plotTop, plotBottom, track.width);
             trackX += track.width;
         }
+
+        // Manual edit overlay
+        this._drawEditOverlay(ctx);
 
         // Draw header
         this._drawHeaders(ctx, startX, totalTrackWidth);
@@ -337,6 +354,108 @@ class LogRenderer {
 
         // Draw formation top labels
         this._drawFormationTopLabels(ctx, startX, totalTrackWidth, plotTop, plotBottom);
+
+        // Draw RFT points (foreground)
+        this._drawRFTPoints(ctx, startX, totalTrackWidth, plotTop, plotBottom);
+    }
+
+    setEditOverlay(overlay = {}) {
+        this.editOverlay = {
+            enabled: !!overlay.enabled,
+            mnemonic: overlay.mnemonic || null,
+            selected: Array.isArray(overlay.selected) ? overlay.selected : [],
+            edited: Array.isArray(overlay.edited) ? overlay.edited : [],
+            ghosts: Array.isArray(overlay.ghosts) ? overlay.ghosts : [],
+        };
+        this.render();
+    }
+
+    _drawEditOverlay(ctx) {
+        if (!this.editOverlay?.enabled) return;
+        const drawPts = (pts, fill, radius = 3.5, stroke = null) => {
+            for (const p of pts) {
+                if (!Number.isFinite(p?.x) || !Number.isFinite(p?.y)) continue;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+                ctx.fillStyle = fill;
+                ctx.fill();
+                if (stroke) {
+                    ctx.strokeStyle = stroke;
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+            }
+        };
+        drawPts(this.editOverlay.ghosts, 'rgba(148,163,184,0.45)', 3.2, 'rgba(100,116,139,0.8)');
+        drawPts(this.editOverlay.edited, '#f97316', 4.2, '#fb923c');
+        drawPts(this.editOverlay.selected, '#fde047', 4.8, '#facc15');
+    }
+
+    _valueToXInTrack(val, scale, useLog, trackX, width) {
+        let x;
+        if (useLog) {
+            const logMin = Math.log10(Math.max(scale[0], 0.001));
+            const logMax = Math.log10(Math.max(scale[1], 0.001));
+            const logVal = Math.log10(Math.max(val, 0.001));
+            const normalized = (logVal - logMin) / (logMax - logMin);
+            x = trackX + width - normalized * width;
+        } else {
+            let normalized;
+            if (scale[0] > scale[1]) normalized = (scale[0] - val) / (scale[0] - scale[1]);
+            else normalized = (val - scale[0]) / (scale[1] - scale[0]);
+            x = trackX + normalized * width;
+        }
+        return Math.max(trackX, Math.min(trackX + width, x));
+    }
+
+    getCurvePointAtIndex(mnemonic, idx, overrideValue = undefined) {
+        if (!this.depthData?.length || !Number.isFinite(idx) || idx < 0 || idx >= this.depthData.length) return null;
+        const depth = this.depthData[idx];
+        let trackX = this.margin.left + this.depthTrackWidth;
+        for (const track of this.tracks) {
+            if (!track.curves.includes(mnemonic)) {
+                trackX += track.width;
+                continue;
+            }
+            const data = this.curveData[mnemonic];
+            if (!data || idx >= data.length) return null;
+            const v = overrideValue !== undefined ? overrideValue : data[idx];
+            if (v === null || v === undefined || Number.isNaN(v)) return null;
+            const cfg = this.curveConfig[mnemonic] || {};
+            const scale = cfg.scale || [0, 100];
+            const x = this._valueToXInTrack(v, scale, !!track.log, trackX, track.width);
+            const y = this._depthToY(depth);
+            return { mnemonic, index: idx, depth, value: v, x, y };
+        }
+        return null;
+    }
+
+    getNearestCurvePoint(mouseX, mouseY, preferredMnemonic = null) {
+        if (!this.depthData?.length) return null;
+        const plotTop = this.margin.top;
+        const plotBottom = this.height - this.margin.bottom;
+        if (mouseY < plotTop || mouseY > plotBottom) return null;
+
+        const depth = this._yToDepth(mouseY);
+        let idx = 0;
+        let minDepthDist = Infinity;
+        for (let i = 0; i < this.depthData.length; i++) {
+            const d = Math.abs(this.depthData[i] - depth);
+            if (d < minDepthDist) { minDepthDist = d; idx = i; }
+        }
+
+        let best = null;
+        const maxPx = 14;
+        const candidates = preferredMnemonic
+            ? [preferredMnemonic]
+            : this.tracks.flatMap(t => t.curves);
+        for (const mnemonic of candidates) {
+            const p = this.getCurvePointAtIndex(mnemonic, idx);
+            if (!p) continue;
+            const dist = Math.hypot(mouseX - p.x, mouseY - p.y);
+            if (dist <= maxPx && (!best || dist < best.distance)) best = { ...p, distance: dist };
+        }
+        return best;
     }
 
     _drawFormationColumn(ctx, x, width, plotTop, plotBottom) {
@@ -692,6 +811,57 @@ class LogRenderer {
             ctx.font = 'bold 10px DM Sans';
             ctx.textAlign = 'left';
             ctx.fillText(zone.name, startX + 4, Math.max(yTop, plotTop) + 14);
+        }
+    }
+
+    _drawDSTIntervals(ctx, startX, totalWidth, plotTop, plotBottom) {
+        if (!Array.isArray(this.dstIntervals) || !this.dstIntervals.length) return;
+        for (const d of this.dstIntervals) {
+            const top = Number(d.top_depth);
+            const bottom = Number(d.bottom_depth);
+            if (!Number.isFinite(top) || !Number.isFinite(bottom) || bottom <= top) continue;
+            const yTop = this._depthToY(top);
+            const yBottom = this._depthToY(bottom);
+            if (yBottom < plotTop || yTop > plotBottom) continue;
+            const y1 = Math.max(plotTop, yTop);
+            const y2 = Math.min(plotBottom, yBottom);
+            ctx.fillStyle = 'rgba(255,153,0,0.14)';
+            ctx.fillRect(startX, y1, totalWidth, y2 - y1);
+            ctx.strokeStyle = '#ff9900';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 4]);
+            ctx.beginPath();
+            ctx.moveTo(startX, y1);
+            ctx.lineTo(startX + totalWidth, y1);
+            ctx.moveTo(startX, y2);
+            ctx.lineTo(startX + totalWidth, y2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+    }
+
+    _drawRFTPoints(ctx, startX, totalWidth, plotTop, plotBottom) {
+        if (!Array.isArray(this.rftPoints) || !this.rftPoints.length) return;
+        const fluidColor = (f) => {
+            const v = String(f || '').toLowerCase();
+            if (v === 'oil') return '#2ecc71';
+            if (v === 'gas') return '#e74c3c';
+            if (v === 'water') return '#3498db';
+            return '#aaaaaa';
+        };
+        const x = startX + totalWidth - 8;
+        for (const p of this.rftPoints) {
+            const depth = Number(p.depth);
+            if (!Number.isFinite(depth)) continue;
+            const y = this._depthToY(depth);
+            if (y < plotTop || y > plotBottom) continue;
+            ctx.fillStyle = fluidColor(p.fluid_type);
+            ctx.beginPath();
+            ctx.arc(x, y, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#0d1117';
+            ctx.lineWidth = 1;
+            ctx.stroke();
         }
     }
 

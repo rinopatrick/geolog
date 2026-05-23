@@ -7,6 +7,7 @@ from starlette.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 import numpy as np
 import json
@@ -15,15 +16,21 @@ import datetime
 import csv
 import io
 from concurrent.futures import ThreadPoolExecutor
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from threading import Lock
 import uuid
 
 try:
     from database import engine, Base, get_db, SessionLocal
-    from models import Project, Well, LogRun, CurveData, FormationTop, Annotation, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
+    from models import Project, Well, LogRun, CurveData, FormationTop, Annotation, DSTTest, RFTPoint, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
     from las_parser import LASParser, CURVE_TRACKS
 except ImportError:
     from backend.database import engine, Base, get_db, SessionLocal
-    from backend.models import Project, Well, LogRun, CurveData, FormationTop, Annotation, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
+    from backend.models import Project, Well, LogRun, CurveData, FormationTop, Annotation, DSTTest, RFTPoint, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
     from backend.las_parser import LASParser, CURVE_TRACKS
 
 # Create tables
@@ -34,12 +41,135 @@ logging.basicConfig(
 )
 logger = logging.getLogger("geolog")
 
+# In-memory original-value snapshots for curve point edits.
+# Keyed by "<log_run_id>:<mnemonic>" -> {"index": original_value}
+CURVE_EDIT_ORIGINALS = {}
+
 Base.metadata.create_all(bind=engine)
+
+
+def _ensure_well_coordinate_columns():
+    """Add latitude/longitude columns if missing (idempotent)."""
+    with engine.begin() as conn:
+        try:
+            conn.execute(text("ALTER TABLE wells ADD COLUMN latitude FLOAT;"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE wells ADD COLUMN longitude FLOAT;"))
+        except Exception:
+            pass
+
+
+_ensure_well_coordinate_columns()
+
+
+def _to_float_or_none(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip()
+    if not s:
+        return None
+    # Keep numeric content and sign/dot
+    cleaned = "".join(ch for ch in s if ch.isdigit() or ch in {".", "-", "+"})
+    if cleaned in {"", ".", "-", "+", "-.", "+."}:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _extract_las_coordinates(las):
+    """Extract latitude/longitude from LAS well header/parameters when present."""
+    lat = None
+    lon = None
+
+    # Try explicit attributes if parser is extended in future
+    lat = _to_float_or_none(getattr(las.well, "latitude", None))
+    lon = _to_float_or_none(getattr(las.well, "longitude", None))
+
+    # Fallback: parse from location string (e.g. "29.1234, -95.5678")
+    if lat is None or lon is None:
+        loc = getattr(las.well, "location", "") or ""
+        nums = []
+        for token in loc.replace(";", " ").replace(",", " ").split():
+            v = _to_float_or_none(token)
+            if v is not None:
+                nums.append(v)
+        if len(nums) >= 2:
+            if lat is None:
+                lat = nums[0]
+            if lon is None:
+                lon = nums[1]
+
+    # Fallback: parse common parameter mnemonics
+    if lat is None or lon is None:
+        for p in las.parameters:
+            m = (p.mnemonic or "").strip().upper()
+            v = _to_float_or_none(p.value)
+            if v is None:
+                continue
+            if lat is None and m in {"LAT", "LATI", "LATITUDE"}:
+                lat = v
+            if lon is None and m in {"LON", "LONG", "LONGI", "LONGITUDE"}:
+                lon = v
+
+    # Basic sanity check
+    if lat is not None and not (-90.0 <= lat <= 90.0):
+        lat = None
+    if lon is not None and not (-180.0 <= lon <= 180.0):
+        lon = None
+
+    return lat, lon
 
 app = FastAPI(title="GeoLog", version="2.0.0", description="Oil & Gas Well Log Viewer")
 
 JOB_EXECUTOR = ThreadPoolExecutor(max_workers=2)
 JOBS = {}
+JOBS_LOCK = Lock()
+
+
+def _utc_now_iso() -> str:
+    return datetime.datetime.utcnow().isoformat() + "Z"
+
+
+def _create_job(job_type: str) -> str:
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    with JOBS_LOCK:
+        JOBS[job_id] = {
+            "id": job_id,
+            "type": job_type,
+            "status": "queued",
+            "progress": 0,
+            "result": None,
+            "error": None,
+            "started_at": None,
+            "finished_at": None,
+            "created_at": _utc_now_iso(),
+        }
+    return job_id
+
+
+def _update_job(job_id: str, **fields):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            return
+        job.update(fields)
+
+
+def _get_job(job_id: str):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        return dict(job) if job else None
+
+
+def _list_jobs():
+    with JOBS_LOCK:
+        return [dict(j) for j in JOBS.values()]
 
 ROLE_RANK = {"viewer": 1, "interpreter": 2, "admin": 3}
 
@@ -382,6 +512,12 @@ async def upload_las(wid: int, file: UploadFile = File(...), db: Session = Depen
     if las.well.start:
         well.total_depth = las.well.stop
 
+    lat, lon = _extract_las_coordinates(las)
+    if lat is not None:
+        well.latitude = lat
+    if lon is not None:
+        well.longitude = lon
+
     db.commit()
 
     return {
@@ -411,6 +547,146 @@ def delete_log_run(lr_id: int, db: Session = Depends(get_db)):
     db.query(Annotation).filter(Annotation.log_run_id == lr_id).delete()
     db.delete(lr)
     db.commit()
+
+
+# ─── Log Run Diff (LAS comparison) ─────────────────────────────
+@app.post("/api/log-runs/diff")
+def diff_log_runs(req: dict, db: Session = Depends(get_db)):
+    """Compare two log runs and return curve, metadata, and stats differences."""
+    log_run_a_id = req.get("log_run_a_id")
+    log_run_b_id = req.get("log_run_b_id")
+
+    if log_run_a_id is None or log_run_b_id is None:
+        raise HTTPException(400, "log_run_a_id and log_run_b_id are required")
+
+    try:
+        log_run_a_id = int(log_run_a_id)
+        log_run_b_id = int(log_run_b_id)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "log_run_a_id and log_run_b_id must be integers")
+
+    run_a = db.query(LogRun).filter(LogRun.id == log_run_a_id).first()
+    run_b = db.query(LogRun).filter(LogRun.id == log_run_b_id).first()
+
+    if not run_a:
+        raise HTTPException(404, f"Log run A not found: {log_run_a_id}")
+    if not run_b:
+        raise HTTPException(404, f"Log run B not found: {log_run_b_id}")
+
+    curves_a_rows = db.query(CurveData).filter(CurveData.log_run_id == run_a.id).all()
+    curves_b_rows = db.query(CurveData).filter(CurveData.log_run_id == run_b.id).all()
+
+    curves_a = {c.mnemonic: c for c in curves_a_rows}
+    curves_b = {c.mnemonic: c for c in curves_b_rows}
+
+    mnemonics_a = set(curves_a.keys())
+    mnemonics_b = set(curves_b.keys())
+    only_in_a = sorted(mnemonics_a - mnemonics_b)
+    only_in_b = sorted(mnemonics_b - mnemonics_a)
+    shared = sorted(mnemonics_a & mnemonics_b)
+
+    def _curve_stats(curve: CurveData):
+        if not curve or not curve.data_binary:
+            return {"mean": None, "min": None, "max": None, "std": None, "count": 0}
+        arr = np.frombuffer(curve.data_binary, dtype=np.float64)
+        valid = arr[~np.isnan(arr)]
+        if len(valid) == 0:
+            return {"mean": None, "min": None, "max": None, "std": None, "count": 0}
+        return {
+            "mean": float(np.mean(valid)),
+            "min": float(np.min(valid)),
+            "max": float(np.max(valid)),
+            "std": float(np.std(valid)),
+            "count": int(len(valid)),
+        }
+
+    shared_curve_statistics = []
+    for mnemonic in shared:
+        a_curve = curves_a[mnemonic]
+        b_curve = curves_b[mnemonic]
+        stats_a = _curve_stats(a_curve)
+        stats_b = _curve_stats(b_curve)
+
+        shared_curve_statistics.append({
+            "mnemonic": mnemonic,
+            "unit_a": a_curve.unit,
+            "unit_b": b_curve.unit,
+            "description_a": a_curve.description,
+            "description_b": b_curve.description,
+            "num_points_a": int(a_curve.num_points or 0),
+            "num_points_b": int(b_curve.num_points or 0),
+            "num_points_diff": int((a_curve.num_points or 0) - (b_curve.num_points or 0)),
+            "stats_a": stats_a,
+            "stats_b": stats_b,
+            "stats_diff": {
+                "mean": None if stats_a["mean"] is None or stats_b["mean"] is None else float(stats_a["mean"] - stats_b["mean"]),
+                "min": None if stats_a["min"] is None or stats_b["min"] is None else float(stats_a["min"] - stats_b["min"]),
+                "max": None if stats_a["max"] is None or stats_b["max"] is None else float(stats_a["max"] - stats_b["max"]),
+                "std": None if stats_a["std"] is None or stats_b["std"] is None else float(stats_a["std"] - stats_b["std"]),
+                "count": int(stats_a["count"] - stats_b["count"]),
+            },
+        })
+
+    metadata_differences = {
+        "run_a": {
+            "id": run_a.id,
+            "well_id": run_a.well_id,
+            "well_name": run_a.well.name if getattr(run_a, "well", None) else None,
+            "filename": run_a.filename,
+            "start_depth": run_a.start_depth,
+            "stop_depth": run_a.stop_depth,
+            "step": run_a.step,
+            "num_points": run_a.num_points,
+        },
+        "run_b": {
+            "id": run_b.id,
+            "well_id": run_b.well_id,
+            "well_name": run_b.well.name if getattr(run_b, "well", None) else None,
+            "filename": run_b.filename,
+            "start_depth": run_b.start_depth,
+            "stop_depth": run_b.stop_depth,
+            "step": run_b.step,
+            "num_points": run_b.num_points,
+        },
+        "differences": {
+            "start_depth": None if run_a.start_depth is None or run_b.start_depth is None else float(run_a.start_depth - run_b.start_depth),
+            "stop_depth": None if run_a.stop_depth is None or run_b.stop_depth is None else float(run_a.stop_depth - run_b.stop_depth),
+            "step": None if run_a.step is None or run_b.step is None else float(run_a.step - run_b.step),
+            "num_points": int((run_a.num_points or 0) - (run_b.num_points or 0)),
+            "well_id": int((run_a.well_id or 0) - (run_b.well_id or 0)),
+            "same_well": bool(run_a.well_id == run_b.well_id),
+        },
+    }
+
+    return {
+        "log_run_a_id": run_a.id,
+        "log_run_b_id": run_b.id,
+        "curve_differences": {
+            "only_in_a": only_in_a,
+            "only_in_b": only_in_b,
+            "shared": shared,
+            "shared_count": len(shared),
+        },
+        "metadata_differences": metadata_differences,
+        "shared_curve_statistics": shared_curve_statistics,
+        "data_point_count_differences": {
+            "total_curves_a": len(curves_a_rows),
+            "total_curves_b": len(curves_b_rows),
+            "total_curve_diff": len(curves_a_rows) - len(curves_b_rows),
+            "run_num_points_a": int(run_a.num_points or 0),
+            "run_num_points_b": int(run_b.num_points or 0),
+            "run_num_points_diff": int((run_a.num_points or 0) - (run_b.num_points or 0)),
+            "shared_curve_valid_points": [
+                {
+                    "mnemonic": row["mnemonic"],
+                    "valid_points_a": row["stats_a"]["count"],
+                    "valid_points_b": row["stats_b"]["count"],
+                    "valid_points_diff": row["stats_diff"]["count"],
+                }
+                for row in shared_curve_statistics
+            ],
+        },
+    }
 
 
 # ─── Curve Data ───────────────────────────────────────────────
@@ -949,6 +1225,129 @@ def delete_annotation(aid: int, db: Session = Depends(get_db)):
     return {"status": "ok"}
 
 
+# ─── DST / RFT Pressure Data ──────────────────────────────────
+@app.post("/api/wells/{wid}/dst", status_code=201)
+def create_dst(wid: int, data: dict, db: Session = Depends(get_db)):
+    row = DSTTest(
+        well_id=wid,
+        test_number=str(data.get("test_number", "")),
+        top_depth=float(data.get("top_depth")),
+        bottom_depth=float(data.get("bottom_depth")),
+        formation=str(data.get("formation", "")),
+        choke_size=str(data.get("choke_size", "")),
+        flow_rate=float(data["flow_rate"]) if data.get("flow_rate") is not None else None,
+        shut_in_pressure=float(data["shut_in_pressure"]) if data.get("shut_in_pressure") is not None else None,
+        flowing_pressure=float(data["flowing_pressure"]) if data.get("flowing_pressure") is not None else None,
+        temperature=float(data["temperature"]) if data.get("temperature") is not None else None,
+        permeability=float(data["permeability"]) if data.get("permeability") is not None else None,
+        skin=float(data["skin"]) if data.get("skin") is not None else None,
+        result=str(data.get("result", "")),
+        notes=str(data.get("notes", "")),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {c.name: getattr(row, c.name) for c in DSTTest.__table__.columns}
+
+
+@app.get("/api/wells/{wid}/dst")
+def list_dst(wid: int, db: Session = Depends(get_db)):
+    rows = db.query(DSTTest).filter(DSTTest.well_id == wid).order_by(DSTTest.top_depth.asc(), DSTTest.id.asc()).all()
+    return [{c.name: getattr(r, c.name) for c in DSTTest.__table__.columns} for r in rows]
+
+
+@app.post("/api/wells/{wid}/rft", status_code=201)
+def create_rft(wid: int, data: dict, db: Session = Depends(get_db)):
+    row = RFTPoint(
+        well_id=wid,
+        depth=float(data.get("depth")),
+        pressure=float(data.get("pressure")),
+        mobility=float(data["mobility"]) if data.get("mobility") is not None else None,
+        fluid_type=str(data.get("fluid_type", "unknown") or "unknown").lower(),
+        sample_recovered=str(data.get("sample_recovered", "")),
+        notes=str(data.get("notes", "")),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {c.name: getattr(row, c.name) for c in RFTPoint.__table__.columns}
+
+
+@app.get("/api/wells/{wid}/rft")
+def list_rft(wid: int, db: Session = Depends(get_db)):
+    rows = db.query(RFTPoint).filter(RFTPoint.well_id == wid).order_by(RFTPoint.depth.asc(), RFTPoint.id.asc()).all()
+    return [{c.name: getattr(r, c.name) for c in RFTPoint.__table__.columns} for r in rows]
+
+
+@app.post("/api/wells/{wid}/rft/upload-csv")
+async def upload_rft_csv(wid: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    content = await file.read()
+    text_data = content.decode("utf-8", errors="replace")
+    reader = csv.DictReader(io.StringIO(text_data))
+    inserted = 0
+    for rec in reader:
+        if not rec:
+            continue
+        depth_raw = rec.get("depth") or rec.get("Depth") or rec.get("DEPTH")
+        press_raw = rec.get("pressure") or rec.get("Pressure") or rec.get("PRESSURE")
+        if depth_raw is None or press_raw is None:
+            continue
+        try:
+            depth = float(str(depth_raw).strip())
+            pressure = float(str(press_raw).strip())
+        except Exception:
+            continue
+        row = RFTPoint(
+            well_id=wid,
+            depth=depth,
+            pressure=pressure,
+            mobility=float(rec.get("mobility")) if rec.get("mobility") not in (None, "") else None,
+            fluid_type=str(rec.get("fluid_type") or rec.get("FluidType") or rec.get("fluid") or "unknown").lower(),
+            sample_recovered=str(rec.get("sample_recovered") or rec.get("sample") or ""),
+            notes=str(rec.get("notes") or ""),
+        )
+        db.add(row)
+        inserted += 1
+    db.commit()
+    return {"status": "ok", "inserted": inserted}
+
+
+@app.get("/api/wells/{wid}/rft/pressure-gradient")
+def rft_pressure_gradient(wid: int, db: Session = Depends(get_db)):
+    rows = db.query(RFTPoint).filter(RFTPoint.well_id == wid).order_by(RFTPoint.depth.asc()).all()
+    points = [{c.name: getattr(r, c.name) for c in RFTPoint.__table__.columns} for r in rows]
+    valid = [(float(r.depth), float(r.pressure), (r.fluid_type or "unknown").lower()) for r in rows if r.depth is not None and r.pressure is not None]
+    if len(valid) < 2:
+        return {"count": len(valid), "points": points, "overall": None, "by_fluid": []}
+
+    depths = np.array([v[0] for v in valid], dtype=float)
+    pressures = np.array([v[1] for v in valid], dtype=float)
+    slope, intercept = np.polyfit(depths, pressures, 1)
+    overall = {
+        "gradient": float(slope),
+        "intercept": float(intercept),
+        "equation": f"P = {slope:.6f}*Depth + {intercept:.3f}",
+    }
+
+    by_fluid = []
+    for fluid in sorted(set(v[2] for v in valid)):
+        arr = [(d, p) for d, p, f in valid if f == fluid]
+        if len(arr) < 2:
+            continue
+        d = np.array([a[0] for a in arr], dtype=float)
+        p = np.array([a[1] for a in arr], dtype=float)
+        s, b = np.polyfit(d, p, 1)
+        by_fluid.append({
+            "fluid_type": fluid,
+            "count": len(arr),
+            "gradient": float(s),
+            "intercept": float(b),
+            "equation": f"P = {s:.6f}*Depth + {b:.3f}",
+        })
+
+    return {"count": len(valid), "points": points, "overall": overall, "by_fluid": by_fluid}
+
+
 # ─── Curve Alias/Mnemonic Remap ──────────────────────────────
 
 @app.get("/api/wells/{wid}/aliases")
@@ -1363,6 +1762,91 @@ def curve_override(lr_id: int, data: dict, db: Session = Depends(get_db)):
     return {"status": "ok", "points_overridden": count}
 
 
+@app.post("/api/log-runs/{lr_id}/curve-edit")
+def curve_edit(lr_id: int, data: dict, db: Session = Depends(get_db)):
+    """Apply manual point edits to a curve and track original values for undo."""
+    mnemonic = str(data.get("mnemonic", "")).strip().upper()
+    edits = data.get("edits") or []
+    if not mnemonic:
+        raise HTTPException(400, "mnemonic is required")
+    if not isinstance(edits, list) or not edits:
+        raise HTTPException(400, "edits[] is required")
+
+    cd = db.query(CurveData).filter(CurveData.log_run_id == lr_id, CurveData.mnemonic == mnemonic).first()
+    if not cd:
+        raise HTTPException(404, f"Curve {mnemonic} not found")
+
+    dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr_id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])) .first()
+    if not dept_cd:
+        raise HTTPException(404, "Depth curve not found")
+
+    arr = np.frombuffer(cd.data_binary, dtype=np.float64).copy()
+    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64)
+    if len(arr) != len(dept):
+        n = min(len(arr), len(dept))
+        arr = arr[:n]
+        dept = dept[:n]
+
+    key = f"{lr_id}:{mnemonic}"
+    originals = CURVE_EDIT_ORIGINALS.setdefault(key, {})
+
+    applied = []
+    changed = 0
+    nulled = 0
+    for e in edits:
+        if not isinstance(e, dict):
+            continue
+        depth_raw = e.get("depth")
+        if depth_raw is None:
+            continue
+        try:
+            depth = float(depth_raw)
+        except Exception:
+            continue
+
+        idx = int(np.argmin(np.abs(dept - depth)))
+        old_val = arr[idx]
+        if idx not in originals:
+            originals[idx] = None if np.isnan(old_val) else float(old_val)
+
+        nv_raw = e.get("new_value")
+        new_val = np.nan if nv_raw is None else float(nv_raw)
+        arr[idx] = new_val
+        changed += 1
+        if np.isnan(new_val):
+            nulled += 1
+
+        applied.append({
+            "index": idx,
+            "depth": float(dept[idx]),
+            "old_value": None if np.isnan(old_val) else float(old_val),
+            "new_value": None if np.isnan(new_val) else float(new_val),
+        })
+
+    valid = arr[~np.isnan(arr)]
+    cd.data_binary = arr.tobytes()
+    cd.num_points = int(len(arr))
+    cd.min_value = float(np.min(valid)) if len(valid) else None
+    cd.max_value = float(np.max(valid)) if len(valid) else None
+    db.commit()
+
+    return {
+        "status": "ok",
+        "mnemonic": mnemonic,
+        "applied_count": len(applied),
+        "changed_count": changed,
+        "nulled_count": nulled,
+        "original_store_count": len(originals),
+        "curve_stats": {
+            "num_points": int(len(arr)),
+            "valid_points": int(len(valid)),
+            "null_points": int(len(arr) - len(valid)),
+            "min": float(np.min(valid)) if len(valid) else None,
+            "max": float(np.max(valid)) if len(valid) else None,
+        },
+        "applied_edits": applied,
+    }
+
 
 # ─── Multi-well Strip Log Data ────────────────────────────────
 @app.get("/api/projects/{pid}/strip-log-data")
@@ -1397,6 +1881,105 @@ def strip_log_data(pid: int, curve: str = "GR", db: Session = Depends(get_db)):
         })
     result["formation_names"] = sorted(result["formation_names"])
     return result
+
+
+@app.get("/api/projects/{pid}/cross-section")
+def project_cross_section(pid: int, well_ids: str = "", curve: str = "GR", db: Session = Depends(get_db)):
+    """Return well-to-well cross-section payload: per-well depth/curve/tops and relative X positions."""
+    all_wells = db.query(Well).filter(Well.project_id == pid).order_by(Well.id.asc()).all()
+    if not all_wells:
+        return {"project_id": pid, "curve": (curve or "GR").upper(), "wells": []}
+
+    selected_ids = []
+    if well_ids:
+        for tok in str(well_ids).split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            try:
+                selected_ids.append(int(tok))
+            except ValueError:
+                continue
+
+    if selected_ids:
+        id_set = set(selected_ids)
+        wells = [w for w in all_wells if w.id in id_set]
+        wells.sort(key=lambda w: selected_ids.index(w.id) if w.id in selected_ids else 10**9)
+    else:
+        wells = all_wells
+
+    if not wells:
+        return {"project_id": pid, "curve": (curve or "GR").upper(), "wells": []}
+
+    have_coords = all((w.latitude is not None and w.longitude is not None) for w in wells)
+    if have_coords:
+        lats = [float(w.latitude) for w in wells]
+        lons = [float(w.longitude) for w in wells]
+        lat0 = float(np.mean(lats))
+        km_per_deg_lat = 111.32
+        km_per_deg_lon = 111.32 * float(np.cos(np.radians(lat0)))
+        xs_km = [(lon - lons[0]) * km_per_deg_lon for lon in lons]
+        ys_km = [(lat - lats[0]) * km_per_deg_lat for lat in lats]
+        x_positions = [0.0]
+        for i in range(1, len(wells)):
+            dx = xs_km[i] - xs_km[i - 1]
+            dy = ys_km[i] - ys_km[i - 1]
+            x_positions.append(x_positions[-1] + float(np.hypot(dx, dy)))
+    else:
+        x_positions = [float(i) for i in range(len(wells))]
+
+    mn = (curve or "GR").upper()
+    result_wells = []
+    formation_names = set()
+    for i, w in enumerate(wells):
+        lr = db.query(LogRun).filter(LogRun.well_id == w.id).order_by(LogRun.id.desc()).first()
+        if not lr:
+            continue
+        dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
+        if not dept_cd:
+            continue
+        cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == mn).first()
+
+        depth = np.frombuffer(dept_cd.data_binary, dtype=np.float64)
+        values = np.frombuffer(cd.data_binary, dtype=np.float64) if cd else np.full_like(depth, np.nan)
+
+        step = max(1, len(depth) // 700)
+        idx = list(range(0, len(depth), step))
+
+        tops = db.query(FormationTop).filter(FormationTop.well_id == w.id).order_by(FormationTop.depth.asc()).all()
+        tops_data = []
+        for t in tops:
+            top_name = t.formation_name or "Top"
+            formation_names.add(top_name)
+            tops_data.append({
+                "name": top_name,
+                "depth": round(float(t.depth), 2),
+                "color": t.color or "#888888",
+                "lithology": t.lithology or "",
+            })
+
+        result_wells.append({
+            "well_id": w.id,
+            "name": w.name,
+            "uwi": w.uwi,
+            "x": round(float(x_positions[i]), 4),
+            "depth_unit": w.depth_unit or "FT",
+            "lat": float(w.latitude) if w.latitude is not None else None,
+            "lon": float(w.longitude) if w.longitude is not None else None,
+            "curve": mn,
+            "depth": [round(float(depth[j]), 2) for j in idx],
+            "values": [round(float(values[j]), 4) if not np.isnan(values[j]) else None for j in idx],
+            "tops": tops_data,
+        })
+
+    return {
+        "project_id": pid,
+        "curve": mn,
+        "x_unit": "km" if have_coords else "index",
+        "has_coordinates": have_coords,
+        "formation_names": sorted(formation_names),
+        "wells": result_wells,
+    }
 
 
 # ─── Formation Top Auto-Pick ──────────────────────────────────
@@ -2830,6 +3413,222 @@ def zonation_report(wid: int, db: Session = Depends(get_db)):
     return StreamingResponse(iter([csv_text]), media_type="text/csv", headers=headers)
 
 
+@app.get("/api/wells/{wid}/report-pdf")
+def generate_petrophysical_report_pdf(wid: int, db: Session = Depends(get_db)):
+    """Generate professional petrophysical report as PDF."""
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+
+    tops = (
+        db.query(FormationTop)
+        .filter(FormationTop.well_id == wid)
+        .order_by(FormationTop.depth.asc(), FormationTop.id.asc())
+        .all()
+    )
+    zones_resp = zone_stats(wid, db)
+    zones = zones_resp.get("zones", [])
+    cutoffs = zones_resp.get("cutoffs", {})
+
+    runs = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.run_number.asc()).all()
+    pp = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
+
+    def _fmt(val, nd=2):
+        if val is None:
+            return "-"
+        try:
+            return f"{float(val):.{nd}f}"
+        except Exception:
+            return str(val)
+
+    def _safe_text(v, default="-"):
+        return str(v) if v not in (None, "") else default
+
+    # Build PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=16 * mm,
+        rightMargin=16 * mm,
+        topMargin=14 * mm,
+        bottomMargin=16 * mm,
+        title=f"{well.name or 'Well'} Petrophysical Report",
+        author="GeoLog",
+    )
+
+    styles = getSampleStyleSheet()
+    section_style = ParagraphStyle(
+        "SectionTitle",
+        parent=styles["Heading3"],
+        fontName="Helvetica-Bold",
+        fontSize=11,
+        textColor=colors.HexColor("#1f2937"),
+        spaceBefore=8,
+        spaceAfter=4,
+    )
+    body_style = ParagraphStyle("BodySmall", parent=styles["Normal"], fontSize=9, leading=11)
+
+    elements = []
+
+    # 1) Header
+    report_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    header_tbl = Table([
+        [
+            Paragraph("<b>COMPANY LOGO</b><br/><font size='8'>[Placeholder]</font>", body_style),
+            Paragraph(
+                f"<b>{_safe_text(well.operator, 'GeoLog')}</b><br/>"
+                f"<font size='14'><b>Petrophysical Report</b></font><br/>"
+                f"Date: {report_date}<br/>"
+                f"Well: <b>{_safe_text(well.name)}</b>",
+                body_style,
+            ),
+        ]
+    ], colWidths=[45 * mm, 130 * mm])
+    header_tbl.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#9ca3af")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#d1d5db")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#f3f4f6")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    elements.extend([header_tbl, Spacer(1, 6)])
+
+    # 2) Well Information
+    elements.append(Paragraph("2. Well Information", section_style))
+    location_text = "-"
+    if well.latitude is not None and well.longitude is not None:
+        location_text = f"{_fmt(well.latitude, 5)}, {_fmt(well.longitude, 5)}"
+    country = _safe_text(well.project.country if well.project else None)
+    well_info = [
+        ["UWI", _safe_text(well.uwi), "Field", _safe_text(well.field_name)],
+        ["Operator", _safe_text(well.operator), "Country", country],
+        ["Location (Lat, Lon)", location_text, "KB Elevation", _fmt(well.elevation, 2)],
+    ]
+    wt = Table(well_info, colWidths=[36 * mm, 52 * mm, 34 * mm, 53 * mm])
+    wt.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f9fafb")),
+        ("BACKGROUND", (2, 0), (2, -1), colors.HexColor("#f9fafb")),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    elements.extend([wt, Spacer(1, 6)])
+
+    # 3) Log Run Summary
+    elements.append(Paragraph("3. Log Run Summary", section_style))
+    log_data = [["Run", "Depth Range", "Curves", "Step"]]
+    if runs:
+        for lr in runs:
+            cds = db.query(CurveData.mnemonic).filter(CurveData.log_run_id == lr.id).all()
+            curve_names = ", ".join(sorted({c[0] for c in cds if c and c[0]})) or "-"
+            log_data.append([
+                str(lr.run_number),
+                f"{_fmt(lr.start_depth, 1)} - {_fmt(lr.stop_depth, 1)}",
+                curve_names,
+                _fmt(lr.step, 3),
+            ])
+    else:
+        log_data.append(["-", "-", "-", "-"])
+    lrt = Table(log_data, colWidths=[16 * mm, 36 * mm, 106 * mm, 17 * mm])
+    lrt.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e5e7eb")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    elements.extend([lrt, Spacer(1, 6)])
+
+    # 4) Formation Tops
+    elements.append(Paragraph("4. Formation Tops", section_style))
+    tops_data = [["Formation", "Depth", "Quality"]]
+    if tops:
+        for t in tops:
+            quality = _safe_text(t.notes, "N/A")
+            tops_data.append([_safe_text(t.formation_name), _fmt(t.depth, 2), quality])
+    else:
+        tops_data.append(["-", "-", "-"])
+    tt = Table(tops_data, colWidths=[72 * mm, 25 * mm, 78 * mm])
+    tt.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e5e7eb")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    elements.extend([tt, Spacer(1, 6)])
+
+    # 5) Petrophysical Summary per zone
+    elements.append(Paragraph("5. Petrophysical Summary", section_style))
+    zs_data = [["Zone", "Gross", "Net", "NTG", "Avg PHIE", "Avg SW", "Avg VSH"]]
+    if zones:
+        for z in zones:
+            zs_data.append([
+                _safe_text(z.get("name")),
+                _fmt(z.get("gross_ft"), 2),
+                _fmt(z.get("net_pay_ft"), 2),
+                _fmt(z.get("ntg"), 3),
+                _fmt(z.get("avg_phie"), 4),
+                _fmt(z.get("avg_sw"), 4),
+                _fmt(z.get("avg_vsh"), 4),
+            ])
+    else:
+        zs_data.append(["-", "-", "-", "-", "-", "-", "-"])
+    zst = Table(zs_data, colWidths=[54 * mm, 18 * mm, 18 * mm, 16 * mm, 22 * mm, 22 * mm, 22 * mm])
+    zst.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e5e7eb")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    elements.extend([zst, Spacer(1, 6)])
+
+    # 6) Parameters used
+    elements.append(Paragraph("6. Parameters Used", section_style))
+    rw = pp.rw if pp and pp.rw is not None else 0.10
+    m = pp.m if pp and pp.m is not None else 2.0
+    n = pp.n if pp and pp.n is not None else 2.0
+    params_data = [
+        ["Rw", _fmt(rw, 4), "m", _fmt(m, 3), "n", _fmt(n, 3)],
+        ["VCL cutoff", _fmt(cutoffs.get("vsh", 0.35), 3),
+         "PHIE cutoff", _fmt(cutoffs.get("phie", 0.10), 3),
+         "SW cutoff", _fmt(cutoffs.get("sw", 0.60), 3)],
+    ]
+    pt = Table(params_data, colWidths=[30 * mm, 24 * mm, 14 * mm, 24 * mm, 14 * mm, 24 * mm])
+    pt.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f9fafb")),
+        ("BACKGROUND", (2, 0), (2, -1), colors.HexColor("#f9fafb")),
+        ("BACKGROUND", (4, 0), (4, -1), colors.HexColor("#f9fafb")),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+    ]))
+    elements.append(pt)
+
+    # 7) Footer
+    def _draw_footer(canvas, _doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.HexColor("#6b7280"))
+        canvas.drawString(16 * mm, 10 * mm, "Generated by GeoLog")
+        canvas.drawRightString(194 * mm, 10 * mm, f"Page {canvas.getPageNumber()}")
+        canvas.restoreState()
+
+    doc.build(elements, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
+    buffer.seek(0)
+
+    safe_name = (well.name or "well").replace("/", "_").replace("\\", "_").replace(" ", "_")
+    fname = f"{safe_name}_petrophysical_report.pdf"
+    headers = {"Content-Disposition": f'attachment; filename="{fname}"'}
+    return StreamingResponse(buffer, media_type="application/pdf", headers=headers)
+
+
 @app.get("/api/wells/{wid}/tops-petrel")
 def export_tops_petrel(wid: int, db: Session = Depends(get_db)):
     """Export well tops in Petrel-compatible CSV format."""
@@ -3558,27 +4357,18 @@ def synthetic_seismogram(wid: int, data: dict, db: Session = Depends(get_db), _r
 @app.post("/api/wells/{wid}/synthetic-seismogram-async", status_code=202)
 def synthetic_seismogram_async(wid: int, data: dict, _role: str = Depends(require_interpreter)):
     """Queue synthetic seismogram computation in background job."""
-    job_id = f"job_{uuid.uuid4().hex[:12]}"
-    JOBS[job_id] = {
-        "id": job_id,
-        "type": "synthetic-seismogram",
-        "status": "queued",
-        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
-        "result": None,
-        "error": None,
-    }
+    job_id = _create_job("synthetic-seismogram")
 
     def _run():
         db = SessionLocal()
         try:
-            JOBS[job_id]["status"] = "running"
-            JOBS[job_id]["result"] = _compute_synthetic_seismogram(wid, data, db)
-            JOBS[job_id]["status"] = "done"
+            _update_job(job_id, status="running", progress=10, started_at=_utc_now_iso())
+            result = _compute_synthetic_seismogram(wid, data, db)
+            _update_job(job_id, status="done", progress=100, result=result)
         except Exception as e:
-            JOBS[job_id]["status"] = "failed"
-            JOBS[job_id]["error"] = str(e)
+            _update_job(job_id, status="failed", progress=100, error=str(e))
         finally:
-            JOBS[job_id]["finished_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+            _update_job(job_id, finished_at=_utc_now_iso())
             db.close()
 
     JOB_EXECUTOR.submit(_run)
@@ -3587,7 +4377,7 @@ def synthetic_seismogram_async(wid: int, data: dict, _role: str = Depends(requir
 
 @app.get("/api/jobs/{job_id}")
 def get_job_status(job_id: str, _role: str = Depends(require_viewer)):
-    job = JOBS.get(job_id)
+    job = _get_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
     return job
@@ -3596,34 +4386,25 @@ def get_job_status(job_id: str, _role: str = Depends(require_viewer)):
 @app.get("/api/jobs")
 def list_jobs(_role: str = Depends(require_viewer)):
     """List all background jobs (newest first)."""
-    jobs = sorted(JOBS.values(), key=lambda j: j.get("created_at", ""), reverse=True)
+    jobs = sorted(_list_jobs(), key=lambda j: j.get("created_at", ""), reverse=True)
     return {"jobs": jobs, "total": len(jobs)}
 
 
 @app.post("/api/wells/{wid}/electrofacies-async", status_code=202)
 def electrofacies_async(wid: int, data: dict, _role: str = Depends(require_interpreter)):
     """Queue electrofacies clustering in background job."""
-    job_id = f"job_{uuid.uuid4().hex[:12]}"
-    JOBS[job_id] = {
-        "id": job_id,
-        "type": "electrofacies",
-        "status": "queued",
-        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
-        "result": None,
-        "error": None,
-    }
+    job_id = _create_job("electrofacies")
 
     def _run():
         db = SessionLocal()
         try:
-            JOBS[job_id]["status"] = "running"
-            JOBS[job_id]["result"] = compute_electrofacies(wid, data, db)
-            JOBS[job_id]["status"] = "done"
+            _update_job(job_id, status="running", progress=10, started_at=_utc_now_iso())
+            result = compute_electrofacies(wid, data, db)
+            _update_job(job_id, status="done", progress=100, result=result)
         except Exception as e:
-            JOBS[job_id]["status"] = "failed"
-            JOBS[job_id]["error"] = str(e)
+            _update_job(job_id, status="failed", progress=100, error=str(e))
         finally:
-            JOBS[job_id]["finished_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+            _update_job(job_id, finished_at=_utc_now_iso())
             db.close()
 
     JOB_EXECUTOR.submit(_run)
@@ -3633,27 +4414,18 @@ def electrofacies_async(wid: int, data: dict, _role: str = Depends(require_inter
 @app.post("/api/projects/{pid}/batch-petro-async", status_code=202)
 def batch_petro_async(pid: int, data: dict, _role: str = Depends(require_interpreter)):
     """Queue batch petrophysics in background job."""
-    job_id = f"job_{uuid.uuid4().hex[:12]}"
-    JOBS[job_id] = {
-        "id": job_id,
-        "type": "batch-petro",
-        "status": "queued",
-        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
-        "result": None,
-        "error": None,
-    }
+    job_id = _create_job("batch-petro")
 
     def _run():
         db = SessionLocal()
         try:
-            JOBS[job_id]["status"] = "running"
-            JOBS[job_id]["result"] = batch_petro_params(pid, data, db)
-            JOBS[job_id]["status"] = "done"
+            _update_job(job_id, status="running", progress=10, started_at=_utc_now_iso())
+            result = batch_petro_params(pid, data, db)
+            _update_job(job_id, status="done", progress=100, result=result)
         except Exception as e:
-            JOBS[job_id]["status"] = "failed"
-            JOBS[job_id]["error"] = str(e)
+            _update_job(job_id, status="failed", progress=100, error=str(e))
         finally:
-            JOBS[job_id]["finished_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+            _update_job(job_id, finished_at=_utc_now_iso())
             db.close()
 
     JOB_EXECUTOR.submit(_run)

@@ -43,6 +43,8 @@ class Well(Base):
     log_runs = relationship("LogRun", back_populates="well", cascade="all, delete-orphan")
     formation_tops = relationship("FormationTop", back_populates="well", cascade="all, delete-orphan")
     zones = relationship("Zone", back_populates="well", cascade="all, delete-orphan")
+    dst_tests = relationship("DSTTest", back_populates="well", cascade="all, delete-orphan")
+    rft_points = relationship("RFTPoint", back_populates="well", cascade="all, delete-orphan")
 
 
 class LogRun(Base):
@@ -111,6 +113,45 @@ class Annotation(Base):
     annotation_type = Column(String(50), default="note")  # note, flag, zone
     color = Column(String(20), default="#f39c12")
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class DSTTest(Base):
+    __tablename__ = "dst_tests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False)
+    test_number = Column(String(100), default="")
+    top_depth = Column(Float, nullable=False)
+    bottom_depth = Column(Float, nullable=False)
+    formation = Column(String(200), default="")
+    choke_size = Column(String(100), default="")
+    flow_rate = Column(Float, nullable=True)
+    shut_in_pressure = Column(Float, nullable=True)
+    flowing_pressure = Column(Float, nullable=True)
+    temperature = Column(Float, nullable=True)
+    permeability = Column(Float, nullable=True)
+    skin = Column(Float, nullable=True)
+    result = Column(String(200), default="")
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    well = relationship("Well", back_populates="dst_tests")
+
+
+class RFTPoint(Base):
+    __tablename__ = "rft_points"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False)
+    depth = Column(Float, nullable=False)
+    pressure = Column(Float, nullable=False)
+    mobility = Column(Float, nullable=True)
+    fluid_type = Column(String(50), default="unknown")
+    sample_recovered = Column(String(100), default="")
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    well = relationship("Well", back_populates="rft_points")
 
 
 class Zone(Base):

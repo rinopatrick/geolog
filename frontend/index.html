@@ -39,7 +39,7 @@
                     <button class="nav-btn" data-view="sensitivity" title="Sensitivity analysis for model parameters"><i data-lucide="git-compare"></i><span>Sensitivity</span></button>
                     <button class="nav-btn" data-view="tornado" title="Tornado chart — parameter impact on net pay"><i data-lucide="wind"></i><span>Tornado</span></button>
                     <button class="nav-btn" data-view="vclmodels" title="Compare Vclay models (Larionov, Clavier, Steiber)"><i data-lucide="layers"></i><span>Vcl Models</span></button>
-                    <button class="nav-btn" data-view="comparison" title="Compare multiple wells or runs side-by-side"><i data-lucide="columns-3"></i><span>Compare</span></button>
+                    <button class="nav-btn" data-view="comparison" title="Well-to-well structural cross-section view"><i data-lucide="columns-3"></i><span>Cross Section</span></button>
                 </div>
             </details>
             <details class="nav-group">
@@ -94,6 +94,9 @@
             </button>
             <button class="btn-action" onclick="app.uploadLAS()">
                 <i data-lucide="upload"></i> Upload LAS
+            </button>
+            <button class="btn-action" onclick="app.openBulkImportWizard()">
+                <i data-lucide="files"></i> Bulk Import
             </button>
             <button class="btn-action" id="btnExportPNG" title="Export PNG">
                 <i data-lucide="image"></i>
@@ -156,6 +159,7 @@
                         </button>
                         <div class="btn-group-menu">
                             <button onclick="app.uploadLAS()"><i data-lucide="upload"></i> Upload LAS</button>
+                            <button onclick="app.openBulkImportWizard()"><i data-lucide="files"></i> Bulk Import</button>
                             <button onclick="app.editCurrentWell()"><i data-lucide="pencil"></i> Edit Well</button>
                         </div>
                     </div>
@@ -168,8 +172,8 @@
                             <button onclick="app.addFormationTop()"><i data-lucide="layers"></i> Add Top</button>
                             <button onclick="app.addZone()"><i data-lucide="square"></i> Add Zone</button>
                             <div class="menu-divider"></div>
-                            <button onclick="app.undoZone()"><i data-lucide="undo-2"></i> Undo</button>
-                            <button onclick="app.redoZone()"><i data-lucide="redo-2"></i> Redo</button>
+                            <button id="btnUndo" onclick="app.undo()"><i data-lucide="undo-2"></i> Undo</button>
+                            <button id="btnRedo" onclick="app.redo()"><i data-lucide="redo-2"></i> Redo</button>
                         </div>
                     </div>
                     <!-- Export group -->
@@ -220,6 +224,16 @@
                 <button class="btn-sm" onclick="document.getElementById('bottomPanels').style.display = document.getElementById('bottomPanels').style.display === 'none' ? 'grid' : 'none'" title="Toggle details panels">
                     <i data-lucide="panel-bottom"></i> Details
                 </button>
+                <button class="btn-sm" id="editModeToggle" title="Interactive curve edit mode">
+                    <i data-lucide="pen-line"></i> Edit Mode
+                </button>
+                <div class="toolbar-group">
+                    <label>Edit Curve</label>
+                    <select id="editCurveSelect" class="depth-select" style="min-width:90px"></select>
+                </div>
+                <span id="editDirtyIndicator" class="toolbar-hint">No unsaved edits</span>
+                <button class="btn-sm" id="editSaveBtn" disabled><i data-lucide="save"></i> Save</button>
+                <button class="btn-sm" id="editCancelBtn" disabled><i data-lucide="x-circle"></i> Cancel</button>
                 <!-- Advanced controls (progressive disclosure) -->
                 <button class="btn-sm btn-advanced-toggle" id="advancedToggleBtn" onclick="document.getElementById('advancedControls').classList.toggle('open'); this.classList.toggle('active')">
                     <i data-lucide="settings"></i> Advanced
@@ -258,6 +272,10 @@
             <div class="log-container" id="logDropZone">
                 <canvas id="logCanvas"></canvas>
             </div>
+            <div id="editValuePopover" style="display:none;position:fixed;z-index:99999;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:6px;box-shadow:0 8px 20px rgba(0,0,0,0.4)">
+                <input id="editValueInput" type="text" placeholder="new value / blank=null" style="width:170px;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:6px 8px">
+                <button class="btn-sm" id="editValueApplyBtn" style="margin-left:6px">Apply</button>
+            </div>
 
             <!-- Bottom Panels (collapsed by default for max log area) -->
             <div class="bottom-panels" id="bottomPanels" style="display:none">
@@ -275,6 +293,10 @@
                 <div class="info-panel">
                     <h3><i data-lucide="square"></i> Zones</h3>
                     <div id="zonesPanel" class="panel-content"></div>
+                </div>
+                <div class="info-panel">
+                    <h3><i data-lucide="history"></i> Curve Edit History</h3>
+                    <div id="editHistoryList" class="panel-content"><div style="color:#8b949e">No edits yet.</div></div>
                 </div>
             </div>
         </div>
@@ -390,6 +412,7 @@
                 <div class="toolbar-group"><label>Depth Shift (ft)</label><input id="corrShift" class="depth-input" type="number" value="0" step="0.5"></div>
                 <div class="toolbar-group"><label>Stretch</label><input id="corrStretch" class="depth-input" type="number" value="1.000" step="0.001"></div>
                 <div class="toolbar-group"><label>Snap to tops</label><input id="corrSnapTops" type="checkbox" checked></div>
+                <button class="btn-sm active" id="corrShowTops" aria-pressed="true"><i data-lucide="layers"></i> Show Tops</button>
                 <button class="btn-sm" onclick="app.autoTieShift()"><i data-lucide="wand-sparkles"></i> Auto Tie</button>
                 <button class="btn-sm" onclick="app.applyTopSnap()"><i data-lucide="magnet"></i> Top Snap</button>
                 <button class="btn-sm" onclick="app.applyTopNameTie()"><i data-lucide="link-2"></i> Name Tie</button>
@@ -430,15 +453,19 @@
             </div>
         </div>
 
-        <!-- Well Comparison Panel -->
+        <!-- Cross Section Panel -->
         <div id="comparisonPanel" class="panel" style="display:none">
             <div class="panel-toolbar">
-                <div class="toolbar-group"><label>Well Comparison</label><span class="toolbar-hint">Side-by-side statistics for all wells in current project</span></div>
-                <button class="btn-sm" onclick="app.loadWellComparison()"><i data-lucide="refresh-cw"></i> Refresh</button>
-                <button class="btn-sm" onclick="app.exportComparisonCSV()"><i data-lucide="download"></i> CSV</button>
+                <div class="toolbar-group"><label>Cross Section</label><span class="toolbar-hint">Structural well-to-well section with correlated tops</span></div>
+                <div class="toolbar-group"><label>Curve</label><select id="crossSectionCurve" class="depth-select" onchange="app.loadWellComparison()"><option value="GR">GR</option><option value="RHOB">RHOB</option><option value="NPHI">NPHI</option><option value="RT">RT</option></select></div>
+                <div class="toolbar-group"><label>Vertical Scale</label><input id="crossSectionVScale" type="number" min="0.2" max="5" step="0.1" value="1" style="width:80px" onchange="app.loadWellComparison()"></div>
+                <div class="toolbar-group"><label><input id="crossSectionShowTops" type="checkbox" checked onchange="app.loadWellComparison()"> Show Tops</label></div>
+                <div class="toolbar-group"><label><input id="crossSectionShowCorr" type="checkbox" checked onchange="app.loadWellComparison()"> Show Correlation</label></div>
+                <button class="btn-sm" onclick="app.loadWellComparison()"><i data-lucide="refresh-cw"></i> Render</button>
             </div>
-            <div id="comparisonContent" class="stats-container">
-                <p style="color:#8b949e">Select a project with multiple wells loaded, then click Refresh.</p>
+            <div id="comparisonContent" class="stats-container" style="position:relative;overflow:auto;flex:1">
+                <canvas id="crossSectionCanvas"></canvas>
+                <div id="crossSectionTooltip" class="cross-section-tooltip" style="display:none"></div>
             </div>
         </div>
 
@@ -530,6 +557,27 @@
                     <button class="btn-sm" onclick="app.addAnnotation()"><i data-lucide="plus"></i> Add Annotation</button>
                     <button class="btn-sm" onclick="app.loadAnnotations()"><i data-lucide="refresh-cw"></i> Refresh</button>
                     <div id="annotationsList" style="margin-top:8px;max-height:200px;overflow-y:auto;font-size:12px"></div>
+                </div>
+
+                <!-- DST Results -->
+                <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:16px">
+                    <h4><i data-lucide="gauge"></i> DST Results</h4>
+                    <p style="color:#8b949e;font-size:12px">Drill Stem Test intervals and pressures</p>
+                    <button class="btn-sm" onclick="app.addDST()"><i data-lucide="plus"></i> Add DST</button>
+                    <button class="btn-sm" onclick="app.loadDST()"><i data-lucide="refresh-cw"></i> Refresh</button>
+                    <div id="dstList" style="margin-top:8px;max-height:220px;overflow-y:auto;font-size:12px"></div>
+                </div>
+
+                <!-- RFT Pressure -->
+                <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:16px">
+                    <h4><i data-lucide="scatter-chart"></i> RFT Pressure</h4>
+                    <p style="color:#8b949e;font-size:12px">Pressure-depth points, gradient, CSV upload</p>
+                    <button class="btn-sm" onclick="app.addRFT()"><i data-lucide="plus"></i> Add RFT Point</button>
+                    <button class="btn-sm" onclick="document.getElementById('rftCsvFileInput').click()"><i data-lucide="upload"></i> Upload CSV</button>
+                    <button class="btn-sm" onclick="app.loadRFT()"><i data-lucide="refresh-cw"></i> Refresh</button>
+                    <input type="file" id="rftCsvFileInput" accept=".csv" style="display:none">
+                    <div id="rftUploadStatus" style="margin-top:6px;font-size:12px;color:#8b949e"></div>
+                    <div style="margin-top:10px"><canvas id="rftCanvas" width="600" height="320"></canvas></div>
                 </div>
 
                 <!-- Mnemonic Remap -->
@@ -983,20 +1031,79 @@
         </div>
     </div>
 
+    <!-- Bulk Import Wizard -->
+    <div id="bulkImportModal" class="help-modal-overlay" style="display:none" onclick="app.closeBulkImportWizard(event)">
+        <div style="max-width:920px;width:95vw;max-height:90vh;overflow-y:auto;background:var(--bg-secondary);border-radius:12px;border:1px solid var(--border)" onclick="event.stopPropagation()">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border)">
+                <h3 style="color:var(--accent)"><i data-lucide="files"></i> Bulk LAS Import Wizard</h3>
+                <button class="modal-close" onclick="app.closeBulkImportWizard()">&times;</button>
+            </div>
+            <div style="padding:16px">
+                <div id="bulkDropZone" style="border:2px dashed #30363d;border-radius:10px;padding:26px;text-align:center;color:#8b949e;cursor:pointer;background:#0d1117">
+                    <p style="margin:0 0 6px 0;color:#c9d1d9">Drag & drop LAS files here</p>
+                    <p style="margin:0 0 10px 0;font-size:12px">Accepts multiple <code>.las</code> files</p>
+                    <input type="file" id="bulkImportFileInput" multiple accept=".las,.LAS" style="display:none">
+                    <button class="btn-primary" onclick="document.getElementById('bulkImportFileInput').click()"><i data-lucide="upload"></i> Select Files</button>
+                </div>
+                <div id="bulkImportList" style="margin-top:14px"></div>
+                <div id="bulkImportSummary" style="margin-top:12px;color:#8b949e;font-size:13px"></div>
+            </div>
+        </div>
+    </div>
+
     <div id="shortcutModal" class="help-modal-overlay" style="display:none" onclick="app.closeShortcutHelp(event)">
-        <div class="help-modal">
+        <div class="help-modal shortcut-help-modal" role="dialog" aria-modal="true" aria-labelledby="shortcutHelpTitle">
             <div class="help-modal-header">
-                <h3>Keyboard Shortcuts</h3>
+                <h3 id="shortcutHelpTitle">Keyboard Shortcuts</h3>
                 <button class="modal-close" onclick="app.closeShortcutHelp()">&times;</button>
             </div>
             <div class="help-modal-body">
-                <p><strong>Navigation:</strong> 1-8 quick panel shortcuts</p>
-                <p><strong>Depth:</strong> ↑ / ↓ pan</p>
-                <p><strong>Zoom:</strong> + / -</p>
-                <p><strong>Zones:</strong> Ctrl+Z undo, Ctrl+Y redo</p>
-                <p><strong>Refresh:</strong> R</p>
-                <p><strong>Close dialogs:</strong> Esc</p>
-                <p><strong>Help:</strong> ?</p>
+                <div class="shortcut-group">
+                    <h4>Views</h4>
+                    <ul>
+                        <li><span>Viewer</span><kbd>1</kbd></li>
+                        <li><span>Crossplot</span><kbd>2</kbd></li>
+                        <li><span>Pickett</span><kbd>3</kbd></li>
+                        <li><span>Petrophysics</span><kbd>4</kbd></li>
+                        <li><span>QC</span><kbd>5</kbd></li>
+                        <li><span>Statistics</span><kbd>6</kbd></li>
+                        <li><span>Correlation</span><kbd>7</kbd></li>
+                        <li><span>Sensitivity</span><kbd>8</kbd></li>
+                        <li><span>Facies</span><kbd>9</kbd></li>
+                    </ul>
+                </div>
+
+                <div class="shortcut-group">
+                    <h4>Navigation</h4>
+                    <ul>
+                        <li><span>Scroll depth up/down</span><kbd>↑</kbd>/<kbd>↓</kbd></li>
+                        <li><span>Zoom in / out</span><kbd>+</kbd>/<kbd>-</kbd></li>
+                        <li><span>Go to top / bottom of well</span><kbd>Home</kbd>/<kbd>End</kbd></li>
+                        <li><span>Toggle fullscreen viewer</span><kbd>F</kbd></li>
+                    </ul>
+                </div>
+
+                <div class="shortcut-group">
+                    <h4>Editing</h4>
+                    <ul>
+                        <li><span>Undo</span><kbd>Ctrl</kbd>+<kbd>Z</kbd></li>
+                        <li><span>Redo</span><kbd>Ctrl</kbd>+<kbd>Y</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></li>
+                        <li><span>Save picks / annotations</span><kbd>Ctrl</kbd>+<kbd>S</kbd></li>
+                        <li><span>Export LAS</span><kbd>Ctrl</kbd>+<kbd>E</kbd></li>
+                        <li><span>Upload LAS</span><kbd>Ctrl</kbd>+<kbd>U</kbd></li>
+                    </ul>
+                </div>
+
+                <div class="shortcut-group">
+                    <h4>General</h4>
+                    <ul>
+                        <li><span>Toggle Lith track</span><kbd>L</kbd></li>
+                        <li><span>Toggle Details</span><kbd>D</kbd></li>
+                        <li><span>Toggle Advanced</span><kbd>A</kbd></li>
+                        <li><span>Close modals / dropdowns</span><kbd>Esc</kbd></li>
+                        <li><span>Open shortcuts help</span><kbd>?</kbd></li>
+                    </ul>
+                </div>
             </div>
         </div>
     </div>
