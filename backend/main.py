@@ -2738,6 +2738,473 @@ def get_decimated_data(lr_id: int, max_points: int = 3000, db: Session = Depends
     return {"curves": result, "decimated": len(arr) > max_points, "original_points": len(arr)}
 
 
+# ─── Sprint 27: Dual-Water Saturation Model ─────────────────
+@app.post("/api/wells/{wid}/dual-water")
+def compute_dual_water(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Compute Sw using Dual-Water model (Clavier et al. 1977).
+    Sw = sqrt( (a * Rw) / (phi^m * Rt) * (1 - (Rw/Rwb) * (Vsh * phi_sh / phi)) )
+    Simplified: Sw_dw = Sw_archie * correction_factor
+    """
+    lr_id = data.get("log_run_id")
+    lr = db.query(LogRun).filter(LogRun.id == lr_id).first() if lr_id else \
+         db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+
+    rt_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["RT", "RESD", "RILD", "ILD"])).first()
+    nphi_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["NPHI", "NPHI_LS"])).first()
+    gr_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["GR", "SGR", "CGR"])).first()
+    dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
+    if not rt_cd or not nphi_cd:
+        raise HTTPException(400, "Need RT and NPHI curves")
+
+    rt = np.frombuffer(rt_cd.data_binary, dtype=np.float64).copy()
+    nphi = np.frombuffer(nphi_cd.data_binary, dtype=np.float64).copy()
+    gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy() if gr_cd else np.zeros_like(rt)
+    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(rt)) * 0.5
+
+    a_v = float(data.get("a", 1.0))
+    m_v = float(data.get("m", 2.0))
+    n_v = float(data.get("n", 2.0))
+    rw = float(data.get("rw", 0.1))
+    rwb = float(data.get("rwb", 0.03))  # bound water resistivity
+    phi_sh = float(data.get("phi_sh", 0.30))  # shale porosity
+    vsh_cutoff = float(data.get("vsh_cutoff", 0.35))
+
+    # Vsh from GR
+    gr_valid = gr[~np.isnan(gr) & (gr > 0)]
+    gr_min = float(np.min(gr_valid)) if len(gr_valid) else 0
+    gr_max = float(np.max(gr_valid)) if len(gr_valid) else 150
+    if gr_max == gr_min:
+        gr_max = gr_min + 1
+
+    n = len(rt)
+    sw = np.full(n, np.nan)
+    vsh_arr = np.full(n, np.nan)
+    phie_arr = np.full(n, np.nan)
+    bvw_arr = np.full(n, np.nan)
+
+    for i in range(n):
+        if np.isnan(rt[i]) or np.isnan(nphi[i]) or rt[i] <= 0 or nphi[i] < 0:
+            continue
+        igr = (gr[i] - gr_min) / (gr_max - gr_min) if gr_max > gr_min else 0
+        vsh_v = max(0, min(1, igr))
+        vsh_arr[i] = vsh_v
+
+        phi_t = max(0.01, nphi[i])
+        # Dual-water: effective porosity = total - bound water
+        phi_e = phi_t * (1 - vsh_v * (1 - phi_sh / max(phi_t, 0.01)))
+        phi_e = max(0.01, phi_e)
+        phie_arr[i] = phi_e
+
+        # Sw calculation with bound water correction
+        sw_archie = (a_v * rw / (phi_e ** m_v * rt[i])) ** (1.0 / n_v)
+        # Bound water volume
+        vwb = vsh_v * phi_sh
+        # Dual-water correction
+        if phi_e > 0:
+            correction = 1 - (rw / rwb) * (vwb / phi_e)
+            sw_v = sw_archie * max(0, correction)
+        else:
+            sw_v = 1.0
+        sw[i] = max(0, min(1, sw_v))
+        bvw_arr[i] = sw[i] * phi_e  # bulk volume water
+
+    valid_sw = sw[~np.isnan(sw)]
+    valid_phie = phie_arr[~np.isnan(phie_arr)]
+    valid_bvw = bvw_arr[~np.isnan(bvw_arr)]
+
+    return {
+        "depth": dept.tolist(),
+        "sw": sw.tolist(),
+        "vsh": vsh_arr.tolist(),
+        "phie": phie_arr.tolist(),
+        "bvw": bvw_arr.tolist(),
+        "stats": {
+            "sw_mean": round(float(np.mean(valid_sw)), 4) if len(valid_sw) else None,
+            "sw_median": round(float(np.median(valid_sw)), 4) if len(valid_sw) else None,
+            "phie_mean": round(float(np.mean(valid_phie)), 4) if len(valid_phie) else None,
+            "bvw_mean": round(float(np.mean(valid_bvw)), 4) if len(valid_bvw) else None,
+            "model": "dual_water",
+            "rwb": rwb,
+            "phi_sh": phi_sh,
+        }
+    }
+
+
+# ─── Sprint 27: Vcl Model Selector ──────────────────────────
+@app.post("/api/wells/{wid}/vcl-models")
+def compute_vcl_models(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Compute Vclay using multiple models for comparison.
+    Models: larionov_tertiary, larionov_old, clavier, steiber, linear_igr
+    """
+    lr_id = data.get("log_run_id")
+    lr = db.query(LogRun).filter(LogRun.id == lr_id).first() if lr_id else \
+         db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+
+    gr_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["GR", "SGR", "CGR"])).first()
+    dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
+    if not gr_cd:
+        raise HTTPException(400, "GR curve required")
+
+    gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy()
+    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(gr)) * 0.5
+
+    gr_clean = float(data.get("gr_clean", 20))  # GR in clean sand
+    gr_shale = float(data.get("gr_shale", 120))  # GR in shale
+
+    n = len(gr)
+    results = {
+        "depth": dept.tolist(),
+        "igr": np.full(n, np.nan).tolist(),
+        "larionov_tertiary": np.full(n, np.nan).tolist(),
+        "larionov_old": np.full(n, np.nan).tolist(),
+        "clavier": np.full(n, np.nan).tolist(),
+        "steiber": np.full(n, np.nan).tolist(),
+    }
+
+    for i in range(n):
+        if np.isnan(gr[i]) or gr[i] < 0:
+            continue
+        # IGR (Linear Gamma Ray Index)
+        igr = (gr[i] - gr_clean) / (gr_shale - gr_clean) if gr_shale > gr_clean else 0
+        igr = max(0, min(1, igr))
+        results["igr"][i] = round(igr, 4)
+
+        # Larionov (Tertiary rocks): Vcl = 0.083 * (2^(3.7*IGR) - 1)
+        vcl_lt = 0.083 * (2 ** (3.7 * igr) - 1)
+        results["larionov_tertiary"][i] = round(max(0, min(1, vcl_lt)), 4)
+
+        # Larionov (Older rocks): Vcl = 0.33 * (2^(2*IGR) - 1)
+        vcl_lo = 0.33 * (2 ** (2 * igr) - 1)
+        results["larionov_old"][i] = round(max(0, min(1, vcl_lo)), 4)
+
+        # Clavier et al.: Vcl = 1.7 - sqrt(3.38 - (IGR + 0.7)^2)
+        vcl_c = 1.7 - np.sqrt(max(0, 3.38 - (igr + 0.7) ** 2))
+        results["clavier"][i] = round(max(0, min(1, vcl_c)), 4)
+
+        # Steiber: Vcl = IGR / (3 - 2*IGR)
+        vcl_s = igr / (3 - 2 * igr) if (3 - 2 * igr) > 0 else 1.0
+        results["steiber"][i] = round(max(0, min(1, vcl_s)), 4)
+
+    # Summary stats
+    valid_igr = [v for v in results["igr"] if v is not None and not np.isnan(v)]
+    summary = {}
+    for model in ["igr", "larionov_tertiary", "larionov_old", "clavier", "steiber"]:
+        vals = [v for v in results[model] if v is not None and not np.isnan(v)]
+        summary[model] = {
+            "mean": round(float(np.mean(vals)), 4) if vals else None,
+            "median": round(float(np.median(vals)), 4) if vals else None,
+            "min": round(float(np.min(vals)), 4) if vals else None,
+            "max": round(float(np.max(vals)), 4) if vals else None,
+        }
+
+    return {"results": results, "summary": summary, "params": {"gr_clean": gr_clean, "gr_shale": gr_shale}}
+
+
+# ─── Sprint 27: Tornado Chart Data ──────────────────────────
+@app.post("/api/wells/{wid}/tornado")
+def tornado_analysis(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Tornado chart: vary each parameter ±X% and measure impact on net_pay.
+    Returns sorted impact for each parameter.
+    """
+    lr_id = data.get("log_run_id")
+    lr = db.query(LogRun).filter(LogRun.id == lr_id).first() if lr_id else \
+         db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+
+    rt_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["RT", "RESD", "RILD", "ILD"])).first()
+    nphi_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["NPHI", "NPHI_LS"])).first()
+    gr_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["GR", "SGR", "CGR"])).first()
+    if not rt_cd or not nphi_cd:
+        raise HTTPException(400, "Need RT and NPHI")
+
+    rt = np.frombuffer(rt_cd.data_binary, dtype=np.float64).copy()
+    nphi = np.frombuffer(nphi_cd.data_binary, dtype=np.float64).copy()
+    gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy() if gr_cd else np.zeros_like(rt)
+
+    # Base params
+    base_params = {
+        "a": float(data.get("a", 1.0)),
+        "m": float(data.get("m", 2.0)),
+        "n": float(data.get("n", 2.0)),
+        "rw": float(data.get("rw", 0.1)),
+        "vsh_cutoff": float(data.get("vsh_cutoff", 0.35)),
+        "phie_cutoff": float(data.get("phie_cutoff", 0.10)),
+        "sw_cutoff": float(data.get("sw_cutoff", 0.60)),
+    }
+    variation = float(data.get("variation_pct", 20)) / 100.0
+
+    gr_valid = gr[~np.isnan(gr) & (gr > 0)]
+    gr_min = float(np.min(gr_valid)) if len(gr_valid) else 0
+    gr_max = float(np.max(gr_valid)) if len(gr_valid) else 150
+    if gr_max == gr_min:
+        gr_max = gr_min + 1
+
+    def _count_net_pay(params):
+        """Count net pay feet with given params."""
+        pay = 0
+        step = float(lr.step) if lr.step else 0.5
+        for i in range(len(rt)):
+            if np.isnan(rt[i]) or np.isnan(nphi[i]) or rt[i] <= 0 or nphi[i] < 0:
+                continue
+            igr = (gr[i] - gr_min) / (gr_max - gr_min) if gr_max > gr_min else 0
+            vsh_v = max(0, min(1, igr))
+            phi = max(0, nphi[i] * (1 - vsh_v))
+            if phi < 0.01:
+                continue
+            sw_v = (params["a"] / (phi ** params["m"] * rt[i] / params["rw"])) ** (1.0 / params["n"])
+            sw_v = max(0, min(1, sw_v))
+            if vsh_v < params["vsh_cutoff"] and phi > params["phie_cutoff"] and sw_v < params["sw_cutoff"]:
+                pay += 1
+        return pay * step
+
+    # Base net pay
+    base_pay = _count_net_pay(base_params)
+
+    # Tornado: vary each param
+    tornado_items = []
+    for param_name in ["a", "m", "n", "rw", "vsh_cutoff", "phie_cutoff", "sw_cutoff"]:
+        low_params = base_params.copy()
+        high_params = base_params.copy()
+        delta = base_params[param_name] * variation
+        low_params[param_name] = max(0.001, base_params[param_name] - delta)
+        high_params[param_name] = base_params[param_name] + delta
+
+        pay_low = _count_net_pay(low_params)
+        pay_high = _count_net_pay(high_params)
+
+        # Impact = range of net pay variation
+        impact = abs(pay_high - pay_low)
+        tornado_items.append({
+            "parameter": param_name,
+            "base_value": base_params[param_name],
+            "low_value": round(low_params[param_name], 4),
+            "high_value": round(high_params[param_name], 4),
+            "pay_low": round(pay_low, 2),
+            "pay_high": round(pay_high, 2),
+            "base_pay": round(base_pay, 2),
+            "impact": round(impact, 2),
+            "swing_low": round(pay_low - base_pay, 2),
+            "swing_high": round(pay_high - base_pay, 2),
+        })
+
+    # Sort by impact (most impactful first)
+    tornado_items.sort(key=lambda x: x["impact"], reverse=True)
+
+    return {
+        "base_pay": round(base_pay, 2),
+        "variation_pct": round(variation * 100, 1),
+        "tornado": tornado_items,
+    }
+
+
+# ─── Sprint 27: Core Calibration ────────────────────────────
+@app.post("/api/wells/{wid}/core-calibration")
+def core_calibration(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Calibrate log-derived porosity/permeability against core data.
+    Accepts core_depth, core_phi, core_k arrays. Returns regression stats.
+    """
+    core_depth = data.get("core_depth", [])
+    core_phi = data.get("core_phi", [])
+    core_k = data.get("core_k", [])
+    log_curve = data.get("log_curve", "NPHI")  # curve to calibrate against
+
+    if not core_depth or not core_phi:
+        raise HTTPException(400, "core_depth and core_phi required")
+
+    lr_id = data.get("log_run_id")
+    lr = db.query(LogRun).filter(LogRun.id == lr_id).first() if lr_id else \
+         db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+
+    log_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == log_curve).first()
+    dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
+    if not log_cd or not dept_cd:
+        raise HTTPException(400, f"Curve {log_curve} or DEPTH not found")
+
+    log_arr = np.frombuffer(log_cd.data_binary, dtype=np.float64).copy()
+    dept_arr = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy()
+
+    # Match core depths to nearest log values
+    matched_log = []
+    matched_core = []
+    for d, phi in zip(core_depth, core_phi):
+        idx = np.argmin(np.abs(dept_arr - d))
+        if abs(dept_arr[idx] - d) < 2.0:  # within 2 ft tolerance
+            if not np.isnan(log_arr[idx]):
+                matched_log.append(float(log_arr[idx]))
+                matched_core.append(float(phi))
+
+    if len(matched_log) < 3:
+        raise HTTPException(400, f"Only {len(matched_log)} core points matched to log (need ≥3)")
+
+    # Linear regression: core_phi = a + b * log_value
+    x = np.array(matched_log)
+    y = np.array(matched_core)
+    n = len(x)
+    sx = np.sum(x)
+    sy = np.sum(y)
+    sxx = np.sum(x * x)
+    sxy = np.sum(x * y)
+    denom = n * sxx - sx * sx
+    if denom == 0:
+        raise HTTPException(400, "Degenerate data — cannot fit")
+
+    slope = (n * sxy - sx * sy) / denom
+    intercept = (sy - slope * sx) / n
+
+    # R²
+    y_pred = intercept + slope * x
+    ss_res = np.sum((y - y_pred) ** 2)
+    ss_tot = np.sum((y - np.mean(y)) ** 2)
+    r_squared = 1 - ss_res / ss_tot if ss_tot > 0 else 0
+
+    # RMSE
+    rmse = np.sqrt(np.mean((y - y_pred) ** 2))
+
+    # Permeability transform (if core_k provided)
+    perm_stats = None
+    if core_k and len(core_k) == len(core_phi):
+        # Timur-type: k = a * phi^b / Sw^c (simplified: k = a * phi^b)
+        k_arr = np.array([float(k) for k in core_k])
+        phi_arr = np.array([float(p) for p in core_phi])
+        # Log-log regression: log(k) = log(a) + b * log(phi)
+        valid = (k_arr > 0) & (phi_arr > 0)
+        if valid.sum() >= 3:
+            log_k = np.log10(k_arr[valid])
+            log_phi = np.log10(phi_arr[valid])
+            nk = len(log_k)
+            skx = np.sum(log_phi)
+            sky = np.sum(log_k)
+            skxx = np.sum(log_phi * log_phi)
+            skxy = np.sum(log_phi * log_k)
+            dk = nk * skxx - skx * skx
+            if dk != 0:
+                b_perm = (nk * skxy - skx * sky) / dk
+                a_perm = 10 ** ((sky - b_perm * skx) / nk)
+                k_pred = a_perm * phi_arr[valid] ** b_perm
+                ss_r = np.sum((k_arr[valid] - k_pred) ** 2)
+                ss_t = np.sum((k_arr[valid] - np.mean(k_arr[valid])) ** 2)
+                r2_perm = 1 - ss_r / ss_t if ss_t > 0 else 0
+                perm_stats = {
+                    "a_perm": round(float(a_perm), 6),
+                    "b_perm": round(float(b_perm), 4),
+                    "r_squared": round(float(r2_perm), 4),
+                    "equation": f"k = {a_perm:.4f} × φ^{b_perm:.2f}",
+                    "n_points": int(valid.sum()),
+                }
+
+    return {
+        "n_matched": len(matched_log),
+        "slope": round(float(slope), 6),
+        "intercept": round(float(intercept), 6),
+        "r_squared": round(float(r_squared), 4),
+        "rmse": round(float(rmse), 6),
+        "equation": f"{log_curve}_core = {intercept:.4f} + {slope:.4f} × {log_curve}_log",
+        "matched_depth": [core_depth[i] for i in range(len(core_depth)) if i < len(matched_log)],
+        "matched_core": matched_core,
+        "matched_log": matched_log,
+        "predicted": [round(float(v), 4) for v in y_pred.tolist()],
+        "permeability": perm_stats,
+    }
+
+
+# ─── Sprint 27: Enhanced QC with Auto-Fix ───────────────────
+@app.post("/api/wells/{wid}/qc-autofix")
+def qc_autofix(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Run enhanced QC and suggest auto-fixes.
+    Returns issues found + recommended fixes.
+    """
+    lr_id = data.get("log_run_id")
+    lr = db.query(LogRun).filter(LogRun.id == lr_id).first() if lr_id else \
+         db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+
+    curves = db.query(CurveData).filter(CurveData.log_run_id == lr.id).all()
+    dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
+    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else None
+
+    issues = []
+    fixes = []
+
+    for cd in curves:
+        if cd.mnemonic in ("DEPT", "DEPTH"):
+            continue
+        arr = np.frombuffer(cd.data_binary, dtype=np.float64).copy()
+        n = len(arr)
+        valid = arr[~np.isnan(arr)]
+        if len(valid) == 0:
+            issues.append({"curve": cd.mnemonic, "type": "no_data", "severity": "critical",
+                          "detail": f"{cd.mnemonic} has no valid data"})
+            continue
+
+        # Check for nulls
+        null_count = int(np.sum(np.isnan(arr)))
+        null_pct = null_count / n * 100
+        if null_pct > 50:
+            issues.append({"curve": cd.mnemonic, "type": "high_nulls", "severity": "warning",
+                          "detail": f"{cd.mnemonic}: {null_pct:.0f}% null values"})
+            fixes.append({"curve": cd.mnemonic, "action": "interpolate", "detail": "Linear interpolation for null gaps"})
+
+        # Check for spikes (>5x std from local mean)
+        if len(valid) > 20:
+            mean = np.mean(valid)
+            std = np.std(valid)
+            spike_mask = np.abs(arr - mean) > 5 * std
+            spike_count = int(np.sum(spike_mask & ~np.isnan(arr)))
+            if spike_count > 0:
+                issues.append({"curve": cd.mnemonic, "type": "spikes", "severity": "warning",
+                              "detail": f"{cd.mnemonic}: {spike_count} potential spikes (>5σ)"})
+                fixes.append({"curve": cd.mnemonic, "action": "despike", "window": 5,
+                             "detail": "Apply median filter (window=5)"})
+
+        # Check for constant values (stuck sensor)
+        if len(valid) > 10:
+            unique_ratio = len(np.unique(np.round(valid, 2))) / len(valid)
+            if unique_ratio < 0.01:
+                issues.append({"curve": cd.mnemonic, "type": "constant", "severity": "critical",
+                              "detail": f"{cd.mnemonic}: appears stuck/constant ({len(np.unique(np.round(valid,2)))} unique values)"})
+
+        # Check depth consistency (gaps)
+        if dept is not None and len(dept) > 1:
+            step = np.median(np.diff(dept))
+            gaps = np.where(np.diff(dept) > step * 3)[0]
+            if len(gaps) > 0:
+                issues.append({"curve": cd.mnemonic, "type": "depth_gap", "severity": "info",
+                              "detail": f"{len(gaps)} depth gaps > {step*3:.1f} ft detected"})
+
+        # Check for negative values in curves that shouldn't have them
+        if cd.mnemonic in ("GR", "RT", "RESD", "RHOB", "NPHI"):
+            neg_count = int(np.sum(valid < 0))
+            if neg_count > 0:
+                issues.append({"curve": cd.mnemonic, "type": "negative", "severity": "warning",
+                              "detail": f"{cd.mnemonic}: {neg_count} negative values"})
+                fixes.append({"curve": cd.mnemonic, "action": "clip_negative",
+                             "detail": "Clip negative values to 0"})
+
+    # Score
+    critical = sum(1 for i in issues if i["severity"] == "critical")
+    warnings = sum(1 for i in issues if i["severity"] == "warning")
+    score = max(0, 100 - critical * 20 - warnings * 5)
+    grade = "A" if score >= 80 else "B" if score >= 60 else "C"
+
+    return {
+        "total_curves": len(curves),
+        "issues": issues,
+        "fixes": fixes,
+        "score": score,
+        "grade": grade,
+        "critical": critical,
+        "warnings": warnings,
+    }
+
+
 # ─── Inject audit logging into key endpoints ──────────────────
 # Patch upload endpoint to log audit
 _orig_upload = app.routes[:]

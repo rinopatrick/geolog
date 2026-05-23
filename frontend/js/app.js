@@ -245,6 +245,10 @@ class GeoLogApp {
         document.getElementById('dashboardPanel').style.display = view === 'dashboard' ? 'block' : 'none';
         document.getElementById('matrixPanel').style.display = view === 'matrix' ? 'block' : 'none';
         document.getElementById('auditPanel').style.display = view === 'audit' ? 'block' : 'none';
+        document.getElementById('tornadoPanel').style.display = view === 'tornado' ? 'block' : 'none';
+        document.getElementById('vclmodelsPanel').style.display = view === 'vclmodels' ? 'block' : 'none';
+        document.getElementById('corecalPanel').style.display = view === 'corecal' ? 'block' : 'none';
+        document.getElementById('qcautofixPanel').style.display = view === 'qcautofix' ? 'block' : 'none';
 
         // Sprint 26: Update status bar + trigger panel-specific loads
         this._updateStatusBar(view);
@@ -4784,6 +4788,385 @@ class GeoLogApp {
         });
     }
 
+    // ─── Sprint 27: Tornado Chart ───────────────────────────────
+    async runTornado() {
+        if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
+        const variation = document.getElementById('tornadoVar')?.value || 20;
+        GeoLoading.show('Running tornado analysis...');
+        try {
+            const resp = await fetch(`/api/wells/${this.currentWell}/tornado`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ variation_pct: parseFloat(variation) })
+            });
+            const data = await resp.json();
+            GeoLoading.hide();
+            this._renderTornado(data);
+        } catch (e) {
+            GeoLoading.hide();
+            GeoToast.error('Tornado analysis failed: ' + e.message);
+        }
+    }
+
+    _renderTornado(data) {
+        const container = document.getElementById('tornadoResults');
+        if (!container) return;
+        const maxImpact = Math.max(...data.tornado.map(t => Math.abs(t.swing_low)), ...data.tornado.map(t => Math.abs(t.swing_high)), 1);
+
+        let html = `<div style="margin-bottom:16px">
+            <span class="qc-grade qc-grade-a" style="font-size:20px">Base Net Pay: ${data.base_pay} ft</span>
+            <span style="color:var(--text-muted);margin-left:12px">±${data.variation_pct}% variation</span>
+        </div>`;
+
+        html += '<div style="display:flex;flex-direction:column;gap:8px">';
+        data.tornado.forEach((item, idx) => {
+            const barLow = Math.abs(item.swing_low) / maxImpact * 100;
+            const barHigh = Math.abs(item.swing_high) / maxImpact * 100;
+            const color = idx === 0 ? 'var(--danger)' : idx === 1 ? 'var(--warning)' : 'var(--accent)';
+            html += `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-tertiary);border-radius:6px;border-left:3px solid ${color}">
+                <div style="min-width:100px;font-weight:600;font-size:12px;color:var(--text-primary)">${item.parameter}</div>
+                <div style="flex:1;display:flex;align-items:center;gap:4px">
+                    <div style="text-align:right;width:60px;font-family:var(--font-mono);font-size:11px;color:var(--danger)">${item.swing_low > 0 ? '+' : ''}${item.swing_low}</div>
+                    <div style="flex:1;height:20px;background:var(--bg-primary);border-radius:3px;position:relative;overflow:hidden">
+                        <div style="position:absolute;right:50%;width:${barLow/2}%;height:100%;background:rgba(199,90,90,0.4);border-radius:3px 0 0 3px"></div>
+                        <div style="position:absolute;left:50%;width:${barHigh/2}%;height:100%;background:rgba(76,175,125,0.4);border-radius:0 3px 3px 0"></div>
+                        <div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--text-muted)"></div>
+                    </div>
+                    <div style="width:60px;font-family:var(--font-mono);font-size:11px;color:var(--success)">+${item.swing_high}</div>
+                </div>
+                <div style="min-width:50px;text-align:right;font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">${item.impact} ft</div>
+            </div>`;
+        });
+        html += '</div>';
+        html += '<div style="margin-top:12px;font-size:11px;color:var(--text-muted);text-align:center">← Low value reduces pay | High value increases pay →</div>';
+
+        container.innerHTML = html;
+        container.className = '';
+        container.style.padding = '0';
+    }
+
+    // ─── Sprint 27: Vcl Models ──────────────────────────────────
+    async runVclModels() {
+        if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
+        const grClean = parseFloat(document.getElementById('vclGrClean')?.value || 20);
+        const grShale = parseFloat(document.getElementById('vclGrShale')?.value || 120);
+        GeoLoading.show('Computing Vclay models...');
+        try {
+            const resp = await fetch(`/api/wells/${this.currentWell}/vcl-models`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ gr_clean: grClean, gr_shale: grShale })
+            });
+            const data = await resp.json();
+            GeoLoading.hide();
+            this._renderVclModels(data);
+        } catch (e) {
+            GeoLoading.hide();
+            GeoToast.error('Vcl computation failed');
+        }
+    }
+
+    _renderVclModels(data) {
+        const container = document.getElementById('vclResults');
+        if (!container) return;
+        const models = ['igr', 'larionov_tertiary', 'larionov_old', 'clavier', 'steiber'];
+        const labels = { igr: 'Linear IGR', larionov_tertiary: 'Larionov (Tertiary)', larionov_old: 'Larionov (Older)', clavier: 'Clavier', steiber: 'Steiber' };
+        const colors = ['#5b8fb9', '#d4a853', '#4caf7d', '#c75a5a', '#8b6fb0'];
+
+        let html = `<div style="margin-bottom:16px"><span style="color:var(--text-muted);font-size:12px">GR Clean: ${data.params.gr_clean} | GR Shale: ${data.params.gr_shale}</span></div>`;
+
+        // Summary table
+        html += '<table class="petro-table"><tr><th>Model</th><th>Mean</th><th>Median</th><th>Min</th><th>Max</th></tr>';
+        models.forEach((m, idx) => {
+            const s = data.summary[m];
+            html += `<tr><td style="color:${colors[idx]};font-weight:600">${labels[m]}</td>
+                <td>${s.mean?.toFixed(4) || '—'}</td><td>${s.median?.toFixed(4) || '—'}</td>
+                <td>${s.min?.toFixed(4) || '—'}</td><td>${s.max?.toFixed(4) || '—'}</td></tr>`;
+        });
+        html += '</table>';
+
+        // Canvas for depth plot
+        html += '<div style="margin-top:20px"><canvas id="vclCanvas" style="width:100%;height:400px;background:var(--bg-primary);border-radius:8px"></canvas></div>';
+
+        container.innerHTML = html;
+        container.className = '';
+        container.style.padding = '0';
+
+        // Render the depth plot
+        setTimeout(() => this._renderVclPlot(data, colors), 100);
+    }
+
+    _renderVclPlot(data, colors) {
+        const canvas = document.getElementById('vclCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width * 2;
+        canvas.height = 800;
+        ctx.scale(2, 2);
+        const W = rect.width, H = 400;
+        const pad = { top: 20, right: 20, bottom: 40, left: 60 };
+        const pw = W - pad.left - pad.right;
+        const ph = H - pad.top - pad.bottom;
+
+        ctx.fillStyle = '#0a0e14';
+        ctx.fillRect(0, 0, W, H);
+
+        const depth = data.results.depth;
+        const dMin = Math.min(...depth);
+        const dMax = Math.max(...depth);
+        const models = ['igr', 'larionov_tertiary', 'larionov_old', 'clavier', 'steiber'];
+        const labels = ['IGR', 'Larionov (T)', 'Larionov (O)', 'Clavier', 'Steiber'];
+
+        // Grid
+        ctx.strokeStyle = 'rgba(42,52,70,0.5)';
+        ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 4; i++) {
+            const x = pad.left + (pw / 4) * i;
+            ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, pad.top + ph); ctx.stroke();
+            ctx.fillStyle = '#6b7a8d';
+            ctx.font = '10px JetBrains Mono';
+            ctx.textAlign = 'center';
+            ctx.fillText((i * 0.25).toFixed(2), x, H - 10);
+        }
+        for (let i = 0; i <= 5; i++) {
+            const y = pad.top + (ph / 5) * i;
+            ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + pw, y); ctx.stroke();
+            ctx.fillStyle = '#6b7a8d';
+            ctx.font = '10px JetBrains Mono';
+            ctx.textAlign = 'right';
+            ctx.fillText((dMin + (dMax - dMin) / 5 * i).toFixed(0), pad.left - 8, y + 4);
+        }
+
+        // Plot each model
+        const step = Math.max(1, Math.floor(depth.length / 500));
+        models.forEach((model, idx) => {
+            ctx.strokeStyle = colors[idx];
+            ctx.lineWidth = 1.5;
+            ctx.globalAlpha = 0.8;
+            ctx.beginPath();
+            let started = false;
+            for (let i = 0; i < depth.length; i += step) {
+                const v = data.results[model][i];
+                if (v === null || v === undefined || isNaN(v)) continue;
+                const px = pad.left + v * pw;
+                const py = pad.top + ((depth[i] - dMin) / (dMax - dMin)) * ph;
+                if (!started) { ctx.moveTo(px, py); started = true; }
+                else ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+        });
+
+        // Legend
+        ctx.font = '11px Geologica';
+        models.forEach((m, idx) => {
+            const lx = pad.left + 10 + idx * 100;
+            const ly = pad.top - 5;
+            ctx.fillStyle = colors[idx];
+            ctx.fillRect(lx, ly - 8, 12, 3);
+            ctx.fillText(labels[idx], lx + 16, ly);
+        });
+    }
+
+    // ─── Sprint 27: Core Calibration ────────────────────────────
+    showCoreCalModal() {
+        if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
+        GeoModal.show({
+            title: 'Core Calibration Data',
+            fields: [
+                { id: 'core_depths', label: 'Core Depths (comma-separated, ft)', type: 'text', placeholder: '5100, 5200, 5300, 5400' },
+                { id: 'core_phi', label: 'Core Porosity (comma-separated, v/v)', type: 'text', placeholder: '0.18, 0.22, 0.15, 0.20' },
+                { id: 'core_perm', label: 'Core Permeability (comma-separated, mD, optional)', type: 'text', placeholder: '120, 350, 45, 200' },
+            ],
+            onConfirm: (vals) => {
+                const depths = vals.core_depths.split(',').map(Number).filter(n => !isNaN(n));
+                const phi = vals.core_phi.split(',').map(Number).filter(n => !isNaN(n));
+                const perm = vals.core_perm ? vals.core_perm.split(',').map(Number).filter(n => !isNaN(n)) : [];
+                this._runCoreCal(depths, phi, perm);
+            }
+        });
+    }
+
+    async _runCoreCal(depths, phi, perm) {
+        const curve = document.getElementById('coreCalCurve')?.value || 'NPHI';
+        GeoLoading.show('Calibrating...');
+        try {
+            const resp = await fetch(`/api/wells/${this.currentWell}/core-calibration`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ core_depth: depths, core_phi: phi, core_k: perm, log_curve: curve })
+            });
+            const data = await resp.json();
+            GeoLoading.hide();
+            this._renderCoreCal(data, curve);
+        } catch (e) {
+            GeoLoading.hide();
+            GeoToast.error('Calibration failed: ' + (e.message || 'Unknown error'));
+        }
+    }
+
+    _renderCoreCal(data, curve) {
+        const container = document.getElementById('coreCalResults');
+        if (!container) return;
+
+        let html = `<div class="stats-card" style="margin-bottom:16px">
+            <h4 style="color:var(--accent)">Calibration Results</h4>
+            <div class="petro-stat"><span>Matched Points</span><strong>${data.n_matched}</strong></div>
+            <div class="petro-stat"><span>Equation</span><strong>${data.equation}</strong></div>
+            <div class="petro-stat"><span>R²</span><strong>${data.r_squared}</strong></div>
+            <div class="petro-stat"><span>RMSE</span><strong>${data.rmse}</strong></div>
+            <div class="petro-stat"><span>Slope</span><strong>${data.slope}</strong></div>
+            <div class="petro-stat"><span>Intercept</span><strong>${data.intercept}</strong></div>
+        </div>`;
+
+        if (data.permeability) {
+            html += `<div class="stats-card" style="margin-bottom:16px">
+                <h4 style="color:var(--accent)">Permeability Transform</h4>
+                <div class="petro-stat"><span>Equation</span><strong>${data.permeability.equation}</strong></div>
+                <div class="petro-stat"><span>R²</span><strong>${data.permeability.r_squared}</strong></div>
+                <div class="petro-stat"><span>Points</span><strong>${data.permeability.n_points}</strong></div>
+            </div>`;
+        }
+
+        // Cross-plot: core vs log
+        html += '<div><canvas id="coreCalCanvas" style="width:100%;height:300px;background:var(--bg-primary);border-radius:8px"></canvas></div>';
+
+        container.innerHTML = html;
+        container.className = '';
+        container.style.padding = '0';
+
+        // Render scatter
+        setTimeout(() => {
+            const canvas = document.getElementById('coreCalCanvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const W = canvas.parentElement.getBoundingClientRect().width;
+            canvas.width = W * 2;
+            canvas.height = 600;
+            ctx.scale(2, 2);
+            const H = 300;
+            const pad = { top: 30, right: 30, bottom: 50, left: 60 };
+            const pw = W - pad.left - pad.right;
+            const ph = H - pad.top - pad.bottom;
+
+            ctx.fillStyle = '#0a0e14';
+            ctx.fillRect(0, 0, W, H);
+
+            const xMin = Math.min(...data.matched_log) * 0.9;
+            const xMax = Math.max(...data.matched_log) * 1.1;
+            const yMin = Math.min(...data.matched_core) * 0.9;
+            const yMax = Math.max(...data.matched_core) * 1.1;
+
+            // Grid
+            ctx.strokeStyle = 'rgba(42,52,70,0.5)';
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i <= 4; i++) {
+                ctx.beginPath();
+                ctx.moveTo(pad.left + pw/4*i, pad.top);
+                ctx.lineTo(pad.left + pw/4*i, pad.top + ph);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(pad.left, pad.top + ph/4*i);
+                ctx.lineTo(pad.left + pw, pad.top + ph/4*i);
+                ctx.stroke();
+            }
+
+            // Points
+            ctx.fillStyle = '#d4a853';
+            data.matched_log.forEach((x, i) => {
+                const px = pad.left + ((x - xMin) / (xMax - xMin)) * pw;
+                const py = pad.top + ((yMax - data.matched_core[i]) / (yMax - yMin)) * ph;
+                ctx.beginPath();
+                ctx.arc(px, py, 5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // 1:1 line
+            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(pad.left, pad.top + ph);
+            ctx.lineTo(pad.left + pw, pad.top);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Labels
+            ctx.fillStyle = '#9aa8b8';
+            ctx.font = '12px Geologica';
+            ctx.textAlign = 'center';
+            ctx.fillText(`Log ${curve}`, pad.left + pw/2, H - 10);
+            ctx.save();
+            ctx.translate(16, pad.top + ph/2);
+            ctx.rotate(-Math.PI/2);
+            ctx.fillText('Core Porosity', 0, 0);
+            ctx.restore();
+
+            // R² label
+            ctx.fillStyle = '#d4a853';
+            ctx.font = '14px Geologica';
+            ctx.textAlign = 'left';
+            ctx.fillText(`R² = ${data.r_squared}`, pad.left + 10, pad.top + 20);
+        }, 100);
+    }
+
+    // ─── Sprint 27: QC Auto-Fix ─────────────────────────────────
+    async runQcAutofix() {
+        if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
+        GeoLoading.show('Running enhanced QC...');
+        try {
+            const resp = await fetch(`/api/wells/${this.currentWell}/qc-autofix`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            const data = await resp.json();
+            GeoLoading.hide();
+            this._renderQcAutofix(data);
+        } catch (e) {
+            GeoLoading.hide();
+            GeoToast.error('QC failed');
+        }
+    }
+
+    _renderQcAutofix(data) {
+        const container = document.getElementById('qcAutofixResults');
+        if (!container) return;
+
+        const gradeClass = data.grade === 'A' ? 'qc-grade-a' : data.grade === 'B' ? 'qc-grade-b' : 'qc-grade-c';
+
+        let html = `<div style="display:flex;align-items:center;gap:20px;margin-bottom:20px">
+            <div class="qc-grade ${gradeClass}" style="font-size:48px">${data.grade}</div>
+            <div>
+                <div style="font-size:24px;font-weight:700;color:var(--text-primary)">${data.score}/100</div>
+                <div style="font-size:12px;color:var(--text-muted)">${data.total_curves} curves analyzed | ${data.critical} critical | ${data.warnings} warnings</div>
+            </div>
+        </div>`;
+
+        if (data.issues.length === 0) {
+            html += '<div style="color:var(--success);font-size:14px;padding:20px;text-align:center">✓ No issues found — data quality is excellent</div>';
+        } else {
+            // Issues table
+            html += '<h4 style="color:var(--text-primary);margin-bottom:10px">Issues Found</h4>';
+            html += '<table class="petro-table"><tr><th>Curve</th><th>Type</th><th>Severity</th><th>Detail</th></tr>';
+            data.issues.forEach(i => {
+                const sevColor = i.severity === 'critical' ? 'var(--danger)' : i.severity === 'warning' ? 'var(--warning)' : 'var(--text-muted)';
+                html += `<tr><td>${i.curve}</td><td>${i.type}</td><td style="color:${sevColor};font-weight:600">${i.severity}</td><td>${i.detail}</td></tr>`;
+            });
+            html += '</table>';
+
+            // Fixes
+            if (data.fixes.length) {
+                html += '<h4 style="color:var(--accent);margin:16px 0 10px">Recommended Fixes</h4>';
+                html += '<table class="petro-table"><tr><th>Curve</th><th>Action</th><th>Detail</th></tr>';
+                data.fixes.forEach(f => {
+                    html += `<tr><td>${f.curve}</td><td style="color:var(--accent);font-weight:600">${f.action}</td><td>${f.detail}</td></tr>`;
+                });
+                html += '</table>';
+            }
+        }
+
+        container.innerHTML = html;
+        container.className = '';
+        container.style.padding = '0';
+    }
+
 }
 // Initialize
 const app = new GeoLogApp();
@@ -4793,7 +5176,7 @@ document.addEventListener('keydown', (e) => {
     // Don't trigger if typing in input/textarea
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
 
-    const views = ['viewer', 'crossplot', 'pickett', 'mnplot', 'petrophysics', 'qc', 'correlation', 'statistics', 'sensitivity', 'comparison', 'striplog', 'facies', 'tools', 'probability', 'moveable', 'dipplot', 'buckles', 'hingle', 'calculator', 'datatable', 'topsmgmt', 'formation', 'batch', 'map', 'dashboard', 'matrix', 'audit'];
+    const views = ['viewer', 'crossplot', 'pickett', 'mnplot', 'petrophysics', 'qc', 'correlation', 'statistics', 'sensitivity', 'comparison', 'striplog', 'facies', 'tools', 'probability', 'moveable', 'dipplot', 'buckles', 'hingle', 'calculator', 'datatable', 'topsmgmt', 'formation', 'batch', 'map', 'dashboard', 'matrix', 'audit', 'tornado', 'vclmodels', 'corecal', 'qcautofix'];
 
     switch (e.key) {
         case '1': case '2': case '3': case '4':

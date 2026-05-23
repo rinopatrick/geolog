@@ -37,6 +37,8 @@
                     <button class="nav-btn" data-view="qc" title="Run quality checks for missing data and outliers"><i data-lucide="shield-check"></i><span>QC</span></button>
                     <button class="nav-btn" data-view="statistics" title="View curve statistics and distributions"><i data-lucide="bar-chart-3"></i><span>Statistics</span></button>
                     <button class="nav-btn" data-view="sensitivity" title="Sensitivity analysis for model parameters"><i data-lucide="git-compare"></i><span>Sensitivity</span></button>
+                    <button class="nav-btn" data-view="tornado" title="Tornado chart — parameter impact on net pay"><i data-lucide="wind"></i><span>Tornado</span></button>
+                    <button class="nav-btn" data-view="vclmodels" title="Compare Vclay models (Larionov, Clavier, Steiber)"><i data-lucide="layers"></i><span>Vcl Models</span></button>
                     <button class="nav-btn" data-view="comparison" title="Compare multiple wells or runs side-by-side"><i data-lucide="columns-3"></i><span>Compare</span></button>
                 </div>
             </details>
@@ -64,6 +66,8 @@
                 <summary class="nav-btn nav-group-trigger" title="Utilities, exports, mapping, and automation">Tools</summary>
                 <div class="nav-group-menu">
                     <button class="nav-btn" data-view="tools" title="General utilities and helper workflows"><i data-lucide="wrench"></i><span>Tools</span></button>
+                    <button class="nav-btn" data-view="corecal" title="Core calibration — depth shift and porosity/permeability transforms"><i data-lucide="target"></i><span>Core Cal</span></button>
+                    <button class="nav-btn" data-view="qcautofix" title="Enhanced QC with auto-fix suggestions"><i data-lucide="sparkles"></i><span>QC Fix</span></button>
                     <button class="nav-btn" data-view="calculator" title="Quick petrophysical and engineering calculations"><i data-lucide="function-square"></i><span>Calc</span></button>
                     <button class="nav-btn" data-view="datatable" title="Inspect raw curve samples in a table"><i data-lucide="table"></i><span>Data Table</span></button>
                     <button class="nav-btn" data-view="batch" title="Run petrophysics in batch across wells"><i data-lucide="copy"></i><span>Batch</span></button>
@@ -723,6 +727,92 @@
                     <div class="empty-state-icon"><i data-lucide="file-text"></i></div>
                     <h3>No Activity Yet</h3>
                     <p>Upload LAS files, compute petrophysics, or export data to see the audit trail here.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tornado Chart Panel -->
+        <div id="tornadoPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group">
+                    <label>Tornado Chart</label>
+                    <span class="toolbar-hint">Parameter sensitivity — which parameter has the most impact on net pay?</span>
+                </div>
+                <div class="toolbar-group">
+                    <label>Variation %</label>
+                    <input type="number" id="tornadoVar" value="20" min="5" max="50" style="width:60px">
+                </div>
+                <button class="btn-primary" onclick="app.runTornado()"><i data-lucide="refresh-cw"></i> Run</button>
+            </div>
+            <div style="padding:20px">
+                <div id="tornadoResults" class="empty-state">
+                    <div class="empty-state-icon"><i data-lucide="wind"></i></div>
+                    <h3>Tornado Analysis</h3>
+                    <p>Vary each parameter ±X% and measure impact on net pay. Click Run to start.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vcl Models Panel -->
+        <div id="vclmodelsPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group">
+                    <label>Vclay Model Comparison</label>
+                    <span class="toolbar-hint">Compare Larionov, Clavier, Steiber, and linear IGR models</span>
+                </div>
+                <div class="toolbar-group">
+                    <label>GR Clean</label>
+                    <input type="number" id="vclGrClean" value="20" style="width:60px">
+                    <label>GR Shale</label>
+                    <input type="number" id="vclGrShale" value="120" style="width:60px">
+                </div>
+                <button class="btn-primary" onclick="app.runVclModels()"><i data-lucide="refresh-cw"></i> Compare</button>
+            </div>
+            <div style="padding:20px">
+                <div id="vclResults" class="empty-state">
+                    <div class="empty-state-icon"><i data-lucide="layers"></i></div>
+                    <h3>Vclay Model Comparison</h3>
+                    <p>Compare 5 different Vclay estimation models side-by-side. Set GR clean/shale endpoints then click Compare.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Core Calibration Panel -->
+        <div id="corecalPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group">
+                    <label>Core Calibration</label>
+                    <span class="toolbar-hint">Calibrate log porosity/permeability against core data</span>
+                </div>
+                <div class="toolbar-group">
+                    <label>Log Curve</label>
+                    <select id="coreCalCurve"><option>NPHI</option><option>RHOB</option><option>DT</option></select>
+                </div>
+                <button class="btn-primary" onclick="app.showCoreCalModal()"><i data-lucide="target"></i> Calibrate</button>
+            </div>
+            <div style="padding:20px">
+                <div id="coreCalResults" class="empty-state">
+                    <div class="empty-state-icon"><i data-lucide="target"></i></div>
+                    <h3>Core-Log Calibration</h3>
+                    <p>Paste core depth/porosity/permeability data to compute regression and calibration transforms.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- QC Auto-Fix Panel -->
+        <div id="qcautofixPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group">
+                    <label>Enhanced QC with Auto-Fix</label>
+                    <span class="toolbar-hint">Detect issues and suggest automated fixes</span>
+                </div>
+                <button class="btn-primary" onclick="app.runQcAutofix()"><i data-lucide="sparkles"></i> Run QC</button>
+            </div>
+            <div style="padding:20px">
+                <div id="qcAutofixResults" class="empty-state">
+                    <div class="empty-state-icon"><i data-lucide="sparkles"></i></div>
+                    <h3>Quality Control & Auto-Fix</h3>
+                    <p>Automatically detect data quality issues (spikes, nulls, stuck sensors, depth gaps) and suggest fixes.</p>
                 </div>
             </div>
         </div>
