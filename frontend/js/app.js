@@ -770,7 +770,7 @@ class GeoLogApp {
             const runNo = r.run_number ?? (idx + 1);
             const file = r.filename || 'unknown.las';
             const pts = r.num_points ?? 0;
-            const versionLabel = this._formatLASVersion(r.version);
+            const versionLabel = this._formatLASVersion(r.version || r.las_version);
             const versionText = versionLabel ? ` • ${versionLabel}` : '';
             return `<option value="${r.id}">Run ${runNo} • ${file} • ${pts} pts${versionText}</option>`;
         }).join('');
@@ -787,7 +787,8 @@ class GeoLogApp {
 
     _normalizeLogRunVersion(logRun) {
         if (!logRun || typeof logRun !== 'object') return logRun;
-        const normalized = this._formatLASVersion(logRun.version);
+        const rawVersion = logRun.version || logRun.las_version;
+        const normalized = this._formatLASVersion(rawVersion);
         if (!normalized) return logRun;
         return { ...logRun, version: normalized };
     }
@@ -1661,7 +1662,7 @@ class GeoLogApp {
             const dBase = hasDepth ? Math.max(s, e) : null;
             const depthText = hasDepth ? `${dTop.toFixed(2)}-${dBase.toFixed(2)}` : 'n/a';
             const stepAbs = Number.isFinite(Number(this.currentLogRun.step)) ? Math.abs(Number(this.currentLogRun.step)).toFixed(4) : 'n/a';
-            const versionLabel = this._formatLASVersion(this.currentLogRun.version);
+            const versionLabel = this._formatLASVersion(this.currentLogRun.version || this.currentLogRun.las_version);
             const versionClass = versionLabel.includes('3.0') ? 'las-badge las-badge-v3' : 'las-badge las-badge-v2';
             const versionBadge = versionLabel ? ` <span class="${versionClass}">${versionLabel}</span>` : '';
             statsEl.innerHTML = `Run ${runNo} • ${file} • ${this.currentLogRun.num_points} pts • ${depthText} ${well.depth_unit} • step ${stepAbs}${versionBadge}`;
