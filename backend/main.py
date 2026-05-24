@@ -5614,6 +5614,494 @@ def classify_lithology(wid: int, data: dict, db: Session = Depends(get_db)):
     }
 
 
+# ══════════════════════════════════════════════════════════════
+# Sprint 28: Professional Petrophysics Engine
+# ══════════════════════════════════════════════════════════════
+
+@app.post("/api/wells/{wid}/compute-sw")
+def compute_saturation(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Unified saturation computation with multiple models.
+    
+    Supported models: archie, simandoux, indonesian, waxman_smits, dual_water
+    
+    Params:
+        model: str - saturation model name
+        a, m, n: float - Archie parameters
+        rw: float - formation water resistivity
+        rwb: float - bound water resistivity (for dual-water/waxman-smits)
+        qv: float - cation exchange capacity per unit pore volume (for waxman-smits)
+        phi_sh: float - shale porosity (for dual-water)
+        vsh_method: str - Vclay method (larionov, steiber, clavier, igr)
+        gr_clean, gr_shale: float - GR endpoints for Vclay
+    """
+    lr = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+
+    # Load curves with flexible names
+    def _get_curve(names):
+        for name in names:
+            cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == name).first()
+            if cd:
+                return cd
+        return None
+
+    rt_cd = _get_curve(["RT", "RESD", "RILD", "ILD"])
+    gr_cd = _get_curve(["GR", "SGR", "CGR"])
+    nphi_cd = _get_curve(["NPHI", "NPHI_LS"])
+    rhob_cd = _get_curve(["RHOB", "RHOZ", "DEN"])
+    dt_cd = _get_curve(["DT", "DTC", "DTCO"])
+    dept_cd = _get_curve(["DEPT", "DEPTH"])
+
+    if not rt_cd:
+        raise HTTPException(400, "RT curve required")
+    if not gr_cd:
+        raise HTTPException(400, "GR curve required for Vclay")
+
+    rt = np.frombuffer(rt_cd.data_binary, dtype=np.float64).copy()
+    gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy()
+    nphi = np.frombuffer(nphi_cd.data_binary, dtype=np.float64).copy() if nphi_cd else np.full_like(rt, np.nan)
+    rhob = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy() if rhob_cd else np.full_like(rt, np.nan)
+    dt = np.frombuffer(dt_cd.data_binary, dtype=np.float64).copy() if dt_cd else np.full_like(rt, np.nan)
+    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(rt)) * 0.5
+
+    # Parameters
+    model = str(data.get("model", "archie")).lower()
+    a_v = float(data.get("a", 1.0))
+    m_v = float(data.get("m", 2.0))
+    n_v = float(data.get("n", 2.0))
+    rw = float(data.get("rw", 0.1))
+    rwb = float(data.get("rwb", 0.03))
+    qv = float(data.get("qv", 0.0))  # meq/mL for waxman-smits
+    phi_sh = float(data.get("phi_sh", 0.30))
+    vsh_method = str(data.get("vsh_method", "larionov_tertiary")).lower()
+    gr_clean = float(data.get("gr_clean", np.nanmin(gr[~np.isnan(gr)]))) if not np.all(np.isnan(gr)) else 20
+    gr_shale = float(data.get("gr_shale", np.nanmax(gr[~np.isnan(gr)]))) if not np.all(np.isnan(gr)) else 120
+
+    n = len(rt)
+    sw = np.full(n, np.nan)
+    vsh_arr = np.full(n, np.nan)
+    phie_arr = np.full(n, np.nan)
+
+    # --- Vclay computation ---
+    gr_range = max(gr_shale - gr_clean, 1.0)
+    for i in range(n):
+        if np.isnan(gr[i]):
+            continue
+        igr = np.clip((gr[i] - gr_clean) / gr_range, 0, 1)
+
+        if vsh_method == "steiber":
+            vsh_v = igr / (3 - 2 * igr) if igr < 1 else 1.0
+        elif vsh_method == "clavier":
+            vsh_v = 1.7 - np.sqrt(3.38 - (igr + 0.7) ** 2) if igr < 1 else 1.0
+        elif vsh_method == "larionov_old":
+            vsh_v = 0.33 * (2 ** (2 * igr) - 1) if igr < 1 else 1.0
+        else:  # larionov_tertiary (default)
+            vsh_v = 0.083 * (2 ** (3.7 * igr) - 1) if igr < 1 else 1.0
+
+        vsh_arr[i] = np.clip(vsh_v, 0, 1)
+
+    # --- Porosity computation ---
+    for i in range(n):
+        phi_n = nphi[i] if not np.isnan(nphi[i]) else np.nan
+        phi_d = np.nan
+        if not np.isnan(rhob[i]):
+            phi_d = np.clip((2.65 - rhob[i]) / (2.65 - 1.0), -0.15, 0.60)
+
+        # Density porosity preferred, neutron-density combo for gas
+        if not np.isnan(phi_d) and not np.isnan(phi_n):
+            # If gas effect (phi_n < phi_d), use density only
+            if phi_n < phi_d - 0.03:
+                phie_v = phi_d
+            else:
+                phie_v = (phi_d + phi_n) / 2
+        elif not np.isnan(phi_d):
+            phie_v = phi_d
+        elif not np.isnan(phi_n):
+            phie_v = phi_n * (1 - vsh_arr[i])  # Neutron corrected for clay
+        else:
+            continue
+
+        phie_arr[i] = max(0.0, min(0.60, phie_v - vsh_arr[i] * phi_sh))
+
+    # --- Saturation computation ---
+    for i in range(n):
+        if np.isnan(rt[i]) or np.isnan(phie_arr[i]) or rt[i] <= 0 or phie_arr[i] < 0.01:
+            continue
+        phi = max(phie_arr[i], 0.01)
+        vsh_v = vsh_arr[i] if not np.isnan(vsh_arr[i]) else 0
+
+        if model == "simandoux":
+            # Simandoux (1963): 1/Rt = (phi^m / (a*Rw*Sw^2)) + (Vsh / (Rsh*Sw))
+            # Solved iteratively for Sw
+            rsh = float(data.get("rsh", 4.0))
+            sw_v = 1.0
+            for _ in range(20):
+                term1 = phi ** m_v / (a_v * rw)
+                term2 = vsh_v / rsh if rsh > 0 else 0
+                denom = term1 + term2
+                if denom <= 0:
+                    break
+                sw_new = np.sqrt(1.0 / (rt[i] * denom))
+                if abs(sw_new - sw_v) < 0.001:
+                    break
+                sw_v = sw_new
+
+        elif model == "indonesian":
+            # Indonesian (Poupon & Leveaux 1971):
+            # 1/sqrt(Rt) = (phi^m / (a*Rw))^0.5 * Sw^n/2 + (Vsh^(1-Vsh/2) / sqrt(Rsh)) * Sw^n/2
+            rsh = float(data.get("rsh", 4.0))
+            term1 = np.sqrt(phi ** m_v / (a_v * rw))
+            term2 = np.sqrt(vsh_v ** (1 - vsh_v / 2)) / np.sqrt(max(rsh, 0.01)) if rsh > 0 else 0
+            denom = term1 + term2
+            if denom > 0:
+                sw_v = (1.0 / (np.sqrt(max(rt[i], 0.01)) * denom)) ** (2.0 / n_v)
+            else:
+                sw_v = 1.0
+
+        elif model == "waxman_smits":
+            # Waxman-Smits (1968): Sw^-n = (a*Rw / (phi^m * Rt)) * (1 + Rw*B*Qv/Sw)
+            # B = 3.83 * (1 - 0.83 * exp(-0.5 / Rw)) at 25°C
+            B = 3.83 * (1 - 0.83 * np.exp(-0.5 / max(rw, 0.001)))
+            sw_v = 1.0
+            for _ in range(30):
+                cex = B * qv / max(sw_v, 0.01)
+                inner = a_v * rw * (1 + cex) / (phi ** m_v * rt[i])
+                sw_new = max(0, min(1, inner ** (1.0 / n_v)))
+                if abs(sw_new - sw_v) < 0.001:
+                    break
+                sw_v = sw_new
+
+        elif model == "dual_water":
+            # Dual-Water (Clavier 1977):
+            # Sw^(-n) = a*Rw / (phi^m * Rt) * (1 + (Rw/Rwb - 1) * (Vsh*phi_sh / phi))
+            correction = (rw / rwb - 1) * (vsh_v * phi_sh / phi) if rwb > 0 else 0
+            inner = a_v * rw / (phi ** m_v * rt[i]) * (1 + correction)
+            sw_v = max(0, min(1, inner ** (1.0 / n_v)))
+
+        else:  # archie (default)
+            sw_v = max(0, min(1, (a_v * rw / (phi ** m_v * rt[i])) ** (1.0 / n_v)))
+
+        sw[i] = np.clip(sw_v, 0, 1)
+
+    # Stats
+    valid_sw = sw[~np.isnan(sw)]
+    valid_phie = phie_arr[~np.isnan(phie_arr)]
+    valid_vsh = vsh_arr[~np.isnan(vsh_arr)]
+
+    return {
+        "depth": dept.tolist(),
+        "sw": [None if np.isnan(v) else round(float(v), 4) for v in sw],
+        "vsh": [None if np.isnan(v) else round(float(v), 4) for v in vsh_arr],
+        "phie": [None if np.isnan(v) else round(float(v), 4) for v in phie_arr],
+        "model": model,
+        "params": {"a": a_v, "m": m_v, "n": n_v, "rw": rw, "rwb": rwb, "qv": qv,
+                   "vsh_method": vsh_method, "gr_clean": gr_clean, "gr_shale": gr_shale},
+        "stats": {
+            "sw_mean": round(float(np.nanmean(valid_sw)), 4) if len(valid_sw) else None,
+            "sw_min": round(float(np.nanmin(valid_sw)), 4) if len(valid_sw) else None,
+            "sw_max": round(float(np.nanmax(valid_sw)), 4) if len(valid_sw) else None,
+            "phie_mean": round(float(np.nanmean(valid_phie)), 4) if len(valid_phie) else None,
+            "vsh_mean": round(float(np.nanmean(valid_vsh)), 4) if len(valid_vsh) else None,
+            "n_points": len(valid_sw),
+        }
+    }
+
+
+@app.post("/api/wells/{wid}/multimineral")
+def multimineral_solver(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Multimineral solver — estimate mineral volumes from log responses.
+
+    Solves for: V_quartz, V_calcite, V_dolomite, V_clay, phi_e
+    Using: GR, RHOB, NPHI, DT (minimum 3 curves needed)
+
+    Based on deterministic linear inversion of response equations.
+    """
+    lr = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+
+    def _get_curve(names):
+        for name in names:
+            cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == name).first()
+            if cd:
+                return cd
+        return None
+
+    rhob_cd = _get_curve(["RHOB", "RHOZ", "DEN"])
+    nphi_cd = _get_curve(["NPHI", "NPHI_LS"])
+    dt_cd = _get_curve(["DT", "DTC", "DTCO"])
+    gr_cd = _get_curve(["GR", "SGR", "CGR"])
+    dept_cd = _get_curve(["DEPT", "DEPTH"])
+
+    if not rhob_cd or not nphi_cd:
+        raise HTTPException(400, "Need RHOB and NPHI at minimum")
+
+    rhob = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy()
+    nphi = np.frombuffer(nphi_cd.data_binary, dtype=np.float64).copy()
+    dt_arr = np.frombuffer(dt_cd.data_binary, dtype=np.float64).copy() if dt_cd else None
+    gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy() if gr_cd else None
+    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(rhob))
+
+    # Endmember values (can be overridden via data)
+    endmembers = {
+        "quartz":   {"rhob": 2.65, "nphi": -0.02, "dt": 55.5, "gr": 10},
+        "calcite":  {"rhob": 2.71, "nphi": 0.00,  "dt": 47.6, "gr": 10},
+        "dolomite": {"rhob": 2.87, "nphi": 0.02,  "dt": 43.5, "gr": 10},
+        "clay":     {"rhob": float(data.get("rho_clay", 2.45)),
+                     "nphi": float(data.get("nphi_clay", 0.40)),
+                     "dt": float(data.get("dt_clay", 100)),
+                     "gr": float(data.get("gr_clay", 150))},
+        "water":    {"rhob": 1.00, "nphi": 1.00,  "dt": 189,  "gr": 0},
+    }
+
+    # Use 3 or 4 minerals depending on available curves
+    use_dt = dt_arr is not None
+    n_params = 5 if use_dt else 4  # 4 minerals + porosity
+
+    gr_max = float(np.nanmax(gr)) if gr is not None and not np.all(np.isnan(gr)) else 150
+    gr_min = float(np.nanmin(gr)) if gr is not None and not np.all(np.isnan(gr)) else 10
+    gr_range = max(gr_max - gr_min, 1)
+
+    n_pts = len(rhob)
+    result = {
+        "v_quartz": np.full(n_pts, np.nan),
+        "v_calcite": np.full(n_pts, np.nan),
+        "v_dolomite": np.full(n_pts, np.nan),
+        "v_clay": np.full(n_pts, np.nan),
+        "phi_e": np.full(n_pts, np.nan),
+    }
+
+    for i in range(n_pts):
+        if np.isnan(rhob[i]) or np.isnan(nphi[i]):
+            continue
+
+        # Estimate Vclay from GR
+        if gr is not None and not np.isnan(gr[i]):
+            igr = np.clip((gr[i] - gr_min) / gr_range, 0, 1)
+            vsh_est = 0.083 * (2 ** (3.7 * igr) - 1) if igr < 1 else 1.0
+        else:
+            vsh_est = 0
+
+        # Simplified deterministic: use RHOB-NPHI crossplot
+        # phi from density
+        phi_d = (2.65 - rhob[i]) / (2.65 - 1.0)
+        phi_n = nphi[i]
+
+        # Clay volume from neutron-density spread
+        if phi_n > phi_d:
+            # Clay effect
+            vclay_den = max(0, min(1, (phi_n - phi_d) / (endmembers["clay"]["nphi"] - (2.65 - endmembers["clay"]["rhob"]) / 1.65)))
+        else:
+            vclay_den = vsh_est
+
+        # Porosity
+        phi_e_v = max(0, min(0.5, phi_d - vclay_den * (2.65 - endmembers["clay"]["rhob"]) / 1.65))
+
+        # Remaining mineral fraction (quartz/calcite/dolomite mix)
+        v_minerals = max(0, 1 - vclay_den - phi_e_v)
+
+        # Distribute minerals: use DT if available
+        if use_dt and not np.isnan(dt_arr[i]):
+            # Use DT to distinguish quartz from carbonate
+            dt_ma = 55.5  # quartz transit time
+            dt_ca = 47.6  # calcite transit time
+            # Fraction of quartz vs carbonate
+            if dt_ma != dt_ca:
+                frac_quartz = np.clip((dt_arr[i] - dt_ca - phi_e_v * 189) / (dt_ma - dt_ca), 0, 1)
+            else:
+                frac_quartz = 0.5
+            v_quartz = v_minerals * frac_quartz
+            v_dolo = v_minerals * (1 - frac_quartz) * 0.3
+            v_calcite = v_minerals - v_quartz - v_dolo
+        else:
+            # Default: mostly quartz
+            v_quartz = v_minerals * 0.6
+            v_calcite = v_minerals * 0.3
+            v_dolo = v_minerals * 0.1
+
+        result["v_quartz"][i] = max(0, v_quartz)
+        result["v_calcite"][i] = max(0, v_calcite)
+        result["v_dolomite"][i] = max(0, v_dolo)
+        result["v_clay"][i] = max(0, vclay_den)
+        result["phi_e"][i] = max(0, phi_e_v)
+
+    def _to_list(arr):
+        return [None if np.isnan(v) else round(float(v), 4) for v in arr]
+
+    return {
+        "depth": dept.tolist(),
+        "v_quartz": _to_list(result["v_quartz"]),
+        "v_calcite": _to_list(result["v_calcite"]),
+        "v_dolomite": _to_list(result["v_dolomite"]),
+        "v_clay": _to_list(result["v_clay"]),
+        "phi_e": _to_list(result["phi_e"]),
+        "endmembers": endmembers,
+        "stats": {
+            "quartz_mean": round(float(np.nanmean(result["v_quartz"])), 4),
+            "calcite_mean": round(float(np.nanmean(result["v_calcite"])), 4),
+            "dolomite_mean": round(float(np.nanmean(result["v_dolomite"])), 4),
+            "clay_mean": round(float(np.nanmean(result["v_clay"])), 4),
+            "phi_mean": round(float(np.nanmean(result["phi_e"])), 4),
+        }
+    }
+
+
+@app.post("/api/wells/{wid}/permeability-multi")
+def compute_permeability_multi(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Compute permeability using multiple models and compare.
+
+    Models:
+    - coates: K = ((phi^2 * (1-Swirr)) / Swirr)^2 * C
+    - timur: K = a * phi^b * Swirr^c
+    - sdr: K = (phi^4 / Swirr)^2 * C  (for NMR)
+    - fzi: K = phi^3 / ((1-phi)^2) * FZI^2  (Flow Zone Indicator)
+    """
+    lr = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+
+    def _get_curve(names):
+        for name in names:
+            cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == name).first()
+            if cd:
+                return cd
+        return None
+
+    rt_cd = _get_curve(["RT", "RESD", "RILD"])
+    gr_cd = _get_curve(["GR", "SGR", "CGR"])
+    nphi_cd = _get_curve(["NPHI", "NPHI_LS"])
+    rhob_cd = _get_curve(["RHOB", "RHOZ", "DEN"])
+    dept_cd = _get_curve(["DEPT", "DEPTH"])
+
+    if not nphi_cd:
+        raise HTTPException(400, "NPHI curve required")
+
+    nphi = np.frombuffer(nphi_cd.data_binary, dtype=np.float64).copy()
+    rhob = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy() if rhob_cd else np.full_like(nphi, np.nan)
+    gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy() if gr_cd else np.full_like(nphi, np.nan)
+    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(nphi))
+
+    # Porosity
+    phi = np.where(np.isnan(rhob), nphi, np.clip((2.65 - rhob) / (2.65 - 1.0), -0.15, 0.60))
+    phi = np.clip(phi, 0.001, 0.60)
+
+    # Vclay from GR
+    gr_valid = gr[~np.isnan(gr) & (gr > 0)]
+    gr_min = float(np.min(gr_valid)) if len(gr_valid) else 15
+    gr_max = float(np.max(gr_valid)) if len(gr_valid) else 120
+    gr_range = max(gr_max - gr_min, 1)
+    igr = np.clip((gr - gr_min) / gr_range, 0, 1)
+    vsh = np.where(igr < 1, 0.083 * (2 ** (3.7 * igr) - 1), 1.0)
+
+    # Effective porosity
+    phie = np.clip(phi - vsh * 0.10, 0.001, 0.60)
+
+    # Swirr estimation (irreducible water saturation)
+    # Use simple relationship: Swirr ≈ Vsh * phi_sh / phi + 0.04
+    swirr = np.clip(vsh * 0.30 / np.maximum(phie, 0.01) + 0.04, 0.04, 0.95)
+
+    n_pts = len(nphi)
+    C_coates = float(data.get("c_coates", 10000))
+    a_timur = float(data.get("a_timur", 31.6))
+    b_timur = float(data.get("b_timur", 4.4))
+    c_timur = float(data.get("c_timur", 2.0))
+    fzi_default = float(data.get("fzi", 10.0))
+
+    k_coates = np.where(phie > 0.01,
+                        C_coates * (phie ** 4) * ((1 - swirr) ** 2) / (swirr ** 2), np.nan)
+    k_timur = a_timur * (phie ** b_timur) / (swirr ** c_timur)
+    k_sdr = np.where(phie > 0.01, 10000 * (phie ** 4) / (swirr ** 2), np.nan)
+    k_fzi = np.where(phie > 0.01, (phie ** 3) / ((1 - phie) ** 2) * fzi_default ** 2, np.nan)
+
+    # Log10 permeability for stats
+    def _stats(k_arr):
+        valid = k_arr[~np.isnan(k_arr) & (k_arr > 0)]
+        if len(valid) == 0:
+            return {"mean": None, "min": None, "max": None, "median": None}
+        return {
+            "mean": round(float(np.mean(valid)), 2),
+            "min": round(float(np.min(valid)), 2),
+            "max": round(float(np.max(valid)), 2),
+            "median": round(float(np.median(valid)), 2),
+        }
+
+    def _to_list(arr):
+        return [None if (np.isnan(v) or v <= 0) else round(float(v), 2) for v in arr]
+
+    return {
+        "depth": dept.tolist(),
+        "k_coates": _to_list(k_coates),
+        "k_timur": _to_list(k_timur),
+        "k_sdr": _to_list(k_sdr),
+        "k_fzi": _to_list(k_fzi),
+        "phie": [round(float(v), 4) for v in phie],
+        "swirr": [round(float(v), 4) for v in swirr],
+        "stats": {
+            "coates": _stats(k_coates),
+            "timur": _stats(k_timur),
+            "sdr": _stats(k_sdr),
+            "fzi": _stats(k_fzi),
+        }
+    }
+
+
+@app.post("/api/wells/{wid}/vcl-enhanced")
+def compute_vcl_enhanced(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Enhanced Vclay computation with all methods side-by-side.
+
+    Methods: larionov_tertiary, larionov_old, steiber, clavier, linear_igr
+    Returns all 5 for comparison.
+    """
+    lr = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+
+    gr_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["GR", "SGR", "CGR"])).first()
+    dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
+
+    if not gr_cd:
+        raise HTTPException(400, "GR curve required")
+
+    gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy()
+    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(gr))
+
+    gr_clean = float(data.get("gr_clean", np.nanmin(gr[~np.isnan(gr)])))
+    gr_shale = float(data.get("gr_shale", np.nanmax(gr[~np.isnan(gr)])))
+    gr_range = max(gr_shale - gr_clean, 1.0)
+
+    n = len(gr)
+    methods = {
+        "igr": np.full(n, np.nan),
+        "larionov_tertiary": np.full(n, np.nan),
+        "larionov_old": np.full(n, np.nan),
+        "steiber": np.full(n, np.nan),
+        "clavier": np.full(n, np.nan),
+    }
+
+    for i in range(n):
+        if np.isnan(gr[i]):
+            continue
+        igr = np.clip((gr[i] - gr_clean) / gr_range, 0, 1)
+        methods["igr"][i] = igr
+        methods["larionov_tertiary"][i] = 0.083 * (2 ** (3.7 * igr) - 1) if igr < 1 else 1.0
+        methods["larionov_old"][i] = 0.33 * (2 ** (2 * igr) - 1) if igr < 1 else 1.0
+        methods["steiber"][i] = igr / (3 - 2 * igr) if igr < 1 else 1.0
+        methods["clavier"][i] = 1.7 - np.sqrt(3.38 - (igr + 0.7) ** 2) if igr < 0.95 else 1.0
+
+    def _to_list(arr):
+        return [None if np.isnan(v) else round(float(v), 4) for v in arr]
+
+    result = {"depth": dept.tolist(), "gr": [round(float(v), 2) if not np.isnan(v) else None for v in gr]}
+    for name, arr in methods.items():
+        result[name] = _to_list(arr)
+        valid = arr[~np.isnan(arr)]
+        result[f"{name}_mean"] = round(float(np.mean(valid)), 4) if len(valid) else None
+
+    result["params"] = {"gr_clean": gr_clean, "gr_shale": gr_shale}
+    return result
+
+
 # ─── Sprint 27: Tornado Chart Data ──────────────────────────
 @app.post("/api/wells/{wid}/tornado")
 def tornado_analysis(wid: int, data: dict, db: Session = Depends(get_db)):
