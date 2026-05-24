@@ -5489,10 +5489,14 @@ def classify_lithology(wid: int, data: dict, db: Session = Depends(get_db)):
         if count > 0:
             summary[label] = round((count / max(1, total_valid)) * 100.0, 2)
 
+    # Replace NaN with None for JSON compliance
+    vcl_clean = [None if np.isnan(v) else round(float(v), 4) for v in vcl_array]
+    dept_clean = [None if np.isnan(d) else round(float(d), 4) for d in dept]
+    
     return {
-        "depth": dept.tolist(),
+        "depth": dept_clean,
         "lith_code": lith_code.astype(int).tolist(),
-        "vcl_array": vcl_array.tolist(),
+        "vcl_array": vcl_clean,
         "summary": summary,
     }
 
