@@ -293,6 +293,12 @@ class GeoLogApp {
         this._showFirstRunWelcome();
         this._bindContextMenu();
         this._updateUndoRedoButtons();
+        
+        // Sprint 31: Professional features init
+        this._initProKeyboard();
+        this._initFavorites();
+        this._initThumbnailPreview();
+        this._initDoubleClickTop();
     }
 
     _bindUI() {
@@ -8184,6 +8190,397 @@ class GeoLogApp {
             URL.revokeObjectURL(url);
             GeoToast.success('PDF downloaded');
         } catch(e) { GeoToast.error('PDF failed: ' + e.message); }
+    }
+
+    // ═══ Professional Features Sprint 31 ═══
+    
+    // Feature 4: Keyboard Navigation Pro
+    _initProKeyboard() {
+        document.addEventListener('keydown', (e) => {
+            const isTyping = ['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName);
+            if (isTyping) return;
+            const key = e.key.toLowerCase();
+            const range = this.renderer ? (this.renderer.viewStop - this.renderer.viewStart) : 100;
+            const step = range * 0.1;
+            const pageStep = range * 0.8;
+            
+            switch(key) {
+                case 'g': this._toggleCurveTrack('GR'); e.preventDefault(); break;
+                case 'r': if (!e.ctrlKey) { this._toggleCurveTrack('RT'); e.preventDefault(); } break;
+                case 'p': this._toggleCurveTrack('NPHI'); e.preventDefault(); break;
+                case 'arrowdown':
+                    if (this.renderer) {
+                        this.renderer.viewStart += step;
+                        this.renderer.viewStop += step;
+                        this.renderer.requestRender();
+                        this.renderer._updateDepthInputs();
+                    }
+                    e.preventDefault(); break;
+                case 'arrowup':
+                    if (this.renderer) {
+                        this.renderer.viewStart -= step;
+                        this.renderer.viewStop -= step;
+                        this.renderer.requestRender();
+                        this.renderer._updateDepthInputs();
+                    }
+                    e.preventDefault(); break;
+                case 'pagedown':
+                    if (this.renderer) {
+                        this.renderer.viewStart += pageStep;
+                        this.renderer.viewStop += pageStep;
+                        this.renderer.requestRender();
+                        this.renderer._updateDepthInputs();
+                    }
+                    e.preventDefault(); break;
+                case 'pageup':
+                    if (this.renderer) {
+                        this.renderer.viewStart -= pageStep;
+                        this.renderer.viewStop -= pageStep;
+                        this.renderer.requestRender();
+                        this.renderer._updateDepthInputs();
+                    }
+                    e.preventDefault(); break;
+                case '=': case '+':
+                    if (this.renderer) {
+                        const mid = (this.renderer.viewStart + this.renderer.viewStop) / 2;
+                        const newRange = range * 0.7;
+                        this.renderer.viewStart = mid - newRange/2;
+                        this.renderer.viewStop = mid + newRange/2;
+                        this.renderer.requestRender();
+                        this.renderer._updateDepthInputs();
+                    }
+                    e.preventDefault(); break;
+                case '-':
+                    if (this.renderer) {
+                        const mid = (this.renderer.viewStart + this.renderer.viewStop) / 2;
+                        const newRange = range * 1.4;
+                        this.renderer.viewStart = mid - newRange/2;
+                        this.renderer.viewStop = mid + newRange/2;
+                        this.renderer.requestRender();
+                        this.renderer._updateDepthInputs();
+                    }
+                    e.preventDefault(); break;
+                case 'home':
+                    if (this.renderer && this.renderer.depthData?.length) {
+                        this.renderer.viewStart = this.renderer.depthData[0];
+                        this.renderer.viewStop = this.renderer.viewStart + range;
+                        this.renderer.requestRender();
+                        this.renderer._updateDepthInputs();
+                    }
+                    e.preventDefault(); break;
+                case 'end':
+                    if (this.renderer && this.renderer.depthData?.length) {
+                        this.renderer.viewStop = this.renderer.depthData[this.renderer.depthData.length-1];
+                        this.renderer.viewStart = this.renderer.viewStop - range;
+                        this.renderer.requestRender();
+                        this.renderer._updateDepthInputs();
+                    }
+                    e.preventDefault(); break;
+            }
+        });
+    }
+    
+    _toggleCurveTrack(curve) {
+        // Toggle visibility of a curve type in the viewer
+        const cfg = this.renderer?.curveConfig;
+        if (!cfg) return;
+        for (const [mnem, c] of Object.entries(cfg)) {
+            if (mnem === curve || mnem.startsWith(curve)) {
+                c.hidden = !c.hidden;
+            }
+        }
+        this.renderer?.requestRender();
+    }
+
+    // Feature 5: Session Save/Restore
+    async saveSession() {
+        if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
+        const session = {
+            version: 1,
+            timestamp: new Date().toISOString(),
+            wellId: this.currentWell.id,
+            wellName: this.currentWell.name,
+            view: {
+                start: this.renderer?.viewStart,
+                stop: this.renderer?.viewStop,
+                scale: this.renderer?.scale
+            },
+            params: {},
+            tracks: this.renderer?.tracks?.map(t => ({name: t.name, curves: t.curves, width: t.width})),
+            lastView: localStorage.getItem('geolog_last_view')
+        };
+        // Save petro params
+        try {
+            const resp = await this._api(`/wells/${this.currentWell.id}/petro-params`);
+            session.params = resp;
+        } catch(e) {}
+        // Save to localStorage + download
+        const key = `geolog_session_${this.currentWell.id}`;
+        localStorage.setItem(key, JSON.stringify(session));
+        // Download as file
+        const blob = new Blob([JSON.stringify(session, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `${this.currentWell.name}_session.json`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        GeoToast.success('Session saved & downloaded');
+    }
+    
+    async loadSession() {
+        const input = document.createElement('input');
+        input.type = 'file'; input.accept = '.json';
+        input.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const session = JSON.parse(text);
+                // Restore well
+                if (session.wellId) {
+                    await this.selectWell(session.wellId);
+                    // Restore view
+                    if (session.view?.start && this.renderer) {
+                        this.renderer.setView(session.view.start, session.view.stop);
+                    }
+                    // Restore params
+                    if (session.params && Object.keys(session.params).length > 0) {
+                        await this._api(`/wells/${session.wellId}/petro-params`, {
+                            method: 'POST', body: JSON.stringify(session.params)
+                        });
+                    }
+                }
+                GeoToast.success('Session restored: ' + (session.wellName || 'unknown'));
+            } catch(err) {
+                GeoToast.error('Invalid session file: ' + err.message);
+            }
+        };
+        input.click();
+    }
+
+    // Feature 6: Batch Export All Wells
+    async batchExportAll() {
+        const wells = this.wells || [];
+        if (wells.length === 0) { GeoToast.warn('No wells to export'); return; }
+        GeoToast.info('Exporting ' + wells.length + ' wells...');
+        try {
+            // Use the first project
+            const projects = await this._api('/projects/');
+            if (!projects.length) { GeoToast.warn('No project found'); return; }
+            const pid = projects[0].id;
+            const resp = await fetch(`/api/projects/${pid}/tops-export`);
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'all_wells_export.csv';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            // Also export each well LAS
+            for (const w of wells) {
+                try {
+                    const lasResp = await fetch(`/api/wells/${w.id}/export-las`);
+                    if (lasResp.ok) {
+                        const lasBlob = await lasResp.blob();
+                        const lasUrl = URL.createObjectURL(lasBlob);
+                        const la = document.createElement('a');
+                        la.href = lasUrl; la.download = `${w.name}.las`;
+                        document.body.appendChild(la); la.click(); document.body.removeChild(la);
+                        URL.revokeObjectURL(lasUrl);
+                    }
+                } catch(e) {}
+            }
+            GeoToast.success('Batch export complete: ' + wells.length + ' wells');
+        } catch(e) {
+            GeoToast.error('Batch export failed: ' + e.message);
+        }
+    }
+
+    // Feature 9: Dark/Light Theme Toggle
+    _currentTheme = 'dark';
+    toggleTheme() {
+        this._currentTheme = this._currentTheme === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', this._currentTheme);
+        localStorage.setItem('geolog_theme', this._currentTheme);
+        if (this._currentTheme === 'light') {
+            document.documentElement.style.setProperty('--bg-primary', '#ffffff');
+            document.documentElement.style.setProperty('--bg-secondary', '#f6f8fa');
+            document.documentElement.style.setProperty('--bg-tertiary', '#eaeef2');
+            document.documentElement.style.setProperty('--text-primary', '#1f2328');
+            document.documentElement.style.setProperty('--text-secondary', '#656d76');
+            document.documentElement.style.setProperty('--border', '#d0d7de');
+            document.body.style.background = '#ffffff';
+            document.body.style.color = '#1f2328';
+        } else {
+            document.documentElement.style.setProperty('--bg-primary', '#0d1117');
+            document.documentElement.style.setProperty('--bg-secondary', '#161b22');
+            document.documentElement.style.setProperty('--bg-tertiary', '#21262d');
+            document.documentElement.style.setProperty('--text-primary', '#e6edf3');
+            document.documentElement.style.setProperty('--text-secondary', '#8b949e');
+            document.documentElement.style.setProperty('--border', '#30363d');
+            document.body.style.background = '';
+            document.body.style.color = '';
+        }
+        // Update renderer colors
+        if (this.renderer) {
+            const isLight = this._currentTheme === 'light';
+            this.renderer.colors.bg = isLight ? '#ffffff' : '#0d1117';
+            this.renderer.colors.headerBg = isLight ? '#f6f8fa' : '#161b22';
+            this.renderer.colors.trackBorder = isLight ? '#d0d7de' : '#30363d';
+            this.renderer.colors.headerText = isLight ? '#1f2328' : '#e6edf3';
+            this.renderer.colors.depthText = isLight ? '#656d76' : '#8b949e';
+            this.renderer.colors.gridLine = isLight ? '#eaeef2' : '#1a1f25';
+            this.renderer.colors.cursorLine = isLight ? '#0969da' : '#58a6ff';
+            this.renderer.requestRender();
+        }
+        GeoToast.info('Theme: ' + this._currentTheme);
+    }
+
+    // Feature 10: Well Thumbnail Preview
+    _initThumbnailPreview() {
+        const sidebar = document.getElementById('wellList') || document.querySelector('.sidebar');
+        if (!sidebar) return;
+        this._thumbCanvas = document.createElement('canvas');
+        this._thumbCanvas.width = 200; this._thumbCanvas.height = 120;
+        this._thumbCanvas.style.cssText = 'position:fixed;z-index:9999;pointer-events:none;border:1px solid #30363d;border-radius:6px;background:#0d1117;display:none;box-shadow:0 4px 12px rgba(0,0,0,0.5)';
+        document.body.appendChild(this._thumbCanvas);
+        
+        sidebar.addEventListener('mouseover', (e) => {
+            const wellItem = e.target.closest('[data-well-id]');
+            if (!wellItem) return;
+            const wellId = wellItem.dataset.wellId;
+            if (!wellId) return;
+            this._showThumbnail(wellId, e);
+        });
+        sidebar.addEventListener('mouseout', (e) => {
+            const wellItem = e.target.closest('[data-well-id]');
+            if (wellItem) this._thumbCanvas.style.display = 'none';
+        });
+    }
+    
+    async _showThumbnail(wellId, e) {
+        // Mini GR curve preview
+        try {
+            const runs = await this._api(`/wells/${wellId}/log-runs`);
+            if (!runs.length) return;
+            const run = runs[runs.length-1];
+            const resp = await fetch(`/api/log-runs/${run.id}/data-decimated?max_points=200&curve_mnemonics=GR`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const gr = data.GR || data.data?.GR || [];
+            if (gr.length < 2) return;
+            
+            const canvas = this._thumbCanvas;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, 200, 120);
+            ctx.fillStyle = '#0d1117';
+            ctx.fillRect(0, 0, 200, 120);
+            
+            // Draw mini GR curve
+            const min = Math.min(...gr.filter(v => v != null));
+            const max = Math.max(...gr.filter(v => v != null));
+            ctx.strokeStyle = '#2ea043';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            for (let i = 0; i < gr.length; i++) {
+                if (gr[i] == null) continue;
+                const x = 10 + ((gr[i] - min) / (max - min || 1)) * 180;
+                const y = 5 + (i / gr.length) * 110;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            
+            // Label
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '9px IBM Plex Mono';
+            ctx.fillText('GR preview', 5, 118);
+            
+            canvas.style.display = 'block';
+            canvas.style.left = (e.clientX + 15) + 'px';
+            canvas.style.top = (e.clientY - 60) + 'px';
+        } catch(e) {}
+    }
+
+    // Feature 11: Recent Wells & Favorites
+    _initFavorites() {
+        this._favorites = JSON.parse(localStorage.getItem('geolog_favorites') || '[]');
+        this._recentWells = JSON.parse(localStorage.getItem('geolog_recent') || '[]');
+    }
+    
+    toggleFavorite(wellId) {
+        const idx = this._favorites.indexOf(wellId);
+        if (idx >= 0) this._favorites.splice(idx, 1);
+        else this._favorites.push(wellId);
+        localStorage.setItem('geolog_favorites', JSON.stringify(this._favorites));
+        this._renderWellSidebar();
+    }
+    
+    addRecentWell(wellId, wellName) {
+        this._recentWells = this._recentWells.filter(r => r.id !== wellId);
+        this._recentWells.unshift({id: wellId, name: wellName, time: Date.now()});
+        if (this._recentWells.length > 5) this._recentWells = this._recentWells.slice(0, 5);
+        localStorage.setItem('geolog_recent', JSON.stringify(this._recentWells));
+    }
+    
+    _renderWellSidebar() {
+        // Add favorites section to sidebar
+        const sidebar = document.querySelector('.sidebar') || document.querySelector('#wellList')?.parentElement;
+        if (!sidebar) return;
+        let favSection = document.getElementById('favoritesSection');
+        if (!favSection) {
+            favSection = document.createElement('div');
+            favSection.id = 'favoritesSection';
+            favSection.style.cssText = 'padding:6px 10px;border-bottom:1px solid #30363d';
+            sidebar.insertBefore(favSection, sidebar.children[2] || null);
+        }
+        const favWells = (this.wells || []).filter(w => this._favorites.includes(w.id));
+        const recent = this._recentWells || [];
+        let html = '';
+        if (favWells.length > 0) {
+            html += '<div style="font-size:10px;color:#8b949e;margin-bottom:4px">⭐ Favorites</div>';
+            for (const w of favWells) {
+                html += '<span style="cursor:pointer;color:#f0883e;font-size:11px;margin-right:8px" onclick="app.selectWell(' + w.id + ')">' + w.name + '</span>';
+            }
+        }
+        if (recent.length > 0) {
+            html += '<div style="font-size:10px;color:#8b949e;margin-top:4px">🕐 Recent</div>';
+            for (const r of recent) {
+                html += '<span style="cursor:pointer;color:#58a6ff;font-size:11px;margin-right:8px" onclick="app.selectWell(' + r.id + ')">' + r.name + '</span>';
+            }
+        }
+        favSection.innerHTML = html;
+    }
+
+    // Feature 8: Quick-add top via double-click (UI handler)
+    _initDoubleClickTop() {
+        if (this.renderer) {
+            this.renderer.onDoubleClick = async (depth) => {
+                const name = prompt('Formation name at ' + depth.toFixed(1) + ':');
+                if (!name) return;
+                try {
+                    await this._api(`/wells/${this.currentWell.id}/tops`, {
+                        method: 'POST', body: JSON.stringify({formation_name: name, depth: depth})
+                    });
+                    await this._loadTops();
+                    this.renderer.requestRender();
+                    GeoToast.success('Top added: ' + name + ' @ ' + depth.toFixed(1));
+                } catch(e) {
+                    GeoToast.error('Failed: ' + e.message);
+                }
+            };
+        }
+    }
+
+    _exportSVG() {
+        if (!this.renderer) { GeoToast.warn('Load a well first'); return; }
+        const svg = this.renderer.exportSVG();
+        const blob = new Blob([svg], {type: 'image/svg+xml'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = (this.currentWell?.name || 'log') + '_export.svg';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        GeoToast.success('SVG exported');
     }
 }
 // Initialize

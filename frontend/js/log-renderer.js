@@ -103,6 +103,7 @@ class LogRenderer {
         this.canvas.addEventListener('mouseleave', () => this._onMouseLeave());
         this.canvas.addEventListener('wheel', (e) => this._onWheel(e), { passive: false });
         this.canvas.addEventListener('mousedown', (e) => this._onMouseDown(e));
+        this.canvas.addEventListener('dblclick', (e) => this._onDoubleClick(e));
         this.canvas.addEventListener('mouseup', (e) => this._onMouseUp(e));
 
         window.addEventListener('resize', () => {
@@ -222,7 +223,6 @@ class LogRenderer {
             const range = this._dragStart.viewStop - this._dragStart.viewStart;
             this.viewStart = this._dragStart.viewStart + depthDelta;
             this.viewStop = this.viewStart + range;
-            // Clamp
             const dataStart = this.depthData[0];
             const dataEnd = this.depthData[this.depthData.length - 1];
             if (this.viewStart < dataStart) { this.viewStart = dataStart; this.viewStop = dataStart + range; }
@@ -231,6 +231,20 @@ class LogRenderer {
             this.requestRender();
             this._updateDepthInputs();
             if (typeof this.onViewChanged === 'function') this.onViewChanged(this.viewStart, this.viewStop);
+        }
+    }
+    
+    _onDoubleClick(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const depth = this._yToDepth(y);
+        if (depth < 0) return;
+        // Check if click is in the track area
+        const lithTrackWidth = (this._showLithology && this.lithologyData?.lith_code?.length) ? 46 : 0;
+        const startX = this.margin.left + this.depthTrackWidth + lithTrackWidth;
+        if (x >= startX && typeof this.onDoubleClick === 'function') {
+            this.onDoubleClick(depth, x, y);
         }
     }
 
@@ -388,7 +402,7 @@ class LogRenderer {
         // Draw header
         this._drawHeaders(ctx, startX, totalTrackWidth, completionTrackWidth);
 
-        // Draw cursor line
+        // Draw enhanced crosshair cursor
         if (this.mouseY > plotTop && this.mouseY < plotBottom) {
             ctx.strokeStyle = this.colors.cursorLine;
             ctx.lineWidth = 1;
@@ -397,6 +411,13 @@ class LogRenderer {
             ctx.moveTo(this.margin.left, this.mouseY);
             ctx.lineTo(w - this.margin.right, this.mouseY);
             ctx.stroke();
+            // Vertical crosshair at mouse X
+            if (this.mouseX > startX && this.mouseX < startX + totalPlotWidth) {
+                ctx.beginPath();
+                ctx.moveTo(this.mouseX, plotTop);
+                ctx.lineTo(this.mouseX, plotBottom);
+                ctx.stroke();
+            }
             ctx.setLineDash([]);
 
             // Depth readout at cursor
@@ -405,6 +426,57 @@ class LogRenderer {
                 ctx.font = 'bold 11px IBM Plex Mono';
                 ctx.textAlign = 'right';
                 ctx.fillText(this.hoverDepth.toFixed(1), this.margin.left + this.depthTrackWidth - 5, this.mouseY - 4);
+            }
+            
+            // Formation top snap indicator
+            if (this.topsData && this.topsData.length > 0) {
+                const snapThr = (this.viewStop - this.viewStart) * 0.012;
+                for (const top of this.topsData) {
+                    if (Math.abs(this.hoverDepth - top.depth) < snapThr) {
+                        const topY = this._depthToY(top.depth);
+                        ctx.strokeStyle = this.colors.formationTop || '#f0883e';
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([]);
+                        ctx.beginPath();
+                        ctx.moveTo(startX, topY); ctx.lineTo(startX + totalPlotWidth, topY);
+                        ctx.stroke();
+                        ctx.fillStyle = this.colors.formationTop || '#f0883e';
+                        ctx.font = 'bold 10px IBM Plex Mono';
+                        ctx.textAlign = 'left';
+                        ctx.fillText(top.name || top.formation_name || '', startX + 4, topY - 4);
+                        break;
+                    }
+                }
+            }
+            
+            // Curve value readout at cursor per track
+            if (this.mouseX > startX) {
+                let tX = startX;
+                for (const track of this.tracks) {
+                    if (this.mouseX >= tX && this.mouseX <= tX + track.width) {
+                        let yi = 0;
+                        for (const mnemonic of track.curves) {
+                            const data = this.curveData[mnemonic];
+                            if (!data) continue;
+                            let nearIdx = 0, minD = Infinity;
+                            for (let i = 0; i < this.depthData.length; i++) {
+                                const d = Math.abs(this.depthData[i] - this.hoverDepth);
+                                if (d < minD) { minD = d; nearIdx = i; }
+                            }
+                            const val = data[nearIdx];
+                            if (val != null && !isNaN(val)) {
+                                const cfg = this.curveConfig[mnemonic] || {};
+                                ctx.fillStyle = cfg.color || '#58a6ff';
+                                ctx.font = '10px IBM Plex Mono';
+                                ctx.textAlign = 'center';
+                                ctx.fillText(val.toFixed(2), this.mouseX, plotTop + 14 + yi * 13);
+                            }
+                            yi++;
+                        }
+                        break;
+                    }
+                    tX += track.width;
+                }
             }
         }
 
@@ -426,6 +498,10 @@ class LogRenderer {
         this.render();
     }
 
+    setMultiWellOverlay(overlays) {
+        this._multiWellOverlays = overlays || [];
+    }
+    
     setOverlayData(overlay = null) {
         this.overlayData = overlay;
         this.requestRender();
@@ -804,6 +880,59 @@ class LogRenderer {
             }
         }
         ctx.stroke();
+        
+        // Curve fill/shading (Feature 2)
+        if (cfg.fill) {
+            const fillColor = cfg.fillColor || color;
+            const fillOpacity = cfg.fillOpacity || 0.15;
+            ctx.fillStyle = fillColor.replace(')', `,${fillOpacity})`).replace('rgb', 'rgba');
+            if (!ctx.fillStyle.includes('rgba')) {
+                ctx.globalAlpha = fillOpacity;
+                ctx.fillStyle = fillColor;
+            }
+            ctx.beginPath();
+            started = false;
+            let lastX = trackX, lastY = plotTop;
+            for (let i = 0; i < this.depthData.length; i += stride) {
+                const depth = this.depthData[i];
+                if (depth < this.viewStart || depth > this.viewStop) continue;
+                const val = data[i];
+                if (val === null || val === undefined || isNaN(val)) { started = false; continue; }
+                const y = plotTop + ((depth - this.viewStart) / (this.viewStop - this.viewStart)) * plotHeight;
+                if (y < plotTop || y > plotBottom) continue;
+                let x;
+                if (useLog) {
+                    const logMin = Math.log10(Math.max(scale[0], 0.001));
+                    const logMax = Math.log10(Math.max(scale[1], 0.001));
+                    const logVal = Math.log10(Math.max(val, 0.001));
+                    x = trackX + width - ((logVal - logMin) / (logMax - logMin)) * width;
+                } else {
+                    let norm = scale[0] > scale[1] ? (scale[0] - val) / (scale[0] - scale[1]) : (val - scale[0]) / (scale[1] - scale[0]);
+                    x = trackX + norm * width;
+                }
+                x = Math.max(trackX, Math.min(trackX + width, x));
+                if (!started) { ctx.moveTo(trackX, y); ctx.lineTo(x, y); started = true; lastX = x; lastY = y; }
+                else { ctx.lineTo(x, y); lastX = x; lastY = y; }
+            }
+            if (started) {
+                ctx.lineTo(trackX, lastY);
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1.0;
+        }
+
+        // Cutoff-based pay zone coloring (Feature 2b)
+        if (cfg.cutoffFill && this._cutoffData && this._cutoffData[mnemonic]) {
+            const cutoffs = this._cutoffData[mnemonic];
+            for (const zone of cutoffs) {
+                const y1 = this._depthToY(zone.top);
+                const y2 = this._depthToY(zone.bottom);
+                if (y2 < plotTop || y1 > plotBottom) continue;
+                ctx.fillStyle = zone.pass ? 'rgba(46,160,67,0.12)' : 'rgba(248,81,73,0.08)';
+                ctx.fillRect(trackX, Math.max(plotTop, y1), width, Math.min(plotBottom, y2) - Math.max(plotTop, y1));
+            }
+        }
 
         // Scale labels
         ctx.fillStyle = color;
@@ -830,6 +959,31 @@ class LogRenderer {
             ctx.fillStyle = this.colors.headerText;
             ctx.font = 'bold 11px IBM Plex Mono';
             ctx.textAlign = 'center';
+            
+            // Curve statistics overlay (Feature 7)
+            let statY = this.margin.top - 14;
+            for (const mnemonic of track.curves) {
+                const data = this.curveData[mnemonic];
+                if (!data || data.length === 0) continue;
+                const cfg = this.curveConfig[mnemonic] || {};
+                const visible = [];
+                for (let i = 0; i < this.depthData.length; i++) {
+                    if (this.depthData[i] >= this.viewStart && this.depthData[i] <= this.viewStop) {
+                        const v = data[i];
+                        if (v != null && !isNaN(v)) visible.push(v);
+                    }
+                }
+                if (visible.length === 0) continue;
+                const min = Math.min(...visible);
+                const max = Math.max(...visible);
+                const mean = visible.reduce((s,v) => s+v, 0) / visible.length;
+                ctx.fillStyle = cfg.color || '#8b949e';
+                ctx.font = '8px IBM Plex Mono';
+                ctx.textAlign = 'left';
+                ctx.fillText(`${mnemonic}: ${mean.toFixed(1)}`, trackX + 3, statY);
+                statY -= 10;
+                if (statY < 4) break;
+            }
             ctx.fillText(track.name, trackX + track.width / 2, 18);
 
             // Curve names with colors
@@ -1172,6 +1326,16 @@ class LogRenderer {
         ctx.textAlign = 'center';
         ctx.fillText('LITH', x + width / 2, 16);
     }
+    exportSVG() {
+        const w = this.width; const h = this.height;
+        let svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '">';
+        svg += '<rect width="' + w + '" height="' + h + '" fill="#0d1117"/>';
+        const dataUrl = this.canvas.toDataURL('image/png');
+        svg += '<image width="' + w + '" height="' + h + '" href="' + dataUrl + '"/>';
+        svg += '</svg>';
+        return svg;
+    }
+    
     exportPNG() {
         // Create high-res export canvas
         const exportScale = 2;
