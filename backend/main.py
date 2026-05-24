@@ -494,6 +494,34 @@ class RBACWriteGuardMiddleware(BaseHTTPMiddleware):
             if ROLE_RANK.get(role, 0) < ROLE_RANK.get(required, 99):
                 return SafeJSONResponse(status_code=403, content={"detail": f"{required} role required"})
 
+            # Interpretation lock enforcement (admins can override)
+            # Lock applies to writes under /api/wells/{wid}/...
+            if role != "admin":
+                parts = [p for p in path.split("/") if p]
+                # ['api','wells','{wid}',...]
+                if len(parts) >= 3 and parts[0] == "api" and parts[1] == "wells":
+                    try:
+                        wid = int(parts[2])
+                    except Exception:
+                        wid = None
+                    if wid is not None:
+                        # allow snapshot/lock metadata operations while locked
+                        allow_when_locked = (
+                            f"/api/wells/{wid}/snapshots",
+                            f"/api/wells/{wid}/lock-status",
+                        )
+                        if not any(path.startswith(p) for p in allow_when_locked):
+                            lock = _get_well_lock(wid)
+                            if lock.get("locked", False):
+                                return SafeJSONResponse(
+                                    status_code=423,
+                                    content={
+                                        "detail": "well is locked by approved snapshot",
+                                        "locked": True,
+                                        "lock": lock,
+                                    },
+                                )
+
         return await call_next(request)
 
 
@@ -1558,6 +1586,41 @@ def export_package(wid: int, db: Session = Depends(get_db)):
 # ─── Interpretation Auditability + Delivery Bundle ───────────
 SNAPSHOT_DIR = os.path.join(os.path.dirname(__file__), "artifacts", "snapshots")
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+LOCK_FILE = os.path.join(os.path.dirname(__file__), "artifacts", "locks.json")
+
+
+def _load_locks() -> dict:
+    if not os.path.exists(LOCK_FILE):
+        return {}
+    try:
+        with open(LOCK_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_locks(data: dict):
+    os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
+    tmp = LOCK_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, LOCK_FILE)
+
+
+def _get_well_lock(wid: int) -> dict:
+    locks = _load_locks()
+    return locks.get(str(wid), {"locked": False})
+
+
+def _set_well_lock(wid: int, locked: bool, actor: str = "system", snapshot_id: str = None):
+    locks = _load_locks()
+    locks[str(wid)] = {
+        "locked": bool(locked),
+        "actor": actor,
+        "snapshot_id": snapshot_id,
+        "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+    _save_locks(locks)
 
 
 def _snapshot_path(wid: int) -> str:
@@ -1624,6 +1687,21 @@ def list_snapshots(wid: int):
     return {"count": len(snaps), "snapshots": snaps}
 
 
+@app.get("/api/wells/{wid}/lock-status")
+def lock_status(wid: int):
+    return _get_well_lock(wid)
+
+
+@app.post("/api/wells/{wid}/unlock")
+def unlock_well(wid: int, data: dict = None, x_user_role: str = Header(default="viewer")):
+    role = (x_user_role or "viewer").lower()
+    if role != "admin":
+        raise HTTPException(403, "admin role required")
+    actor = (data or {}).get("actor", "admin")
+    _set_well_lock(wid, False, actor=actor, snapshot_id=None)
+    return _get_well_lock(wid)
+
+
 @app.get("/api/wells/{wid}/snapshots/{snapshot_id}")
 def get_snapshot(wid: int, snapshot_id: str):
     snaps = _load_snapshots(wid)
@@ -1643,6 +1721,7 @@ def approve_snapshot(wid: int, snapshot_id: str, data: dict = None):
             s["approved_by"] = actor
             s["approved_at"] = datetime.datetime.utcnow().isoformat() + "Z"
             _save_snapshots(wid, snaps)
+            _set_well_lock(wid, True, actor=actor, snapshot_id=snapshot_id)
             return s
     raise HTTPException(404, "Snapshot not found")
 
