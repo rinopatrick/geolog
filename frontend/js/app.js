@@ -86,6 +86,7 @@ class GeoLogApp {
         this.corrShowTops = true;
         this.corrSelectedTop = null;
         this._petroCache = null;
+        this.permResults = null;
         this.zoneUndoStack = [];
         this.zoneRedoStack = [];
         this._undoStack = [];
@@ -99,12 +100,32 @@ class GeoLogApp {
         this.jobIds = JSON.parse(localStorage.getItem('geolog_job_ids') || '[]');
         this.dstData = [];
         this.rftData = [];
+        this.rftGradientAnalysis = null;
+        this.productionData = [];
+        this.productionDecline = null;
         this.apiTimeoutMs = 30000;
         this._apiPendingRequests = new Map();
         this.curveRangeCache = new Map();
         this._curveLoadDebounceTimer = null;
         this._viewportPaddingFactor = 0.5;
         this._suppressViewportLoad = false;
+        this._showLithTrack = false;
+        this._lithologyData = null;
+        this._lastRwEstimation = null;
+        this.completionData = [];
+        this.showCompletionTrack = true;
+        this.workflowTemplates = [];
+
+        this.overlayState = {
+            enabled: false,
+            runAId: null,
+            runBId: null,
+            curve: 'GR',
+            color: '#ff3b30',
+            opacity: 0.5,
+            showDifference: false,
+        };
+        this.overlayRunCache = new Map();
 
         this.curveEditState = {
             enabled: false,
@@ -114,6 +135,14 @@ class GeoLogApp {
             edits: {},
             history: [],
             nextId: 1,
+        };
+
+        this.lqcState = {
+            result: null,
+            originalCurve: null,
+            correctedCurve: null,
+            activeMnemonic: null,
+            showCorrected: false,
         };
 
         this.init();
@@ -249,6 +278,7 @@ class GeoLogApp {
         this.renderer.onViewChanged = (start, stop) => this._onViewportChanged(start, stop);
         this._bindUI();
         await this.loadCurveConfig();
+        await this.loadWorkflowTemplates();
         await this.loadProjects();
         const lastWell = localStorage.getItem('geolog_last_well');
         if (lastWell && this.wells.find(w => w.id === parseInt(lastWell))) {
@@ -334,6 +364,13 @@ class GeoLogApp {
             });
         }
 
+        ['lithGrMin', 'lithGrMax', 'lithMethod'].forEach(id => {
+            document.getElementById(id)?.addEventListener('change', () => {
+                this._lithologyData = null;
+                if (this._showLithTrack) this.toggleLithTrack(true);
+            });
+        });
+
         // Export buttons
         document.getElementById('btnExportPNG')?.addEventListener('click', () => this.renderer?.exportPNG());
         document.getElementById('btnExportLAS')?.addEventListener('click', () => this._exportLAS());
@@ -374,6 +411,21 @@ class GeoLogApp {
         document.getElementById('corrShowTops')?.addEventListener('click', () => this.toggleCorrelationTops());
 
         document.getElementById('editModeToggle')?.addEventListener('click', () => this.toggleEditMode());
+        document.getElementById('overlayToggleBtn')?.addEventListener('click', () => this.toggleOverlayPanel());
+        document.getElementById('overlayRunA')?.addEventListener('change', (e) => this.onOverlayControlChange('runAId', parseInt(e.target.value || '0', 10) || null));
+        document.getElementById('overlayRunB')?.addEventListener('change', (e) => this.onOverlayControlChange('runBId', parseInt(e.target.value || '0', 10) || null));
+        document.getElementById('overlayCurve')?.addEventListener('change', (e) => this.onOverlayControlChange('curve', (e.target.value || '').toUpperCase()));
+        document.getElementById('overlayColor')?.addEventListener('input', (e) => this.onOverlayControlChange('color', e.target.value || '#ff3b30'));
+        document.getElementById('overlayOpacity')?.addEventListener('input', (e) => {
+            const val = Math.max(0.05, Math.min(1, (parseInt(e.target.value || '50', 10) || 50) / 100));
+            this.onOverlayControlChange('opacity', val);
+            const lbl = document.getElementById('overlayOpacityLabel');
+            if (lbl) lbl.textContent = `${Math.round(val * 100)}%`;
+        });
+        document.getElementById('overlayShowDiff')?.addEventListener('change', (e) => this.onOverlayControlChange('showDifference', !!e.target.checked));
+        document.getElementById('overlayClearBtn')?.addEventListener('click', () => this.clearOverlay());
+        document.getElementById('completionTrackToggle')?.addEventListener('change', (e) => this.toggleCompletionTrack(!!e.target.checked));
+        document.getElementById('completionCsvFileInput')?.addEventListener('change', () => this.uploadCompletionCSV());
         document.getElementById('editCurveSelect')?.addEventListener('change', (e) => this.setEditCurve(e.target.value));
         document.getElementById('editSaveBtn')?.addEventListener('click', () => this.saveCurveEdits());
         document.getElementById('editCancelBtn')?.addEventListener('click', () => this.cancelCurveEdits());
@@ -441,6 +493,7 @@ class GeoLogApp {
         document.getElementById('sensitivityPanel').style.display = view === 'sensitivity' ? 'block' : 'none';
         document.getElementById('comparisonPanel').style.display = view === 'comparison' ? 'block' : 'none';
         document.getElementById('toolsPanel').style.display = view === 'tools' ? 'block' : 'none';
+        document.getElementById('productionPanel').style.display = view === 'production' ? 'block' : 'none';
         document.getElementById('faciesPanel').style.display = view === 'facies' ? 'block' : 'none';
         document.getElementById('striplogPanel').style.display = view === 'striplog' ? 'block' : 'none';
         document.getElementById('probabilityPanel').style.display = view === 'probability' ? 'block' : 'none';
@@ -487,6 +540,7 @@ class GeoLogApp {
         if (view === 'sensitivity') { /* auto-loads on click */ }
         if (view === 'comparison') this.loadWellComparison();
         if (view === 'tools') { this._initToolsPanel(); this.refreshJobs(); }
+        if (view === 'production') { this.loadProduction(); this._initProductionCSVUpload(); }
         if (view === 'facies') this._initFaciesPanel();
         if (view === 'striplog') this.renderStripLog();
         if (view === 'probability') this.runProbabilityPlot();
@@ -761,12 +815,16 @@ class GeoLogApp {
             GeoLoading.show('Loading well data...');
             const well = await this._api(`/wells/${wellId}`);
             this.currentWell = well;
+            this.overlayRunCache.clear();
+            this.overlayState.runAId = null;
+            this.overlayState.runBId = null;
 
             // Highlight in sidebar
             document.querySelectorAll('.well-item').forEach(el => el.classList.remove('active'));
             document.querySelector(`.well-item[data-id="${wellId}"]`)?.classList.add('active');
 
             this.loadPetroParams();
+            this.renderTemplateCards();
             this._initBulkUpload();
             this._initCSVUpload();
             if (well.log_runs && well.log_runs.length > 0) {
@@ -800,6 +858,8 @@ class GeoLogApp {
             const chosen = (well.log_runs || []).find(r => r.id === logRunId);
             if (!chosen) return;
             this.currentLogRun = this._normalizeLogRunVersion(chosen);
+            this.overlayState.runAId = this.currentLogRun?.id || null;
+            if (this.overlayState.runBId === this.overlayState.runAId) this.overlayState.runBId = null;
             this.curveRangeCache.clear();
             this._populateLogRunSelector(well.log_runs || [], chosen.id);
             // Auto-populate depth inputs with log run bounds
@@ -824,9 +884,9 @@ class GeoLogApp {
         }
         sel.innerHTML = logRuns.map((r, idx) => {
             const runNo = r.run_number ?? (idx + 1);
-            const file = r.filename || 'unknown.las';
+            const file = r.filename || 'unknown.log';
             const pts = r.num_points ?? 0;
-            const versionLabel = this._formatLASVersion(r.version || r.las_version);
+            const versionLabel = this._formatRunVersion(r.version || r.las_version, file);
             const versionText = versionLabel ? ` • ${versionLabel}` : '';
             return `<option value="${r.id}">Run ${runNo} • ${file} • ${pts} pts${versionText}</option>`;
         }).join('');
@@ -834,17 +894,26 @@ class GeoLogApp {
         sel.value = String(chosen);
     }
 
-    _formatLASVersion(version) {
+    _formatRunVersion(version, filename = '') {
+        const file = String(filename || '').toLowerCase();
+        if (file.endsWith('.dlis') || file.includes('.dlis::')) return 'DLIS';
+        if (file.endsWith('.lis') || file.includes('.lis::')) return 'LIS';
         if (version == null || version === '') return '';
         const v = String(version).trim();
         if (!v) return '';
+        if (v.toUpperCase().includes('DLIS')) return 'DLIS';
+        if (v.toUpperCase().includes('LIS')) return 'LIS';
         return v.toUpperCase().startsWith('LAS') ? v.toUpperCase() : `LAS ${v}`;
+    }
+
+    _formatLASVersion(version) {
+        return this._formatRunVersion(version);
     }
 
     _normalizeLogRunVersion(logRun) {
         if (!logRun || typeof logRun !== 'object') return logRun;
         const rawVersion = logRun.version || logRun.las_version;
-        const normalized = this._formatLASVersion(rawVersion);
+        const normalized = this._formatRunVersion(rawVersion, logRun.filename || '');
         if (!normalized) return logRun;
         return { ...logRun, version: normalized };
     }
@@ -902,11 +971,15 @@ class GeoLogApp {
             if (data[c.mnemonic]) curveData[c.mnemonic] = data[c.mnemonic];
         }
         this.renderer.setData(depth, curveData, this.formationTops, this.curveConfig);
+        this.renderer.setBadHoleIntervals([]);
         const scale = parseInt(document.getElementById('scaleSelect')?.value || '100', 10);
         this.renderer.scale = scale;
         this._renderCurvePanel(curves);
         this._populateCurveSelectors(curves);
         this._populateEditCurveSelector(curves);
+        const overlayCurves = [...new Set(curves.map(c => (c.mnemonic || '').toUpperCase()).filter(Boolean))];
+        this._populateOverlayControls(overlayCurves);
+        if (this.overlayState.enabled) this.applyOverlay();
     }
 
     _onViewportChanged(start, stop) {
@@ -945,6 +1018,7 @@ class GeoLogApp {
                 const data = await this._fetchCurveRange(curves, start, stop, { decimated: false });
                 this._applyCurveDataToRenderer(data, curves);
             }
+            if (this._showLithTrack) await this.toggleLithTrack(true);
 
             this._suppressViewportLoad = true;
             this.renderer.setView(viewStart, viewStop);
@@ -1232,6 +1306,172 @@ class GeoLogApp {
             this.curveEditState.mnemonic = mns[0] || null;
         }
         sel.value = this.curveEditState.mnemonic || '';
+    }
+
+    toggleOverlayPanel() {
+        const panel = document.getElementById('overlayPanel');
+        const btn = document.getElementById('overlayToggleBtn');
+        if (!panel) return;
+        this.overlayState.enabled = !this.overlayState.enabled;
+        panel.style.display = this.overlayState.enabled ? 'flex' : 'none';
+        if (btn) btn.classList.toggle('active', this.overlayState.enabled);
+        if (this.overlayState.enabled) {
+            this._populateOverlayControls();
+            this.applyOverlay();
+        } else {
+            this.renderer?.setOverlayData(null);
+        }
+    }
+
+    onOverlayControlChange(key, value) {
+        this.overlayState[key] = value;
+        this.applyOverlay();
+    }
+
+    clearOverlay() {
+        this.overlayState.runBId = null;
+        this.overlayState.showDifference = false;
+        const runB = document.getElementById('overlayRunB');
+        const diff = document.getElementById('overlayShowDiff');
+        if (runB) runB.value = '';
+        if (diff) diff.checked = false;
+        this.renderer?.setOverlayData(null);
+        this._renderOverlayLegend();
+    }
+
+    _populateOverlayControls(curves = null) {
+        const runs = this.currentWell?.log_runs || [];
+        if (!runs.length) return;
+        if (!this.overlayState.runAId) this.overlayState.runAId = this.currentLogRun?.id || runs[0].id;
+
+        const runASelect = document.getElementById('overlayRunA');
+        const runBSelect = document.getElementById('overlayRunB');
+        const curveSelect = document.getElementById('overlayCurve');
+        const colorInput = document.getElementById('overlayColor');
+        const opacityInput = document.getElementById('overlayOpacity');
+        const showDiff = document.getElementById('overlayShowDiff');
+
+        if (runASelect) {
+            runASelect.innerHTML = runs.map(r => `<option value="${r.id}">Run ${r.run_number || r.id} • ${r.filename || 'log'}</option>`).join('');
+            runASelect.value = String(this.overlayState.runAId || '');
+        }
+
+        const runBOptions = runs.filter(r => r.id !== this.overlayState.runAId);
+        if (!this.overlayState.runBId || !runBOptions.find(r => r.id === this.overlayState.runBId)) {
+            this.overlayState.runBId = runBOptions[0]?.id || null;
+        }
+        if (runBSelect) {
+            runBSelect.innerHTML = `<option value="">Select run...</option>` + runBOptions.map(r => `<option value="${r.id}">Run ${r.run_number || r.id} • ${r.filename || 'log'}</option>`).join('');
+            runBSelect.value = this.overlayState.runBId ? String(this.overlayState.runBId) : '';
+        }
+
+        const mns = curves || [...new Set(Object.keys(this.renderer?.curveData || {}).map(m => m.toUpperCase()).filter(m => m && m !== 'DEPT' && m !== 'DEPTH'))];
+        if (curveSelect && mns.length) {
+            curveSelect.innerHTML = mns.map(m => `<option value="${m}">${m}</option>`).join('');
+            if (!mns.includes(this.overlayState.curve)) this.overlayState.curve = mns.includes('GR') ? 'GR' : mns[0];
+            curveSelect.value = this.overlayState.curve;
+        }
+
+        if (colorInput) colorInput.value = this.overlayState.color;
+        if (opacityInput) opacityInput.value = String(Math.round(this.overlayState.opacity * 100));
+        if (showDiff) showDiff.checked = !!this.overlayState.showDifference;
+        const lbl = document.getElementById('overlayOpacityLabel');
+        if (lbl) lbl.textContent = `${Math.round(this.overlayState.opacity * 100)}%`;
+    }
+
+    _lerpAtDepth(depthArr, valueArr, depth) {
+        if (!Array.isArray(depthArr) || !Array.isArray(valueArr) || depthArr.length < 2) return null;
+        if (depth < depthArr[0] || depth > depthArr[depthArr.length - 1]) return null;
+        let lo = 0;
+        let hi = depthArr.length - 1;
+        while (hi - lo > 1) {
+            const mid = (lo + hi) >> 1;
+            if (depthArr[mid] <= depth) lo = mid;
+            else hi = mid;
+        }
+        const d0 = depthArr[lo], d1 = depthArr[hi];
+        const v0 = valueArr[lo], v1 = valueArr[hi];
+        if (!Number.isFinite(v0) || !Number.isFinite(v1) || d1 === d0) return Number.isFinite(v0) ? v0 : null;
+        const t = (depth - d0) / (d1 - d0);
+        return v0 + (v1 - v0) * t;
+    }
+
+    async _fetchOverlayRunCurve(runId, curveMnemonic) {
+        const key = `${runId}:${curveMnemonic}`;
+        if (this.overlayRunCache.has(key)) return this.overlayRunCache.get(key);
+        const run = (this.currentWell?.log_runs || []).find(r => r.id === runId);
+        if (!run) return null;
+        const data = await this._api(`/log-runs/${runId}/data`, {
+            method: 'POST',
+            body: JSON.stringify({
+                curve_mnemonics: [curveMnemonic],
+                start_depth: run.start_depth,
+                stop_depth: run.stop_depth,
+            }),
+        });
+        const cached = {
+            depth: data.DEPTH || data.DEPT || [],
+            curve: data[curveMnemonic] || [],
+        };
+        this.overlayRunCache.set(key, cached);
+        return cached;
+    }
+
+    async applyOverlay() {
+        if (!this.overlayState.enabled || !this.renderer || !this.currentWell) return;
+        this._populateOverlayControls();
+        const runAId = Number(this.overlayState.runAId || this.currentLogRun?.id || 0);
+        const runBId = Number(this.overlayState.runBId || 0);
+        const curve = (this.overlayState.curve || '').toUpperCase();
+        if (!runAId || !runBId || !curve) {
+            this.renderer.setOverlayData(null);
+            this._renderOverlayLegend();
+            return;
+        }
+
+        try {
+            const [a, b] = await Promise.all([
+                this._fetchOverlayRunCurve(runAId, curve),
+                this._fetchOverlayRunCurve(runBId, curve),
+            ]);
+            const renderDepth = this.renderer.depthData || [];
+            const runAAligned = [];
+            const runBAligned = [];
+            for (const d of renderDepth) {
+                runAAligned.push(this._lerpAtDepth(a?.depth || [], a?.curve || [], d));
+                runBAligned.push(this._lerpAtDepth(b?.depth || [], b?.curve || [], d));
+            }
+
+            this.renderer.setOverlayData({
+                enabled: true,
+                mnemonic: curve,
+                depth: renderDepth,
+                runA: runAAligned,
+                runB: runBAligned,
+                color: this.overlayState.color,
+                opacity: this.overlayState.opacity,
+                showDifference: !!this.overlayState.showDifference,
+            });
+            this._renderOverlayLegend();
+        } catch (e) {
+            console.error('Failed to apply overlay:', e);
+            GeoToast.error('Overlay load failed: ' + (e.message || e));
+        }
+    }
+
+    _renderOverlayLegend() {
+        const el = document.getElementById('overlayLegend');
+        if (!el) return;
+        const runs = this.currentWell?.log_runs || [];
+        const runA = runs.find(r => r.id === Number(this.overlayState.runAId));
+        const runB = runs.find(r => r.id === Number(this.overlayState.runBId));
+        if (!runA || !runB || !this.overlayState.enabled) {
+            el.innerHTML = '';
+            return;
+        }
+        const aName = `Run ${runA.run_number || runA.id}`;
+        const bName = `Run ${runB.run_number || runB.id}`;
+        el.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px"><span style="width:14px;height:3px;background:#58a6ff;display:inline-block"></span>${aName}</span> <span style="margin:0 8px">vs</span> <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:14px;height:3px;background:${this.overlayState.color};display:inline-block"></span>${bName}</span>`;
     }
 
     _activeLogRunForWell(well) {
@@ -1980,14 +2220,17 @@ class GeoLogApp {
         } catch (e) { GeoToast.error('Failed to update well: ' + e.message); }
     }
 
-    async uploadLAS() {
-        if (!this.currentWell) {
-            GeoToast.warn('Select or create a well first.');
-            return;
-        }
+    async _uploadLogFormatForWell(wellId, format = 'las') {
+        const fm = String(format || 'las').toLowerCase();
+        const conf = {
+            las: { ext: '.las,.LAS', endpoint: 'upload-las', label: 'LAS' },
+            dlis: { ext: '.dlis,.DLIS,.tif,.TIF', endpoint: 'upload-dlis', label: 'DLIS' },
+            lis: { ext: '.lis,.LIS', endpoint: 'upload-lis', label: 'LIS' },
+        }[fm] || { ext: '.las,.LAS', endpoint: 'upload-las', label: 'LAS' };
+
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.las,.LAS';
+        input.accept = conf.ext;
         input.onchange = async () => {
             const file = input.files[0];
             if (!file) return;
@@ -1995,45 +2238,47 @@ class GeoLogApp {
             formData.append('file', file);
             GeoLoading.show(`Uploading ${file.name}...`);
             try {
-                const resp = await fetch(`/api/wells/${this.currentWell.id}/upload-las`, {
-                    method: 'POST',
-                    body: formData,
-                });
+                const resp = await fetch(`/api/wells/${wellId}/${conf.endpoint}`, { method: 'POST', body: formData });
                 if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
                 const result = await resp.json();
                 this._applyUploadedLASVersion(result);
-                GeoToast.success(`Uploaded ${result.filename} — ${result.curves.length} curves, ${result.num_points} points`);
-                await this.loadWells(this.projects[0].id);
-            } catch (e) { GeoToast.error('Upload failed: ' + e.message); }
-            finally { GeoLoading.hide(); }
+                const runs = result.runs_created ? ` (${result.runs_created} run${result.runs_created > 1 ? 's' : ''})` : '';
+                GeoToast.success(`Uploaded ${result.filename}${runs} — ${result.curves.length} curves, ${result.num_points} points`);
+                if (this.projects.length > 0) await this.loadWells(this.projects[0].id);
+            } catch (e) {
+                GeoToast.error(`${conf.label} upload failed: ` + e.message);
+            } finally {
+                GeoLoading.hide();
+            }
         };
         input.click();
     }
 
+    async uploadLAS() {
+        if (!this.currentWell) return GeoToast.warn('Select or create a well first.');
+        return this._uploadLogFormatForWell(this.currentWell.id, 'las');
+    }
+
+    async uploadDLIS() {
+        if (!this.currentWell) return GeoToast.warn('Select or create a well first.');
+        return this._uploadLogFormatForWell(this.currentWell.id, 'dlis');
+    }
+
+    async uploadLIS() {
+        if (!this.currentWell) return GeoToast.warn('Select or create a well first.');
+        return this._uploadLogFormatForWell(this.currentWell.id, 'lis');
+    }
+
     async uploadLASForWell(wellId) {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.las,.LAS';
-        input.onchange = async () => {
-            const file = input.files[0];
-            if (!file) return;
-            const formData = new FormData();
-            formData.append('file', file);
-            GeoLoading.show(`Uploading ${file.name}...`);
-            try {
-                const resp = await fetch(`/api/wells/${wellId}/upload-las`, {
-                    method: 'POST',
-                    body: formData,
-                });
-                if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
-                const result = await resp.json();
-                this._applyUploadedLASVersion(result);
-                GeoToast.success(`Uploaded ${result.filename} — ${result.curves.length} curves, ${result.num_points} points`);
-                if (this.projects.length > 0) await this.loadWells(this.projects[0].id);
-            } catch (e) { GeoToast.error('Upload failed: ' + e.message); }
-            finally { GeoLoading.hide(); }
-        };
-        input.click();
+        return this._uploadLogFormatForWell(wellId, 'las');
+    }
+
+    async uploadDLISForWell(wellId) {
+        return this._uploadLogFormatForWell(wellId, 'dlis');
+    }
+
+    async uploadLISForWell(wellId) {
+        return this._uploadLogFormatForWell(wellId, 'lis');
     }
 
     openBulkImportWizard() {
@@ -3223,21 +3468,69 @@ class GeoLogApp {
         if (nRow) nRow.style.display = model === 'archie' ? '' : 'none';
     }
 
-    // ─── Petro Template Presets ───────────────────────────────
-    applyPetroTemplate(template) {
-        const presets = {
-            sandstone: { a: 1.0, m: 2.0, n: 2.0, rw: 0.05, vsh: 0.35, phie: 0.10, sw: 0.60, model: 'archie' },
-            carbonate: { a: 1.0, m: 2.0, n: 2.0, rw: 0.02, vsh: 0.25, phie: 0.05, sw: 0.50, model: 'archie' },
-            shaly_sand: { a: 1.0, m: 1.8, n: 1.8, rw: 0.08, vsh: 0.40, phie: 0.08, sw: 0.70, model: 'simandoux' },
-        };
-        const p = presets[template];
-        if (!p) return;
-        const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
-        set('archA', p.a); set('archM', p.m); set('archN', p.n); set('archRw', p.rw);
-        set('cutVsh', p.vsh); set('cutPhie', p.phie); set('cutSw', p.sw);
-        set('satModel', p.model);
-        this._onSatModelChange();
-        GeoToast.success('Template "' + template + '" applied');
+    // ─── Workflow Templates ───────────────────────────────────
+    async loadWorkflowTemplates() {
+        try {
+            const res = await this._api('/templates');
+            this.workflowTemplates = Array.isArray(res?.templates) ? res.templates : [];
+            this.renderTemplateCards();
+        } catch (e) {
+            this.workflowTemplates = [];
+            this.renderTemplateCards();
+        }
+    }
+
+    renderTemplateCards() {
+        const host = document.getElementById('templateCards');
+        if (!host) return;
+        if (!this.workflowTemplates.length) {
+            host.innerHTML = '<div style="color:#8b949e;font-size:12px">No templates available.</div>';
+            return;
+        }
+        host.innerHTML = this.workflowTemplates.map((t, idx) => {
+            const p = t.params || {};
+            const c = t.recommended_cutoffs || {};
+            return `<div style="border:1px solid #30363d;border-radius:8px;padding:8px;background:#0d1117">
+                <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+                    <strong>${t.name || 'Template'}</strong>
+                    <button class="btn-sm" onclick="app.previewTemplate(${idx})">Preview</button>
+                </div>
+                <div style="font-size:12px;color:#8b949e;margin:4px 0">${t.description || ''}</div>
+                <div style="font-size:12px;color:#c9d1d9">a=${p.a}, m=${p.m}, n=${p.n}, Vcl≤${c.vsh_cutoff}, PHIE≥${c.phie_cutoff}, Sw≤${c.sw_cutoff}</div>
+                <div style="margin-top:6px"><button class="btn-primary" onclick="app.applyWorkflowTemplate('${(t.name || '').replace(/'/g, "\\'")}')">Apply Template</button></div>
+            </div>`;
+        }).join('');
+    }
+
+    previewTemplate(index) {
+        const t = this.workflowTemplates?.[index];
+        const el = document.getElementById('templatePreview');
+        if (!el || !t) return;
+        const p = t.params || {};
+        const c = t.recommended_cutoffs || {};
+        el.innerHTML = `Preview: <strong>${t.name}</strong> → model=${p.saturation_model || 'archie'}, a=${p.a}, m=${p.m}, n=${p.n}, Rw=${t.suggested_rw ?? p.rw}, Vcl≤${c.vsh_cutoff}, PHIE≥${c.phie_cutoff}, Sw≤${c.sw_cutoff}, GR range ${c.gr_min}-${c.gr_max}.`;
+    }
+
+    async applyWorkflowTemplate(templateName) {
+        if (!this.currentWell) return GeoToast.warn('Select a well first');
+        const yes = window.confirm(`Apply template "${templateName}" to this well? This will overwrite current petrophysical parameters.`);
+        if (!yes) return;
+        try {
+            const result = await this._api(`/wells/${this.currentWell.id}/apply-template`, {
+                method: 'POST',
+                body: JSON.stringify({ template_name: templateName }),
+            });
+            await this.loadPetroParams();
+            await this._renderPetrophysics();
+            GeoToast.success(`Applied: ${result?.applied_template || templateName}`);
+        } catch (e) {
+            GeoToast.error('Template apply failed: ' + (e.message || e));
+        }
+    }
+
+    applyPetroTemplate(templateName) {
+        // Backward compatibility for old UI callbacks
+        return this.applyWorkflowTemplate(templateName);
     }
 
     // ─── Save/Load Petro Params ──────────────────────────────
@@ -3784,7 +4077,10 @@ class GeoLogApp {
         await this.loadAnnotations();
         await this.loadDST();
         await this.loadRFT();
+        await this.loadCompletion();
         this._initRFTCSVUpload();
+        const compToggle = document.getElementById('completionTrackToggle');
+        if (compToggle) compToggle.checked = this.showCompletionTrack;
         const aliasEl = document.getElementById('aliasStatus');
         if (aliasEl) {
             try {
@@ -3792,6 +4088,134 @@ class GeoLogApp {
                 aliasEl.textContent = aliases.length ? aliases.length + ' remaps saved' : 'No remaps configured';
             } catch { aliasEl.textContent = 'No remaps'; }
         }
+    }
+
+    async runRwEstimation() {
+        if (!this.currentWell) return GeoToast.warn('Select a well first');
+        const getNum = (id, fallback = null) => {
+            const el = document.getElementById(id);
+            const v = el ? parseFloat(el.value) : NaN;
+            return Number.isFinite(v) ? v : fallback;
+        };
+        const method = (document.getElementById('rwMethod')?.value || 'all').toLowerCase();
+        const payload = {
+            method,
+            rmf: getNum('rwRmf'),
+            temperature: getNum('rwTemp'),
+            temperature_unit: document.getElementById('rwTempUnit')?.value || 'F',
+            ssp: getNum('rwSsp'),
+            rt_clean: getNum('rwRtClean'),
+            phi_clean: getNum('rwPhiClean'),
+            m: getNum('rwM', 2.0),
+            rt_curve: 'RT',
+            phi_curve: 'NPHI',
+        };
+
+        GeoLoading.show('Estimating Rw...');
+        try {
+            const out = await this._api(`/wells/${this.currentWell.id}/rw-estimation`, {
+                method: 'POST',
+                body: JSON.stringify(payload),
+            });
+            this._lastRwEstimation = out;
+            const sp = out.methods?.sp;
+            const ro = out.methods?.ro;
+            const hi = out.methods?.hingle;
+            const fmt = (v, n = 4) => (v === null || v === undefined || Number.isNaN(v)) ? 'N/A' : Number(v).toFixed(n);
+            const catalog = out.catalog || {};
+            const cat = (arr) => Array.isArray(arr) && arr.length === 2 ? `${arr[0]} - ${arr[1]}` : 'N/A';
+            const html = `
+                <div class="petro-summary">
+                    <div class="petro-stat"><span>SP Rw</span><strong>${fmt(sp?.rw)} Ω·m</strong></div>
+                    <div class="petro-stat"><span>SP Rw@77°F</span><strong>${fmt(sp?.rw_77f)} Ω·m</strong></div>
+                    <div class="petro-stat"><span>Ro Rw</span><strong>${fmt(ro?.rw)} Ω·m</strong></div>
+                    <div class="petro-stat"><span>Hingle Rw</span><strong>${fmt(hi?.rw)} Ω·m</strong></div>
+                    <div class="petro-stat"><span>Hingle R²</span><strong>${fmt(hi?.r2, 3)}</strong></div>
+                    <div class="petro-stat"><span>Recommended Rw</span><strong style="color:#3fb950">${fmt(out.recommended_rw)} Ω·m</strong></div>
+                    <div class="petro-stat"><span>Confidence</span><strong>${fmt(out.confidence_score, 1)}%</strong></div>
+                </div>
+                <div style="margin-top:8px;color:#8b949e;font-size:11px">
+                    Catalog: Fresh ${cat(catalog.fresh_water_ohm_m)} • Saline ${cat(catalog.saline_water_ohm_m)} • Gulf Coast ${cat(catalog.typical_gulf_coast_ohm_m)} • North Sea ${cat(catalog.typical_north_sea_ohm_m)}
+                </div>`;
+            document.getElementById('rwResults').innerHTML = html;
+            this._drawRwHingleCanvas(hi?.crossplot, hi);
+            GeoToast.success('Rw estimation complete');
+        } catch (e) {
+            GeoToast.error(e.message || String(e));
+        } finally {
+            GeoLoading.hide();
+        }
+    }
+
+    _drawRwHingleCanvas(crossplot, hingle) {
+        const canvas = document.getElementById('rwHingleCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const W = canvas.clientWidth || 480;
+        const H = canvas.clientHeight || 220;
+        canvas.width = W;
+        canvas.height = H;
+        const m = { top: 22, right: 16, bottom: 30, left: 42 };
+        const plotW = W - m.left - m.right;
+        const plotH = H - m.top - m.bottom;
+
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, W, H);
+
+        const xs = crossplot?.x_phi || [];
+        const ys = crossplot?.y_inv_rt || [];
+        if (!xs.length || !ys.length) {
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '12px DM Sans';
+            ctx.fillText('No Hingle crossplot data', 12, 22);
+            return;
+        }
+
+        const xMin = Math.min(...xs), xMax = Math.max(...xs);
+        const yMin = Math.min(...ys), yMax = Math.max(...ys);
+        const xr = (xMax - xMin) || 1;
+        const yr = (yMax - yMin) || 1;
+        const xp = (x) => m.left + ((x - xMin) / xr) * plotW;
+        const yp = (y) => m.top + plotH - ((y - yMin) / yr) * plotH;
+
+        ctx.strokeStyle = '#30363d';
+        ctx.strokeRect(m.left, m.top, plotW, plotH);
+
+        ctx.fillStyle = '#58a6ff99';
+        for (let i = 0; i < xs.length; i++) {
+            ctx.beginPath();
+            ctx.arc(xp(xs[i]), yp(ys[i]), 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        if (hingle && Number.isFinite(hingle.slope) && Number.isFinite(hingle.intercept_rwa)) {
+            ctx.strokeStyle = '#f85149';
+            ctx.lineWidth = 1.5;
+            const y1 = hingle.slope * xMin + hingle.intercept_rwa;
+            const y2 = hingle.slope * xMax + hingle.intercept_rwa;
+            ctx.beginPath();
+            ctx.moveTo(xp(xMin), yp(y1));
+            ctx.lineTo(xp(xMax), yp(y2));
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '10px IBM Plex Mono';
+        ctx.fillText('φ', W / 2, H - 6);
+        ctx.save();
+        ctx.translate(10, H / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('1/Rt', 0, 0);
+        ctx.restore();
+    }
+
+    async applyRecommendedRw() {
+        const rw = this._lastRwEstimation?.recommended_rw;
+        if (!Number.isFinite(rw)) return GeoToast.warn('Run Rw estimation first');
+        const archRw = document.getElementById('archRw');
+        if (!archRw) return GeoToast.warn('Petrophysics Rw input not found');
+        archRw.value = Number(rw).toFixed(4);
+        GeoToast.success(`Rw updated to ${Number(rw).toFixed(4)} Ω·m`);
     }
 
     async _populateToolRunSelectors() {
@@ -3804,7 +4228,82 @@ class GeoLogApp {
                 if (!el) continue;
                 el.innerHTML = runs.map(r => '<option value="' + r.id + '">Run ' + r.run_number + ' - ' + r.filename + ' (' + r.num_points + ' pts)</option>').join('');
             }
+            const lqcCurveSel = document.getElementById('lqcCurveSelect');
+            if (lqcCurveSel) {
+                const curves = Object.keys(this.renderer?.curveData || {}).filter(c => c && c !== 'DEPT' && c !== 'DEPTH');
+                lqcCurveSel.innerHTML = curves.map(c => `<option value="${c}">${c}</option>`).join('');
+                if (curves.includes('RT')) lqcCurveSel.value = 'RT';
+                else if (curves.includes('GR')) lqcCurveSel.value = 'GR';
+            }
         } catch { /* no runs */ }
+    }
+
+    async runLQCShoulderBedCorrection() {
+        if (!this.currentLogRun) return GeoToast.warn('Select a log run');
+        const mnemonic = document.getElementById('lqcCurveSelect')?.value;
+        const bedThreshold = parseFloat(document.getElementById('lqcBedThreshold')?.value || '2');
+        const method = document.getElementById('lqcMethod')?.value || 'linear';
+        if (!mnemonic) return GeoToast.warn('Select curve for LQC');
+        GeoLoading.show('Running shoulder-bed correction...');
+        try {
+            const out = await this._api(`/log-runs/${this.currentLogRun.id}/shoulder-bed-correction`, {
+                method: 'POST',
+                body: JSON.stringify({ mnemonic, bed_thickness_threshold: bedThreshold, method }),
+            });
+            const original = Array.isArray(this.renderer?.curveData?.[mnemonic]) ? [...this.renderer.curveData[mnemonic]] : null;
+            this.lqcState = {
+                result: out,
+                originalCurve: original,
+                correctedCurve: out.corrected_curve || null,
+                activeMnemonic: mnemonic,
+                showCorrected: false,
+            };
+            const toggle = document.getElementById('lqcToggleCorrected');
+            if (toggle) toggle.checked = false;
+            this.toggleLQCCorrected(false);
+            this.renderer?.setBadHoleIntervals(out?.bad_hole?.intervals || []);
+            this._renderLQCResults();
+            GeoToast.success('LQC completed');
+        } catch (e) {
+            GeoToast.error('LQC failed: ' + (e.message || e));
+        } finally {
+            GeoLoading.hide();
+        }
+    }
+
+    toggleLQCCorrected(enabled) {
+        this.lqcState.showCorrected = !!enabled;
+        const m = this.lqcState.activeMnemonic;
+        if (!m || !this.renderer?.curveData) return;
+        if (enabled && Array.isArray(this.lqcState.correctedCurve)) {
+            this.renderer.curveData[m] = [...this.lqcState.correctedCurve];
+        } else if (Array.isArray(this.lqcState.originalCurve)) {
+            this.renderer.curveData[m] = [...this.lqcState.originalCurve];
+        }
+        this.renderer.render();
+    }
+
+    _renderLQCResults() {
+        const sumEl = document.getElementById('lqcSummary');
+        const intEl = document.getElementById('lqcIntervals');
+        const out = this.lqcState.result;
+        if (!sumEl || !intEl) return;
+        if (!out) {
+            sumEl.textContent = 'Run LQC to see summary.';
+            intEl.innerHTML = '';
+            return;
+        }
+        const q = out.qc_summary || {};
+        sumEl.innerHTML = `Thin beds: <strong>${q.thin_beds_pct ?? 0}%</strong> • Bad hole: <strong>${q.bad_hole_pct ?? 0}%</strong> • Invaded: <strong>${q.invaded_pct ?? 0}%</strong>`;
+
+        const thinRows = (out.thin_beds || []).slice(0, 150).map((b, i) =>
+            `<div style="padding:4px 0;border-bottom:1px solid #21262d"><span style="color:#facc15">Thin #${i + 1}</span> ${b.top} - ${b.bottom} ft <span style="color:#8b949e">(${b.thickness} ft)</span></div>`
+        ).join('');
+        const badRows = (out?.bad_hole?.intervals || []).slice(0, 150).map((b, i) =>
+            `<div style="padding:4px 0;border-bottom:1px solid #21262d"><span style="color:#ef4444">BadHole #${i + 1}</span> ${b.top} - ${b.bottom} ft <span style="color:#8b949e">(${b.thickness} ft)</span></div>`
+        ).join('');
+
+        intEl.innerHTML = `<div style="margin-bottom:6px;color:#8b949e">Flagged intervals</div>${thinRows || '<div style="color:#8b949e">No thin beds flagged.</div>'}${badRows || '<div style="color:#8b949e;margin-top:8px">No bad-hole intervals flagged.</div>'}`;
     }
 
     // ─── Bulk LAS Upload ─────────────────────────────────────
@@ -4004,13 +4503,64 @@ class GeoLogApp {
         try {
             const rows = await this._api('/wells/' + this.currentWell.id + '/rft');
             this.rftData = Array.isArray(rows) ? rows : [];
+            this.rftGradientAnalysis = await this._api('/wells/' + this.currentWell.id + '/rft/pressure-gradient').catch(() => null);
             if (this.renderer) {
                 this.renderer.rftPoints = this.rftData;
                 this.renderer.render();
             }
             await this._drawRFTCrossplot();
+            this._renderRFTAnalysisSummary();
         } catch {}
         finally { GeoLoading.hide(); }
+    }
+
+    _renderRFTAnalysisSummary() {
+        const summaryEl = document.getElementById('rftAnalysisSummary');
+        const tableEl = document.getElementById('rftContactsTable');
+        if (!summaryEl || !tableEl) return;
+        const grad = this.rftGradientAnalysis;
+        if (!grad || !grad.count) {
+            summaryEl.innerHTML = '<div style="color:#8b949e">No gradient analysis available</div>';
+            tableEl.innerHTML = '';
+            return;
+        }
+        const reg = grad.pressure_regime_summary || {};
+        const overall = grad.overall || {};
+        const fmt = (v, n = 3) => Number.isFinite(Number(v)) ? Number(v).toFixed(n) : '-';
+        summaryEl.innerHTML =
+            `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;font-size:12px">` +
+            `<div><b>Overall Gradient</b><br>${fmt(overall.gradient, 4)} psi/ft</div>` +
+            `<div><b>Fluid Guess</b><br>${overall.fluid_guess || 'unknown'}</div>` +
+            `<div><b>Regime</b><br>${overall.regime || 'unknown'}</div>` +
+            `<div><b>Contacts</b><br>${(grad.fluid_contacts || []).length}</div>` +
+            `<div><b>Normal</b><br>${reg.normal || 0}</div>` +
+            `<div><b>Underpressure</b><br>${reg.underpressure || 0}</div>` +
+            `<div><b>Overpressure</b><br>${reg.overpressure || 0}</div>` +
+            `</div>`;
+
+        const contacts = grad.fluid_contacts || [];
+        const segs = grad.fluid_segments || [];
+        let html = '<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>' +
+            '<th style="text-align:left;padding:6px;border-bottom:1px solid #30363d">Type</th>' +
+            '<th style="text-align:left;padding:6px;border-bottom:1px solid #30363d">Depth (ft)</th>' +
+            '<th style="text-align:left;padding:6px;border-bottom:1px solid #30363d">From→To</th>' +
+            '<th style="text-align:left;padding:6px;border-bottom:1px solid #30363d">Segment Gradient</th>' +
+            '</tr></thead><tbody>';
+        if (!contacts.length) {
+            html += '<tr><td colspan="4" style="padding:6px;color:#8b949e">No fluid contacts identified</td></tr>';
+        } else {
+            contacts.forEach((c, i) => {
+                const g = segs[i]?.gradient;
+                html += '<tr>' +
+                    `<td style="padding:6px;border-bottom:1px solid #21262d">${c.type || '-'}</td>` +
+                    `<td style="padding:6px;border-bottom:1px solid #21262d">${fmt(c.depth, 1)}</td>` +
+                    `<td style="padding:6px;border-bottom:1px solid #21262d">${(c.from_fluid || '-')}→${(c.to_fluid || '-')}</td>` +
+                    `<td style="padding:6px;border-bottom:1px solid #21262d">${fmt(g, 4)} psi/ft</td>` +
+                    '</tr>';
+            });
+        }
+        html += '</tbody></table></div>';
+        tableEl.innerHTML = html;
     }
 
     async addRFT() {
@@ -4084,32 +4634,306 @@ class GeoLogApp {
         const sx = p => m.left + ((p - pMin) / ((pMax - pMin) || 1)) * pw;
         const sy = d => m.top + ((d - dMin) / ((dMax - dMin) || 1)) * ph;
         const fc = f => (f === 'oil' ? '#2ecc71' : f === 'gas' ? '#e74c3c' : f === 'water' ? '#3498db' : '#aaaaaa');
+        const regimeColor = r => (r === 'normal' ? '#58a6ff' : r === 'underpressure' ? '#ffb86b' : r === 'overpressure' ? '#ff6b6b' : '#9aa0a6');
 
         ctx.strokeStyle = '#21262d'; ctx.lineWidth = 1; ctx.strokeRect(m.left, m.top, pw, ph);
+        const clsByDepthPressure = new Map();
+        for (const cp of (this.rftGradientAnalysis?.classified_points || [])) {
+            clsByDepthPressure.set(`${Number(cp.depth).toFixed(3)}|${Number(cp.pressure).toFixed(3)}`, cp);
+        }
         for (const r of this.rftData) {
             const x = sx(Number(r.pressure));
             const y = sy(Number(r.depth));
-            ctx.fillStyle = fc((r.fluid_type || '').toLowerCase());
+            const key = `${Number(r.depth).toFixed(3)}|${Number(r.pressure).toFixed(3)}`;
+            const cp = clsByDepthPressure.get(key);
+            ctx.fillStyle = fc((cp?.fluid_from_gradient || r.fluid_type || '').toLowerCase());
             ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+            if (cp?.pressure_regime) {
+                ctx.strokeStyle = regimeColor(cp.pressure_regime);
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
         }
 
         try {
-            const grad = await this._api('/wells/' + this.currentWell.id + '/rft/pressure-gradient');
+            const grad = this.rftGradientAnalysis || await this._api('/wells/' + this.currentWell.id + '/rft/pressure-gradient');
+            this.rftGradientAnalysis = grad;
             const lines = [];
-            if (grad.overall) lines.push({ ...grad.overall, color: '#f2cc60' });
-            for (const g of (grad.by_fluid || [])) lines.push({ ...g, color: fc(g.fluid_type) });
+            if (grad.overall) lines.push({ ...grad.overall, color: '#f2cc60', label: 'Best fit' });
+            if (grad.gradient_lines?.hydrostatic) lines.push({ ...grad.gradient_lines.hydrostatic, color: '#58a6ff' });
+            if (grad.gradient_lines?.lithostatic) lines.push({ ...grad.gradient_lines.lithostatic, color: '#a371f7' });
+            for (const g of (grad.fluid_segments || [])) lines.push({ ...g, color: fc(g.fluid_type), label: `${g.fluid_type} ${Number(g.gradient).toFixed(3)}` });
             for (const ln of lines) {
                 const y1d = dMin, y2d = dMax;
                 const x1p = ln.gradient * y1d + ln.intercept;
                 const x2p = ln.gradient * y2d + ln.intercept;
                 ctx.strokeStyle = ln.color; ctx.lineWidth = 1.5;
                 ctx.beginPath(); ctx.moveTo(sx(x1p), sy(y1d)); ctx.lineTo(sx(x2p), sy(y2d)); ctx.stroke();
+                if (ln.label) {
+                    ctx.fillStyle = ln.color;
+                    ctx.font = '10px DM Sans';
+                    ctx.fillText(ln.label, Math.min(W - 80, sx(x2p) + 4), Math.max(12, sy(y2d) - 4));
+                }
+            }
+            for (const c of (grad.fluid_contacts || [])) {
+                const y = sy(Number(c.depth));
+                ctx.setLineDash([4, 3]);
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(m.left, y);
+                ctx.lineTo(m.left + pw, y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '10px DM Sans';
+                ctx.fillText(`Contact ${c.type} @ ${Number(c.depth).toFixed(1)} ft`, m.left + 6, y - 4);
             }
         } catch {}
 
         ctx.fillStyle = '#c9d1d9'; ctx.font = '11px DM Sans'; ctx.textAlign = 'center';
         ctx.fillText('Pressure', m.left + pw / 2, H - 8);
         ctx.save(); ctx.translate(14, m.top + ph / 2); ctx.rotate(-Math.PI / 2); ctx.fillText('Depth (ft)', 0, 0); ctx.restore();
+    }
+
+    async loadCompletion() {
+        if (!this.currentWell) return;
+        try {
+            const rows = await this._api('/wells/' + this.currentWell.id + '/completion');
+            this.completionData = Array.isArray(rows) ? rows : [];
+            this.renderer?.setCompletionData(this.completionData);
+            this._renderCompletionList();
+        } catch {
+            this.completionData = [];
+            this._renderCompletionList();
+        }
+    }
+
+    _renderCompletionList() {
+        const el = document.getElementById('completionList');
+        if (!el) return;
+        if (!this.completionData.length) {
+            el.innerHTML = '<p style="color:#8b949e">No completion components</p>';
+            return;
+        }
+        el.innerHTML = this.completionData.map(c =>
+            `<div style="display:grid;grid-template-columns:1fr auto;gap:6px;padding:6px 0;border-bottom:1px solid #21262d">` +
+            `<div><strong>${(c.component_type || '').toUpperCase()}</strong> ${c.size ? '(' + c.size + ')' : ''}<br><span style="color:#8b949e">${Number(c.depth_top).toFixed(1)} - ${Number(c.depth_base).toFixed(1)} ft</span></div>` +
+            `<button class="btn-icon-sm" onclick="app.deleteCompletionComponent(${c.id})" title="Delete"><i data-lucide="x"></i></button>` +
+            `</div>`
+        ).join('');
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    async addCompletionComponent() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        const r = await GeoModal.show({ title: 'Add Completion Component', fields: [
+            { id: 'component_type', label: 'Type', type: 'select', options: [
+                { value: 'casing', label: 'Casing' }, { value: 'tubing', label: 'Tubing' }, { value: 'packer', label: 'Packer' },
+                { value: 'perforation', label: 'Perforation' }, { value: 'screen', label: 'Screen' }, { value: 'liner', label: 'Liner' },
+                { value: 'cement', label: 'Cement' }, { value: 'pump', label: 'Pump' }, { value: 'valve', label: 'Valve' },
+            ], value: 'casing' },
+            { id: 'depth_top', label: 'Depth Top (ft)', type: 'number', step: '0.1' },
+            { id: 'depth_base', label: 'Depth Base (ft)', type: 'number', step: '0.1' },
+            { id: 'size', label: 'Size (e.g., 7 in)' },
+            { id: 'description', label: 'Description' },
+        ]});
+        if (!r || isNaN(parseFloat(r.depth_top)) || isNaN(parseFloat(r.depth_base))) return;
+        await this._api('/wells/' + this.currentWell.id + '/completion', { method: 'POST', body: JSON.stringify(r) });
+        GeoToast.success('Completion component added');
+        await this.loadCompletion();
+    }
+
+    async deleteCompletionComponent(cid) {
+        await this._api('/completion/' + cid, { method: 'DELETE' });
+        await this.loadCompletion();
+    }
+
+    async uploadCompletionCSV() {
+        const input = document.getElementById('completionCsvFileInput');
+        const file = input?.files?.[0];
+        if (!file || !this.currentWell) return;
+        const status = document.getElementById('completionUploadStatus');
+        if (status) status.textContent = 'Uploading ' + file.name + '...';
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            const resp = await fetch('/api/wells/' + this.currentWell.id + '/completion/upload-csv', { method: 'POST', body: formData });
+            const result = await resp.json();
+            if (!resp.ok) throw new Error(result?.detail || 'Upload failed');
+            if (status) status.textContent = `Inserted ${result.inserted || 0} rows`;
+            GeoToast.success('Completion CSV uploaded');
+            await this.loadCompletion();
+        } catch (e) {
+            if (status) status.textContent = 'Upload failed';
+            GeoToast.error('Completion upload failed: ' + (e.message || e));
+        } finally {
+            if (input) input.value = '';
+        }
+    }
+
+    toggleCompletionTrack(enabled = !this.showCompletionTrack) {
+        this.showCompletionTrack = !!enabled;
+        this.renderer?.setCompletionTrackVisible(this.showCompletionTrack);
+    }
+
+    async loadProduction() {
+        if (!this.currentWell) return;
+        GeoLoading.show('Loading production data...');
+        try {
+            this.productionData = await this._api('/wells/' + this.currentWell.id + '/production').catch(() => []);
+            this.productionDecline = await this._api('/wells/' + this.currentWell.id + '/production/decline-curve').catch(() => null);
+            this._renderProductionTable();
+            this._drawProductionCharts();
+            const eur = document.getElementById('productionEUR');
+            if (eur) {
+                const v = this.productionDecline?.eur_oil_bbl;
+                eur.textContent = Number.isFinite(v) ? `EUR: ${Math.round(v).toLocaleString()} bbl (${this.productionDecline?.best_model || 'n/a'})` : 'EUR: n/a';
+            }
+        } catch {}
+        finally { GeoLoading.hide(); }
+    }
+
+    _renderProductionTable() {
+        const el = document.getElementById('productionTable');
+        if (!el) return;
+        const rows = this.productionData || [];
+        if (!rows.length) {
+            el.innerHTML = '<p style="color:#8b949e">No production data</p>';
+            return;
+        }
+        const hdr = ['Date','Oil','Gas','Water','WCut%','GOR','BHP','WHP','Choke','CumOil','CumGas','CumWater'];
+        let html = '<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
+        html += hdr.map(h => `<th style="text-align:left;padding:6px;border-bottom:1px solid #30363d">${h}</th>`).join('');
+        html += '</tr></thead><tbody>';
+        for (const r of rows) {
+            const fmt = (v, n=2) => (v === null || v === undefined || v === '') ? '-' : Number(v).toFixed(n);
+            html += '<tr>' +
+                `<td style="padding:6px;border-bottom:1px solid #21262d">${r.date || ''}</td>` +
+                `<td style="padding:6px;border-bottom:1px solid #21262d">${fmt(r.oil_rate)}</td>` +
+                `<td style="padding:6px;border-bottom:1px solid #21262d">${fmt(r.gas_rate)}</td>` +
+                `<td style="padding:6px;border-bottom:1px solid #21262d">${fmt(r.water_rate)}</td>` +
+                `<td style="padding:6px;border-bottom:1px solid #21262d">${fmt(r.water_cut,1)}</td>` +
+                `<td style="padding:6px;border-bottom:1px solid #21262d">${fmt(r.gor,1)}</td>` +
+                `<td style="padding:6px;border-bottom:1px solid #21262d">${fmt(r.bhp,1)}</td>` +
+                `<td style="padding:6px;border-bottom:1px solid #21262d">${fmt(r.whp,1)}</td>` +
+                `<td style="padding:6px;border-bottom:1px solid #21262d">${fmt(r.choke_size,1)}</td>` +
+                `<td style="padding:6px;border-bottom:1px solid #21262d">${fmt(r.cumulative_oil,1)}</td>` +
+                `<td style="padding:6px;border-bottom:1px solid #21262d">${fmt(r.cumulative_gas,1)}</td>` +
+                `<td style="padding:6px;border-bottom:1px solid #21262d">${fmt(r.cumulative_water,1)}</td>` +
+                '</tr>';
+        }
+        html += '</tbody></table></div>';
+        el.innerHTML = html;
+    }
+
+    _drawProductionCharts() {
+        const draw = (canvasId, series, yLabel, overlay = null) => {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            canvas.width = canvas.parentElement?.clientWidth || 900;
+            const W = canvas.width, H = canvas.height;
+            const m = { top: 16, right: 16, bottom: 30, left: 52 };
+            const pw = W - m.left - m.right, ph = H - m.top - m.bottom;
+            ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, W, H);
+            const rows = this.productionData || [];
+            if (!rows.length) { ctx.fillStyle = '#8b949e'; ctx.fillText('No data', 20, 24); return; }
+            const xs = rows.map((_, i) => i);
+            const vals = series.flatMap(s => rows.map(r => Number(r[s.key])).filter(Number.isFinite));
+            if (!vals.length) return;
+            const ymin = Math.min(...vals), ymax = Math.max(...vals);
+            const sx = i => m.left + (i / Math.max(1, xs.length - 1)) * pw;
+            const sy = v => m.top + (1 - ((v - ymin) / ((ymax - ymin) || 1))) * ph;
+            ctx.strokeStyle = '#21262d'; ctx.strokeRect(m.left, m.top, pw, ph);
+            for (const s of series) {
+                ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.beginPath();
+                let started = false;
+                rows.forEach((r, i) => {
+                    const v = Number(r[s.key]);
+                    if (!Number.isFinite(v)) return;
+                    const x = sx(i), y = sy(v);
+                    if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+            }
+            if (overlay) {
+                ctx.setLineDash([5, 4]); ctx.strokeStyle = overlay.color || '#ffffff'; ctx.lineWidth = 2; ctx.beginPath();
+                let started = false;
+                rows.forEach((r, i) => {
+                    const p = overlay.lookup?.[r.date];
+                    if (!Number.isFinite(p)) return;
+                    const x = sx(i), y = sy(p);
+                    if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            ctx.fillStyle = '#c9d1d9'; ctx.font = '11px DM Sans'; ctx.fillText(yLabel, 8, 14);
+        };
+
+        const fitLookup = {};
+        for (const p of (this.productionDecline?.fitted_points || [])) fitLookup[p.date] = Number(p.q_fit);
+        draw('productionCanvas', [
+            { key: 'oil_rate', color: '#2ecc71' },
+            { key: 'gas_rate', color: '#e74c3c' },
+            { key: 'water_rate', color: '#3498db' },
+            { key: 'water_cut', color: '#f2cc60' },
+        ], 'Rates', { color: '#ffffff', lookup: fitLookup });
+        draw('productionPressureCanvas', [
+            { key: 'bhp', color: '#5bc0de' },
+            { key: 'whp', color: '#b46fff' },
+        ], 'Pressure (psi)');
+    }
+
+    async addProductionRecord() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        const r = await GeoModal.show({ title: 'Add Production Record', fields: [
+            { id: 'date', label: 'Date (YYYY-MM-DD)', value: new Date().toISOString().slice(0,10) },
+            { id: 'oil_rate', label: 'Oil Rate (bbl/d)', type: 'number', step: '0.01' },
+            { id: 'gas_rate', label: 'Gas Rate (mcf/d)', type: 'number', step: '0.01' },
+            { id: 'water_rate', label: 'Water Rate (bbl/d)', type: 'number', step: '0.01' },
+            { id: 'water_cut', label: 'Water Cut (%)', type: 'number', step: '0.01' },
+            { id: 'gor', label: 'GOR (scf/bbl)', type: 'number', step: '0.01' },
+            { id: 'bhp', label: 'BHP (psi)', type: 'number', step: '0.01' },
+            { id: 'whp', label: 'WHP (psi)', type: 'number', step: '0.01' },
+            { id: 'choke_size', label: 'Choke Size (64ths)', type: 'number', step: '0.01' },
+            { id: 'cumulative_oil', label: 'Cumulative Oil', type: 'number', step: '0.01' },
+            { id: 'cumulative_gas', label: 'Cumulative Gas', type: 'number', step: '0.01' },
+            { id: 'cumulative_water', label: 'Cumulative Water', type: 'number', step: '0.01' },
+            { id: 'notes', label: 'Notes' },
+        ]});
+        if (!r || !r.date) return;
+        await this._api('/wells/' + this.currentWell.id + '/production', { method: 'POST', body: JSON.stringify(r) });
+        GeoToast.success('Production record saved');
+        await this.loadProduction();
+    }
+
+    _initProductionCSVUpload() {
+        const input = document.getElementById('productionCsvFileInput');
+        if (!input || input._boundProd) return;
+        input._boundProd = true;
+        input.addEventListener('change', async () => {
+            const file = input.files?.[0];
+            if (!file || !this.currentWell) return;
+            const status = document.getElementById('productionUploadStatus');
+            if (status) status.textContent = 'Uploading ' + file.name + '...';
+            const formData = new FormData();
+            formData.append('file', file);
+            try {
+                const resp = await fetch('/api/wells/' + this.currentWell.id + '/production/upload-csv', { method: 'POST', body: formData, headers: { 'X-User-Role': this.currentRole || 'viewer' } });
+                const result = await resp.json();
+                if (!resp.ok) throw new Error(result?.detail || 'Upload failed');
+                if (status) status.textContent = 'Inserted ' + (result.inserted || 0) + ' rows';
+                GeoToast.success('Production CSV uploaded');
+                await this.loadProduction();
+            } catch (e) {
+                if (status) status.textContent = 'Upload failed';
+                GeoToast.error('Production CSV upload failed: ' + (e.message || e));
+            } finally {
+                input.value = '';
+            }
+        });
     }
 
     // ─── Mnemonic Remap ──────────────────────────────────────
@@ -4248,6 +5072,148 @@ class GeoLogApp {
             });
             return { depth: data[deptCurve.mnemonic] || [], values: data[mnemonic] || [] };
         } catch { return null; }
+    }
+
+    async runPermeabilityModels() {
+        if (!this.currentWell) return GeoToast.warn('Select a well first');
+        const model = document.getElementById('permModel')?.value || 'all';
+        const swir = parseFloat(document.getElementById('permSwir')?.value || '0.2');
+        const waterCut = parseFloat(document.getElementById('permWaterCut')?.value || '0');
+        const timurA = parseFloat(document.getElementById('permTimurA')?.value || '0.136');
+        const coatesC = parseFloat(document.getElementById('permCoatesC')?.value || '10000');
+        const sdrA = parseFloat(document.getElementById('permSdrA')?.value || '4');
+
+        GeoLoading.show('Computing permeability models...');
+        try {
+            const data = await this._api(`/wells/${this.currentWell.id}/permeability`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    model,
+                    swir: Number.isFinite(swir) ? swir : 0.2,
+                    water_cut: Number.isFinite(waterCut) ? waterCut : 0,
+                    timur_a: Number.isFinite(timurA) ? timurA : 0.136,
+                    coates_c: Number.isFinite(coatesC) ? coatesC : 10000,
+                    sdr_a: Number.isFinite(sdrA) ? sdrA : 4,
+                })
+            });
+            this.permResults = data;
+            this._renderPermeabilityResults(data);
+            GeoToast.success(`Permeability computed (${(data.models_computed || []).join(', ')})`);
+        } catch (e) {
+            GeoToast.error('Permeability failed: ' + (e.message || e));
+        } finally {
+            GeoLoading.hide();
+        }
+    }
+
+    applyPermeabilityToViewer(model = null) {
+        if (!this.permResults || !this.renderer) return GeoToast.warn('Run permeability first');
+        const chosen = model || (document.getElementById('permApplyModel')?.value || this.permResults.models_computed?.[0]);
+        const k = this.permResults?.k_values?.[chosen];
+        const d = this.permResults?.depth;
+        if (!k || !d || !k.length || d.length !== k.length) return GeoToast.warn('No model data to overlay');
+
+        this.renderer.depthData = d.slice();
+        this.renderer.curveData['PERM'] = k.map(v => (v == null || Number.isNaN(v)) ? NaN : Number(v));
+        this.curveConfig['PERM'] = { track: 4, color: '#ff7b72', scale: [0.01, Math.max(1, ...k.filter(v => Number.isFinite(v)) || [1000])], unit: 'mD', name: `PERM (${chosen.toUpperCase()})`, log: true };
+        this.renderer.curveConfig = this.curveConfig;
+        this.renderer.render();
+        GeoToast.success(`PERM (${chosen.toUpperCase()}) overlay added`);
+    }
+
+    _renderPermeabilityResults(data) {
+        const container = document.getElementById('permResults');
+        const curveCanvas = document.getElementById('permCurveCanvas');
+        const xplotCanvas = document.getElementById('permCrossplotCanvas');
+        const fziCanvas = document.getElementById('permFziCanvas');
+        if (!container || !curveCanvas || !xplotCanvas || !fziCanvas) return;
+
+        const models = data.models_computed || [];
+        const colors = { coates: '#58a6ff', timur: '#3fb950', sdr: '#d29922' };
+
+        const sel = document.getElementById('permApplyModel');
+        if (sel) sel.innerHTML = models.map(m => `<option value="${m}">${m.toUpperCase()}</option>`).join('');
+
+        let html = '<table class="petro-table"><tr><th>Model</th><th>Points</th><th>Min (mD)</th><th>Mean (mD)</th><th>Max (mD)</th></tr>';
+        for (const m of models) {
+            const s = data.summary?.[m] || {};
+            html += `<tr><td style="color:${colors[m] || '#c9d1d9'}">${m.toUpperCase()}</td><td>${s.count ?? 0}</td><td>${s.min ?? '—'}</td><td>${s.mean ?? '—'}</td><td>${s.max ?? '—'}</td></tr>`;
+        }
+        html += '</table>';
+        container.innerHTML = html;
+
+        this._plotPermCurve(curveCanvas, data.depth || [], data.k_values || {}, models, colors);
+        this._plotPermCrossplot(xplotCanvas, data.crossplot || {}, models, colors);
+        this._plotFziHistogram(fziCanvas, data.fzi || {}, models[0], colors);
+    }
+
+    _plotPermCurve(canvas, depth, kv, models, colors) {
+        const ctx = canvas.getContext('2d');
+        const W = canvas.parentElement.getBoundingClientRect().width || 800;
+        canvas.width = W * 2; canvas.height = 560; ctx.scale(2, 2);
+        const H = 280, pad = { top: 20, right: 20, bottom: 30, left: 55 }, pw = W - pad.left - pad.right, ph = H - pad.top - pad.bottom;
+        ctx.fillStyle = '#0a0e14'; ctx.fillRect(0, 0, W, H);
+        if (!depth?.length) return;
+        const dMin = Math.min(...depth), dMax = Math.max(...depth);
+        const allK = models.flatMap(m => (kv[m] || []).filter(v => Number.isFinite(v) && v > 0));
+        if (!allK.length) return;
+        const kMin = Math.log10(Math.max(1e-4, Math.min(...allK))), kMax = Math.log10(Math.max(...allK));
+        const sx = (k) => pad.left + ((Math.log10(Math.max(1e-4, k)) - kMin) / Math.max(1e-9, (kMax - kMin))) * pw;
+        const sy = (d) => pad.top + ((d - dMin) / Math.max(1e-9, (dMax - dMin))) * ph;
+        for (const m of models) {
+            ctx.strokeStyle = colors[m] || '#c9d1d9'; ctx.lineWidth = 1.2; ctx.beginPath();
+            let started = false;
+            const arr = kv[m] || [];
+            for (let i = 0; i < Math.min(arr.length, depth.length); i++) {
+                const v = arr[i];
+                if (!Number.isFinite(v) || v <= 0) continue;
+                const x = sx(v), y = sy(depth[i]);
+                if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+    }
+
+    _plotPermCrossplot(canvas, crossplot, models, colors) {
+        const model = models[0];
+        const cp = crossplot?.[model];
+        const ctx = canvas.getContext('2d');
+        const W = canvas.parentElement.getBoundingClientRect().width || 800;
+        canvas.width = W * 2; canvas.height = 560; ctx.scale(2, 2);
+        const H = 280, pad = { top: 20, right: 20, bottom: 30, left: 55 }, pw = W - pad.left - pad.right, ph = H - pad.top - pad.bottom;
+        ctx.fillStyle = '#0a0e14'; ctx.fillRect(0, 0, W, H);
+        if (!cp?.phi?.length) return;
+        const xMin = Math.min(...cp.phi), xMax = Math.max(...cp.phi);
+        const yLog = cp.k.map(v => Math.log10(Math.max(1e-4, v)));
+        const yMin = Math.min(...yLog), yMax = Math.max(...yLog);
+        const sx = (x) => pad.left + ((x - xMin) / Math.max(1e-9, (xMax - xMin))) * pw;
+        const sy = (y) => pad.top + ph - ((y - yMin) / Math.max(1e-9, (yMax - yMin))) * ph;
+        ctx.fillStyle = colors[model] || '#58a6ff';
+        cp.phi.forEach((x, i) => { const y = yLog[i]; ctx.fillRect(sx(x), sy(y), 2, 2); });
+        if (cp.k_fit?.length === cp.phi.length) {
+            ctx.strokeStyle = '#f85149'; ctx.beginPath();
+            cp.phi.forEach((x, i) => { const y = Math.log10(Math.max(1e-4, cp.k_fit[i])); if (i===0) ctx.moveTo(sx(x), sy(y)); else ctx.lineTo(sx(x), sy(y)); });
+            ctx.stroke();
+        }
+        ctx.fillStyle = '#c9d1d9'; ctx.font = '12px Geologica';
+        ctx.fillText(`${model.toUpperCase()}  R²=${cp.r2 ?? 'n/a'}`, pad.left + 8, pad.top + 14);
+    }
+
+    _plotFziHistogram(canvas, fzi, model, colors) {
+        const hist = fzi?.[model]?.histogram || [];
+        const ctx = canvas.getContext('2d');
+        const W = canvas.parentElement.getBoundingClientRect().width || 800;
+        canvas.width = W * 2; canvas.height = 400; ctx.scale(2, 2);
+        const H = 200, pad = { top: 20, right: 20, bottom: 25, left: 40 }, pw = W - pad.left - pad.right, ph = H - pad.top - pad.bottom;
+        ctx.fillStyle = '#0a0e14'; ctx.fillRect(0, 0, W, H);
+        if (!hist.length) return;
+        const maxC = Math.max(...hist.map(h => h.count), 1);
+        const bw = pw / hist.length;
+        ctx.fillStyle = colors[model] || '#d29922';
+        hist.forEach((h, i) => {
+            const bh = (h.count / maxC) * ph;
+            ctx.fillRect(pad.left + i * bw + 1, pad.top + ph - bh, Math.max(2, bw - 2), bh);
+        });
     }
 
     // ─── Print Report ────────────────────────────────────────
@@ -4414,12 +5380,86 @@ class GeoLogApp {
         finally { GeoLoading.hide(); }
     }
 
-    toggleLithTrack() {
+    async toggleLithTrack(forceOn = false) {
         if (!this.renderer) return;
-        this._showLithTrack = !this._showLithTrack;
+        this._showLithTrack = forceOn ? true : !this._showLithTrack;
         this.renderer._showLithology = this._showLithTrack;
-        this.renderer.render();
-        GeoToast.info('Lith track: ' + (this._showLithTrack ? 'ON' : 'OFF'));
+
+        if (!this._showLithTrack) {
+            this.renderer.setLithologyData(null);
+            this._renderLithologyLegend();
+            this.renderer.render();
+            GeoToast.info('Lith track: OFF');
+            return;
+        }
+
+        if (!this.currentWell) {
+            GeoToast.warn('Load a well first');
+            this._showLithTrack = false;
+            this.renderer._showLithology = false;
+            return;
+        }
+
+        try {
+            GeoLoading.show('Classifying lithology...');
+            const grMin = parseFloat(document.getElementById('lithGrMin')?.value || '0');
+            const grMax = parseFloat(document.getElementById('lithGrMax')?.value || '150');
+            const method = document.getElementById('lithMethod')?.value || 'gr_rhob_nphi';
+            this._lithologyData = await this._api(`/wells/${this.currentWell.id}/lithology`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    log_run_id: this.currentLogRun?.id,
+                    gr_min: grMin,
+                    gr_max: grMax,
+                    method,
+                }),
+            });
+            this.renderer.setLithologyData(this._lithologyData);
+            this._renderLithologyLegend();
+            GeoToast.info('Lith track: ON');
+        } catch (e) {
+            this._showLithTrack = false;
+            this.renderer._showLithology = false;
+            this.renderer.setLithologyData(null);
+            this._renderLithologyLegend();
+            GeoToast.error('Lithology failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    }
+
+    _renderLithologyLegend() {
+        const el = document.getElementById('lithologyLegend');
+        if (!el) return;
+        if (!this._showLithTrack || !this._lithologyData?.summary) {
+            el.style.display = 'none';
+            el.innerHTML = '';
+            return;
+        }
+        const items = [
+            { code: 1, name: 'Sand', color: '#F5DEB3' },
+            { code: 2, name: 'Shaly sand', color: '#D2B48C' },
+            { code: 3, name: 'Shale', color: '#808080' },
+            { code: 4, name: 'Limestone', color: '#87CEEB' },
+            { code: 5, name: 'Dolomite', color: '#FFB6C1' },
+            { code: 6, name: 'Anhydrite', color: '#DDA0DD' },
+            { code: 7, name: 'Salt', color: '#FFFFFF' },
+            { code: 8, name: 'Coal', color: '#2F2F2F' },
+        ];
+        const pct = this._lithologyData.summary || {};
+        const pctKey = {
+            1: 'sand', 2: 'shaly_sand', 3: 'shale', 4: 'limestone',
+            5: 'dolomite', 6: 'anhydrite', 7: 'salt', 8: 'coal'
+        };
+        let html = '<div style="font-weight:600;margin-bottom:6px">Lithology Legend</div><div style="display:flex;flex-wrap:wrap;gap:8px">';
+        for (const it of items) {
+            html += `<div style="display:flex;align-items:center;gap:6px;padding:2px 6px;border:1px solid #30363d;border-radius:5px">` +
+                `<span style="display:inline-block;width:12px;height:12px;background:${it.color};border:1px solid #475569"></span>` +
+                `<span>${it.code} ${it.name}${pct[pctKey[it.code]] != null ? ` (${pct[pctKey[it.code]]}%)` : ''}</span></div>`;
+        }
+        html += '</div>';
+        el.innerHTML = html;
+        el.style.display = 'block';
     }
 
     async runCurveFilter(type) {
@@ -5922,6 +6962,8 @@ class GeoLogApp {
             { label: 'Matrix Plot', icon: 'grid-3x3', action: "app.switchView('matrix')" },
             { label: 'Audit Trail', icon: 'file-text', action: "app.switchView('audit')" },
             { label: 'Upload LAS', icon: 'upload', action: "app.uploadLAS()" },
+            { label: 'Upload DLIS', icon: 'file-up', action: "app.uploadDLIS()" },
+            { label: 'Upload LIS', icon: 'file-up', action: "app.uploadLIS()" },
             { label: 'Export Report', icon: 'file-down', action: "app.exportReport()" },
             { label: 'Export PNG', icon: 'image', action: "app._exportPNG()" },
             { label: 'Keyboard Shortcuts', icon: 'keyboard', action: "app.openShortcutHelp()", shortcut: '?' },
@@ -6140,6 +7182,8 @@ class GeoLogApp {
                     { label: 'Edit Well', icon: 'pencil', action: `app.editWell(${wid})` },
                     { separator: true },
                     { label: 'Upload LAS', icon: 'upload', action: `app.uploadLASForWell(${wid})` },
+                    { label: 'Upload DLIS', icon: 'file-up', action: `app.uploadDLISForWell(${wid})` },
+                    { label: 'Upload LIS', icon: 'file-up', action: `app.uploadLISForWell(${wid})` },
                     { label: 'Export Report', icon: 'file-down', action: `app.currentWell=${wid}; app.exportReport()` },
                     { label: 'Export Package', icon: 'package', action: `app._exportPackage(${wid})` },
                     { separator: true },
@@ -6163,28 +7207,15 @@ class GeoLogApp {
     }
 
     async uploadLASForWell(wid) {
-        // Upload LAS to specific well
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.las';
-        input.onchange = async () => {
-            const file = input.files[0];
-            if (!file) return;
-            GeoLoading.show(`Uploading ${file.name}...`);
-            const fd = new FormData();
-            fd.append('file', file);
-            try {
-                const resp = await fetch(`/api/wells/${wid}/upload-las`, { method: 'POST', body: fd });
-                if (resp.ok) {
-                    GeoToast.success(`Uploaded to well #${wid}`);
-                    await this.loadProjects();
-                } else {
-                    GeoToast.error('Upload failed');
-                }
-            } catch { GeoToast.error('Upload failed'); }
-            GeoLoading.hide();
-        };
-        input.click();
+        return this._uploadLogFormatForWell(wid, 'las');
+    }
+
+    async uploadDLISForWell(wid) {
+        return this._uploadLogFormatForWell(wid, 'dlis');
+    }
+
+    async uploadLISForWell(wid) {
+        return this._uploadLogFormatForWell(wid, 'lis');
     }
 
     async editWell(wid) {
@@ -6581,11 +7612,13 @@ class GeoLogApp {
     async runSeismic() {
         if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
         const freq = document.getElementById('seismicFreq')?.value || 30;
+        const polarity = document.getElementById('seismicPolarity')?.value || 'normal';
+        const phase = parseInt(document.getElementById('seismicPhase')?.value || '0', 10);
         GeoLoading.show('Generating synthetic seismogram...');
         try {
             const data = await this._api(`/wells/${this.currentWell}/synthetic-seismogram`, {
                 method: 'POST',
-                body: JSON.stringify({ frequency: parseFloat(freq) })
+                body: JSON.stringify({ wavelet_freq: parseFloat(freq), polarity, phase })
             });
             this._renderSeismic(data);
         } catch (e) {
@@ -6597,7 +7630,7 @@ class GeoLogApp {
         const container = document.getElementById('seismicResults');
         if (!container) return;
 
-        let html = `<div style="display:flex;gap:20px;margin-bottom:16px">
+        let html = `<div style="display:flex;gap:20px;margin-bottom:16px;flex-wrap:wrap">
             <div class="stats-card" style="flex:1">
                 <h4 style="color:var(--accent)">Acoustic Impedance</h4>
                 <div class="petro-stat"><span>Min</span><strong>${data.stats.ai_min}</strong></div>
@@ -6612,11 +7645,19 @@ class GeoLogApp {
             </div>
             <div class="stats-card" style="flex:1">
                 <h4 style="color:var(--accent)">Wavelet</h4>
-                <div class="petro-stat"><span>Frequency</span><strong>${data.params.frequency} Hz</strong></div>
+                <div class="petro-stat"><span>Frequency</span><strong>${data.params.wavelet_freq} Hz</strong></div>
+                <div class="petro-stat"><span>Polarity</span><strong>${data.params.polarity}</strong></div>
+                <div class="petro-stat"><span>Phase</span><strong>${data.params.phase}°</strong></div>
                 <div class="petro-stat"><span>Type</span><strong>Ricker</strong></div>
             </div>
+            <div class="stats-card" style="flex:1">
+                <h4 style="color:var(--accent)">Time-Depth</h4>
+                <div class="petro-stat"><span>TWT Min</span><strong>${data.stats.twt_min_s}s</strong></div>
+                <div class="petro-stat"><span>TWT Max</span><strong>${data.stats.twt_max_s}s</strong></div>
+                <div class="petro-stat"><span>Samples</span><strong>${data.params.n_points}</strong></div>
+            </div>
         </div>`;
-        html += '<canvas id="seismicCanvas" style="width:100%;height:500px;background:var(--bg-primary);border-radius:8px"></canvas>';
+        html += '<canvas id="seismicCanvas" style="width:100%;height:560px;background:var(--bg-primary);border-radius:8px"></canvas>';
 
         container.innerHTML = html;
         container.className = '';
@@ -6629,9 +7670,9 @@ class GeoLogApp {
             const ctx = canvas.getContext('2d');
             const W = canvas.parentElement.getBoundingClientRect().width;
             canvas.width = W * 2;
-            canvas.height = 1000;
+            canvas.height = 1120;
             ctx.scale(2, 2);
-            const H = 500;
+            const H = 560;
             const pad = { top: 20, right: 20, bottom: 40, left: 60 };
             const pw = W - pad.left - pad.right;
             const ph = H - pad.top - pad.bottom;
@@ -6640,6 +7681,7 @@ class GeoLogApp {
             ctx.fillRect(0, 0, W, H);
 
             const depth = data.depth;
+            const twt = data.twt || [];
             const dMin = Math.min(...depth);
             const dMax = Math.max(...depth);
 
@@ -6655,24 +7697,38 @@ class GeoLogApp {
                 ctx.fillText((dMin + (dMax - dMin) / 5 * i).toFixed(0), pad.left - 8, y + 4);
             }
 
-            // AI track (left third)
-            const aiW = pw / 3;
+            // AI track (left quarter)
+            const aiW = pw * 0.25;
             const aiMin = data.stats.ai_min;
             const aiMax = data.stats.ai_max;
             ctx.strokeStyle = '#5b8fb9';
             ctx.lineWidth = 1.5;
             ctx.beginPath();
             for (let i = 0; i < depth.length; i++) {
-                const x = pad.left + ((data.ai[i] - aiMin) / (aiMax - aiMin)) * aiW;
+                const x = pad.left + ((data.ai[i] - aiMin) / ((aiMax - aiMin) || 1)) * aiW;
                 const y = pad.top + ((depth[i] - dMin) / (dMax - dMin)) * ph;
                 if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             }
             ctx.stroke();
 
-            // Synthetic trace (center) — wiggle display
-            const synthW = pw / 3;
-            const synthCenter = pad.left + aiW + synthW / 2;
-            const synthMax = Math.max(...data.synthetic.map(Math.abs));
+            // Synthetic trace (center-left) — wiggle + variable density
+            const synthW = pw * 0.35;
+            const synthLeft = pad.left + aiW + 12;
+            const synthCenter = synthLeft + synthW / 2;
+            const synthMax = Math.max(...data.synthetic.map(Math.abs)) || 1;
+
+            // Variable density background
+            for (let i = 1; i < depth.length; i++) {
+                const amp = data.synthetic[i] / synthMax;
+                const shade = Math.floor(128 + amp * 110);
+                ctx.strokeStyle = `rgb(${shade},${shade},${shade})`;
+                const y = pad.top + ((depth[i] - dMin) / (dMax - dMin)) * ph;
+                ctx.beginPath();
+                ctx.moveTo(synthLeft, y);
+                ctx.lineTo(synthLeft + synthW, y);
+                ctx.stroke();
+            }
+
             ctx.strokeStyle = '#d4a853';
             ctx.lineWidth = 1.5;
             ctx.beginPath();
@@ -6690,11 +7746,50 @@ class GeoLogApp {
             for (let i = 0; i < depth.length; i++) {
                 const x = synthCenter + (data.synthetic[i] / synthMax) * synthW / 2;
                 const y = pad.top + ((depth[i] - dMin) / (dMax - dMin)) * ph;
-                ctx.lineTo(x, y);
+                ctx.lineTo(Math.max(x, synthCenter), y);
             }
             ctx.lineTo(synthCenter, pad.top + ph);
             ctx.closePath();
             ctx.fill();
+
+            // TWT-depth curve (right-mid)
+            const twtW = pw * 0.2;
+            const twtX0 = synthLeft + synthW + 14;
+            const twtMin = twt.length ? Math.min(...twt) : 0;
+            const twtMax = twt.length ? Math.max(...twt) : 1;
+            ctx.strokeStyle = '#79c0ff';
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            for (let i = 0; i < depth.length; i++) {
+                const tx = twtX0 + (((twt[i] || 0) - twtMin) / ((twtMax - twtMin) || 1)) * twtW;
+                const y = pad.top + ((depth[i] - dMin) / (dMax - dMin)) * ph;
+                if (i === 0) ctx.moveTo(tx, y); else ctx.lineTo(tx, y);
+            }
+            ctx.stroke();
+
+            // Wavelet display (far right)
+            const wltW = pw * 0.18;
+            const wltX0 = twtX0 + twtW + 14;
+            const wlt = data.wavelet?.amplitude || [];
+            const wltT = data.wavelet?.time || [];
+            const wltCenterX = wltX0 + wltW / 2;
+            const wltMax = Math.max(...wlt.map(Math.abs), 1e-9);
+            const wltTop = pad.top + 40;
+            const wltH = ph - 80;
+            ctx.strokeStyle = '#ff7b72';
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            for (let i = 0; i < wlt.length; i++) {
+                const x = wltCenterX + (wlt[i] / wltMax) * (wltW / 2 - 2);
+                const y = wltTop + (i / Math.max(1, wlt.length - 1)) * wltH;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(255,123,114,0.3)';
+            ctx.beginPath();
+            ctx.moveTo(wltCenterX, wltTop);
+            ctx.lineTo(wltCenterX, wltTop + wltH);
+            ctx.stroke();
 
             // Labels
             ctx.fillStyle = '#9aa8b8';
@@ -6702,6 +7797,16 @@ class GeoLogApp {
             ctx.textAlign = 'center';
             ctx.fillText('AI', pad.left + aiW / 2, pad.top - 5);
             ctx.fillText('Synthetic', synthCenter, pad.top - 5);
+            ctx.fillText('TWT(s)', twtX0 + twtW / 2, pad.top - 5);
+            ctx.fillText('Wavelet', wltCenterX, pad.top - 5);
+
+            if (wltT.length) {
+                ctx.textAlign = 'left';
+                ctx.font = '10px JetBrains Mono';
+                ctx.fillStyle = '#6b7a8d';
+                ctx.fillText(`${(Math.min(...wltT) * 1000).toFixed(1)} ms`, wltX0, wltTop + wltH + 14);
+                ctx.fillText(`${(Math.max(...wltT) * 1000).toFixed(1)} ms`, wltX0 + wltW - 46, wltTop + wltH + 14);
+            }
         }, 100);
     }
 

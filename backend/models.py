@@ -1,6 +1,6 @@
 """Database models for well log viewer."""
 import datetime
-from sqlalchemy import Column, Integer, Float, String, Text, DateTime, ForeignKey, LargeBinary
+from sqlalchemy import Column, Integer, Float, String, Text, Date, DateTime, ForeignKey, LargeBinary
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -45,6 +45,7 @@ class Well(Base):
     zones = relationship("Zone", back_populates="well", cascade="all, delete-orphan")
     dst_tests = relationship("DSTTest", back_populates="well", cascade="all, delete-orphan")
     rft_points = relationship("RFTPoint", back_populates="well", cascade="all, delete-orphan")
+    completion_data = relationship("CompletionData", back_populates="well", cascade="all, delete-orphan")
 
 
 class LogRun(Base):
@@ -152,6 +153,45 @@ class RFTPoint(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     well = relationship("Well", back_populates="rft_points")
+
+
+class CompletionData(Base):
+    __tablename__ = "completion_data"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, index=True)
+    depth_top = Column(Float, nullable=False)
+    depth_base = Column(Float, nullable=False)
+    component_type = Column(String(50), nullable=False)
+    size = Column(String(100), default="")
+    description = Column(Text, default="")
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    well = relationship("Well", back_populates="completion_data")
+
+
+class ProductionData(Base):
+    __tablename__ = "production_data"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)
+    oil_rate = Column(Float, nullable=True)          # bbl/d
+    gas_rate = Column(Float, nullable=True)          # mcf/d
+    water_rate = Column(Float, nullable=True)        # bbl/d
+    water_cut = Column(Float, nullable=True)         # %
+    gor = Column(Float, nullable=True)               # scf/bbl
+    bhp = Column(Float, nullable=True)               # psi
+    whp = Column(Float, nullable=True)               # psi
+    choke_size = Column(Float, nullable=True)        # 64ths
+    cumulative_oil = Column(Float, nullable=True)
+    cumulative_gas = Column(Float, nullable=True)
+    cumulative_water = Column(Float, nullable=True)
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    well = relationship("Well")
 
 
 class Zone(Base):

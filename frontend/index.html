@@ -66,6 +66,7 @@
                 <summary class="nav-btn nav-group-trigger" title="Utilities, exports, mapping, and automation">Tools</summary>
                 <div class="nav-group-menu">
                     <button class="nav-btn" data-view="tools" title="General utilities and helper workflows"><i data-lucide="wrench"></i><span>Tools</span></button>
+                    <button class="nav-btn" data-view="production" title="Production rates, pressures, and decline curve analysis"><i data-lucide="line-chart"></i><span>Production</span></button>
                     <button class="nav-btn" data-view="corecal" title="Core calibration — depth shift and porosity/permeability transforms"><i data-lucide="target"></i><span>Core Cal</span></button>
                     <button class="nav-btn" data-view="qcautofix" title="Enhanced QC with auto-fix suggestions"><i data-lucide="sparkles"></i><span>QC Fix</span></button>
                     <button class="nav-btn" data-view="calculator" title="Quick petrophysical and engineering calculations"><i data-lucide="function-square"></i><span>Calc</span></button>
@@ -159,6 +160,8 @@
                         </button>
                         <div class="btn-group-menu">
                             <button onclick="app.uploadLAS()"><i data-lucide="upload"></i> Upload LAS</button>
+                            <button onclick="app.uploadDLIS()"><i data-lucide="file-up"></i> Upload DLIS</button>
+                            <button onclick="app.uploadLIS()"><i data-lucide="file-up"></i> Upload LIS</button>
                             <button onclick="app.openBulkImportWizard()"><i data-lucide="files"></i> Bulk Import</button>
                             <button onclick="app.editCurrentWell()"><i data-lucide="pencil"></i> Edit Well</button>
                         </div>
@@ -218,14 +221,17 @@
                     <input type="number" id="depthBottom" step="10" class="depth-input">
                 </div>
                 <span class="toolbar-hint">🖱️ Scroll to zoom • Drag to pan</span>
-                <button class="btn-sm" onclick="app.toggleLithTrack()" title="Toggle lithology track">
-                    <i data-lucide="paintbrush"></i> Lith
+                <button class="btn-sm" id="btnLithTrack" onclick="app.toggleLithTrack()" title="Toggle lithology track">
+                    <i data-lucide="paintbrush"></i> Lithology
                 </button>
                 <button class="btn-sm" onclick="document.getElementById('bottomPanels').style.display = document.getElementById('bottomPanels').style.display === 'none' ? 'grid' : 'none'" title="Toggle details panels">
                     <i data-lucide="panel-bottom"></i> Details
                 </button>
                 <button class="btn-sm" id="editModeToggle" title="Interactive curve edit mode">
                     <i data-lucide="pen-line"></i> Edit Mode
+                </button>
+                <button class="btn-sm" id="overlayToggleBtn" title="Compare same curve across two runs">
+                    <i data-lucide="layers-3"></i> Overlay
                 </button>
                 <div class="toolbar-group">
                     <label>Edit Curve</label>
@@ -265,6 +271,22 @@
                             <input type="number" id="maxPointsInput" class="depth-input" min="500" max="20000" step="500" value="3000" style="width:74px" aria-label="Max points">
                         </div>
                     </div>
+                    <div class="toolbar-group" title="Lithology classification settings">
+                        <label>GR Min</label>
+                        <input type="number" id="lithGrMin" class="depth-input" value="0" step="1" style="width:70px">
+                    </div>
+                    <div class="toolbar-group" title="Lithology classification settings">
+                        <label>GR Max</label>
+                        <input type="number" id="lithGrMax" class="depth-input" value="150" step="1" style="width:70px">
+                    </div>
+                    <div class="toolbar-group" title="Lithology method">
+                        <label>Method</label>
+                        <select id="lithMethod" class="depth-select" style="min-width:130px">
+                            <option value="gr_rhob_nphi" selected>GR+RHOB+NPHI</option>
+                            <option value="crossplot">Crossplot</option>
+                            <option value="gr_only">GR only</option>
+                        </select>
+                    </div>
                 </div>
             </div>
 
@@ -272,10 +294,21 @@
             <div class="log-container" id="logDropZone">
                 <canvas id="logCanvas"></canvas>
             </div>
+            <div id="overlayPanel" style="display:none;margin-top:10px;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:8px;gap:10px;align-items:flex-end;flex-wrap:wrap">
+                <div class="toolbar-group"><label>Run A</label><select id="overlayRunA" class="depth-select" style="min-width:180px"></select></div>
+                <div class="toolbar-group"><label>Run B</label><select id="overlayRunB" class="depth-select" style="min-width:180px"></select></div>
+                <div class="toolbar-group"><label>Curve</label><select id="overlayCurve" class="depth-select" style="min-width:90px"></select></div>
+                <div class="toolbar-group"><label>Run B Color</label><input id="overlayColor" type="color" value="#ff3b30" style="height:34px"></div>
+                <div class="toolbar-group"><label>Opacity</label><input id="overlayOpacity" type="range" min="5" max="100" step="5" value="50"><span id="overlayOpacityLabel" class="toolbar-hint">50%</span></div>
+                <div class="toolbar-group"><label><input id="overlayShowDiff" type="checkbox"> Show Difference</label></div>
+                <div class="toolbar-group"><button class="btn-sm" id="overlayClearBtn"><i data-lucide="x"></i> Clear</button></div>
+                <div id="overlayLegend" class="toolbar-hint" style="min-width:220px"></div>
+            </div>
             <div id="editValuePopover" style="display:none;position:fixed;z-index:99999;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:6px;box-shadow:0 8px 20px rgba(0,0,0,0.4)">
                 <input id="editValueInput" type="text" placeholder="new value / blank=null" style="width:170px;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:6px 8px">
                 <button class="btn-sm" id="editValueApplyBtn" style="margin-left:6px">Apply</button>
             </div>
+            <div id="lithologyLegend" style="display:none;margin-top:8px;padding:8px;background:#111827;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;font-size:12px"></div>
 
             <!-- Bottom Panels (collapsed by default for max log area) -->
             <div class="bottom-panels" id="bottomPanels" style="display:none">
@@ -370,12 +403,9 @@
                     <div class="form-row"><label>m (cementation)</label><input type="number" id="archM" value="2" step="0.1"></div>
                     <div class="form-row"><label>n (saturation exp)</label><input type="number" id="archN" value="2" step="0.1"></div>
                     <div class="form-row"><label>Rw (ohm·m)</label><input type="number" id="archRw" value="0.1" step="0.01"></div>
-                    <h3 style="margin-top:10px">Template Presets</h3>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-                        <button class="btn-sm" onclick="app.applyPetroTemplate('sandstone')">Sandstone</button>
-                        <button class="btn-sm" onclick="app.applyPetroTemplate('carbonate')">Carbonate</button>
-                        <button class="btn-sm" onclick="app.applyPetroTemplate('shaly_sand')">Shaly Sand</button>
-                    </div>
+                    <h3 style="margin-top:10px">Workflow Templates</h3>
+                    <div id="templatePreview" style="font-size:12px;color:#8b949e;margin:6px 0 10px 0">Select a template to preview changes.</div>
+                    <div id="templateCards" style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:10px"></div>
                     <h3>Cutoffs</h3>
                     <div class="form-row"><label>Vsh max</label><input type="number" id="cutVsh" value="0.35" step="0.01"></div>
                     <div class="form-row"><label>PHIE min</label><input type="number" id="cutPhie" value="0.10" step="0.01"></div>
@@ -538,6 +568,35 @@
                     <button class="btn-primary" onclick="app.saveDepthShift()"><i data-lucide="save"></i> Apply & Save</button>
                 </div>
 
+                <!-- Rw Estimation -->
+                <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:16px">
+                    <h4><i data-lucide="droplets"></i> Rw Estimation</h4>
+                    <p style="color:#8b949e;font-size:12px">Estimate formation water resistivity via SP, Ro, Hingle, or all methods</p>
+                    <div class="form-row"><label>Method</label>
+                        <select id="rwMethod" class="depth-select">
+                            <option value="all" selected>All</option>
+                            <option value="sp">SP</option>
+                            <option value="ro">Ro (clean zone)</option>
+                            <option value="hingle">Hingle</option>
+                        </select>
+                    </div>
+                    <div class="form-row"><label>Rmf (ohm·m)</label><input type="number" id="rwRmf" value="0.12" step="0.001"></div>
+                    <div class="form-row"><label>Temp</label><input type="number" id="rwTemp" value="180" step="0.1"></div>
+                    <div class="form-row"><label>Temp Unit</label>
+                        <select id="rwTempUnit" class="depth-select"><option value="F" selected>°F</option><option value="C">°C</option></select>
+                    </div>
+                    <div class="form-row"><label>SSP (mV)</label><input type="number" id="rwSsp" value="-50" step="1"></div>
+                    <div class="form-row"><label>Rt clean (ohm·m)</label><input type="number" id="rwRtClean" value="5" step="0.01"></div>
+                    <div class="form-row"><label>Phi clean (v/v)</label><input type="number" id="rwPhiClean" value="0.25" step="0.01"></div>
+                    <div class="form-row"><label>m exponent</label><input type="number" id="rwM" value="2.0" step="0.1"></div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+                        <button class="btn-primary" onclick="app.runRwEstimation()"><i data-lucide="play"></i> Estimate Rw</button>
+                        <button class="btn-sm" onclick="app.applyRecommendedRw()"><i data-lucide="check-circle"></i> Use this Rw</button>
+                    </div>
+                    <div id="rwResults" style="margin-top:10px;font-size:12px;color:#8b949e"></div>
+                    <div style="margin-top:10px"><canvas id="rwHingleCanvas" style="width:100%;height:220px;background:#0d1117;border-radius:8px"></canvas></div>
+                </div>
+
                 <!-- Curve Splice -->
                 <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:16px">
                     <h4><i data-lucide="scissors"></i> Curve Splice / Merge</h4>
@@ -578,6 +637,25 @@
                     <input type="file" id="rftCsvFileInput" accept=".csv" style="display:none">
                     <div id="rftUploadStatus" style="margin-top:6px;font-size:12px;color:#8b949e"></div>
                     <div style="margin-top:10px"><canvas id="rftCanvas" width="600" height="320"></canvas></div>
+                    <div id="rftAnalysisSummary" style="margin-top:10px;font-size:12px;color:#c9d1d9"></div>
+                    <div id="rftContactsTable" style="margin-top:10px"></div>
+                </div>
+
+                <!-- Completion Schematic -->
+                <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:16px">
+                    <h4><i data-lucide="construction"></i> Completion</h4>
+                    <p style="color:#8b949e;font-size:12px">Completion equipment + schematic track</p>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
+                        <button class="btn-sm" onclick="app.addCompletionComponent()"><i data-lucide="plus"></i> Add Component</button>
+                        <button class="btn-sm" onclick="document.getElementById('completionCsvFileInput').click()"><i data-lucide="upload"></i> Upload CSV</button>
+                        <button class="btn-sm" onclick="app.loadCompletion()"><i data-lucide="refresh-cw"></i> Refresh</button>
+                    </div>
+                    <div style="margin-top:8px;color:#c9d1d9;font-size:12px">
+                        <label><input type="checkbox" id="completionTrackToggle" checked> Show completion track in viewer</label>
+                    </div>
+                    <input type="file" id="completionCsvFileInput" accept=".csv" style="display:none">
+                    <div id="completionUploadStatus" style="margin-top:6px;font-size:12px;color:#8b949e"></div>
+                    <div id="completionList" style="margin-top:8px;max-height:220px;overflow-y:auto;font-size:12px"></div>
                 </div>
 
                 <!-- Mnemonic Remap -->
@@ -612,6 +690,30 @@
                 </div>
 
                 <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:16px">
+                    <h4><i data-lucide="droplets"></i> Permeability Models</h4>
+                    <p style="color:#8b949e;font-size:12px">Coates, Timur, SDR + poro-perm crossplot + FZI</p>
+                    <div class="form-row"><label>Model</label>
+                        <select id="permModel" class="depth-select">
+                            <option value="all">All</option><option value="coates">Coates</option><option value="timur">Timur</option><option value="sdr">SDR (NMR)</option>
+                        </select>
+                    </div>
+                    <div class="form-row"><label>Swir</label><input type="number" id="permSwir" value="0.2" step="0.01"></div>
+                    <div class="form-row"><label>Water cut</label><input type="number" id="permWaterCut" value="0.0" step="0.01"></div>
+                    <div class="form-row"><label>Timur a</label><input type="number" id="permTimurA" value="0.136" step="0.001"></div>
+                    <div class="form-row"><label>Coates C</label><input type="number" id="permCoatesC" value="10000" step="100"></div>
+                    <div class="form-row"><label>SDR a</label><input type="number" id="permSdrA" value="4" step="0.1"></div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+                        <button class="btn-primary" onclick="app.runPermeabilityModels()"><i data-lucide="play"></i> Run</button>
+                        <select id="permApplyModel" class="depth-select" style="max-width:130px"></select>
+                        <button class="btn-sm" onclick="app.applyPermeabilityToViewer()"><i data-lucide="layers"></i> Overlay PERM</button>
+                    </div>
+                    <div id="permResults" style="margin-top:10px;font-size:12px;color:#8b949e"></div>
+                    <div style="margin-top:10px"><canvas id="permCurveCanvas" style="width:100%;height:280px;background:#0d1117;border-radius:8px"></canvas></div>
+                    <div style="margin-top:10px"><canvas id="permCrossplotCanvas" style="width:100%;height:280px;background:#0d1117;border-radius:8px"></canvas></div>
+                    <div style="margin-top:10px"><canvas id="permFziCanvas" style="width:100%;height:200px;background:#0d1117;border-radius:8px"></canvas></div>
+                </div>
+
+                <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:16px">
                     <h4><i data-lucide="scan"></i> Auto-Pick Formation Tops</h4>
                     <p style="color:#8b949e;font-size:12px">Detect boundaries from curve inflection</p>
                     <div class="form-row"><label>Curve</label><select id="autoPickCurve" class="depth-select"><option value="GR">GR</option><option value="RT">RT</option></select></div>
@@ -634,6 +736,20 @@
                     <button class="btn-sm" onclick="app.viewTrajectory()">View Path</button>
                     <div id="trajectoryStatus" style="margin-top:8px;font-size:12px;color:#8b949e"></div>
                 </div>
+
+                <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:16px">
+                    <h4><i data-lucide="shield-alert"></i> LQC Shoulder-Bed Correction</h4>
+                    <p style="color:#8b949e;font-size:12px">Thin-bed correction with bad-hole and invasion diagnostics</p>
+                    <div class="form-row"><label>Curve</label><select id="lqcCurveSelect" class="depth-select"></select></div>
+                    <div class="form-row"><label>Thin-bed threshold (ft)</label><input type="number" id="lqcBedThreshold" value="2" step="0.1" min="0.1"></div>
+                    <div class="form-row"><label>Method</label><select id="lqcMethod" class="depth-select"><option value="linear">Linear</option><option value="simandoux">Simandoux</option></select></div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+                        <button class="btn-primary" onclick="app.runLQCShoulderBedCorrection()"><i data-lucide="play"></i> Run LQC</button>
+                        <label style="display:flex;align-items:center;gap:6px;color:#c9d1d9;font-size:12px"><input type="checkbox" id="lqcToggleCorrected" onchange="app.toggleLQCCorrected(this.checked)"> Show corrected curve</label>
+                    </div>
+                    <div id="lqcSummary" style="margin-top:10px;font-size:12px;color:#8b949e">Run LQC to see summary.</div>
+                    <div id="lqcIntervals" style="margin-top:10px;max-height:220px;overflow-y:auto;font-size:12px;color:#c9d1d9"></div>
+                </div>
                 </div>
 
                 <!-- Log Run Overlay -->
@@ -646,6 +762,29 @@
                     <button class="btn-primary" onclick="app.renderOverlay()"><i data-lucide="eye"></i> Overlay</button>
                     <div style="margin-top:10px"><canvas id="overlayCanvas" width="600" height="400"></canvas></div>
                 </div>
+            </div>
+        </div>
+
+        <div id="productionPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group"><label>Production Data</label><span class="toolbar-hint">Rates, pressure, decline curve and EUR</span></div>
+                <button class="btn-sm" onclick="app.addProductionRecord()"><i data-lucide="plus"></i> Add Record</button>
+                <button class="btn-sm" onclick="document.getElementById('productionCsvFileInput').click()"><i data-lucide="upload"></i> Upload CSV</button>
+                <button class="btn-sm" onclick="app.loadProduction()"><i data-lucide="refresh-cw"></i> Refresh</button>
+                <span id="productionEUR" class="toolbar-hint"></span>
+            </div>
+            <div style="padding:12px;display:grid;grid-template-columns:1fr;gap:12px;">
+                <input type="file" id="productionCsvFileInput" accept=".csv" style="display:none">
+                <div id="productionUploadStatus" style="font-size:12px;color:#8b949e"></div>
+                <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:10px">
+                    <div style="font-size:12px;color:#8b949e;margin-bottom:6px">Oil (green), Gas (red), Water (blue), Water Cut (yellow dashed), Decline fit (white)</div>
+                    <canvas id="productionCanvas" width="1000" height="320"></canvas>
+                </div>
+                <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:10px">
+                    <div style="font-size:12px;color:#8b949e;margin-bottom:6px">BHP (cyan) and WHP (magenta)</div>
+                    <canvas id="productionPressureCanvas" width="1000" height="260"></canvas>
+                </div>
+                <div id="productionTable" class="stats-container"></div>
             </div>
         </div>
 
@@ -938,7 +1077,22 @@
                 </div>
                 <div class="toolbar-group">
                     <label>Freq (Hz)</label>
-                    <input type="number" id="seismicFreq" value="30" min="5" max="100" style="width:60px">
+                    <input type="range" id="seismicFreq" value="30" min="10" max="80" step="1" style="width:140px" oninput="document.getElementById('seismicFreqVal').textContent=this.value">
+                    <span id="seismicFreqVal" class="toolbar-hint">30</span>
+                </div>
+                <div class="toolbar-group">
+                    <label>Polarity</label>
+                    <select id="seismicPolarity" class="depth-select" style="min-width:110px">
+                        <option value="normal" selected>Normal</option>
+                        <option value="reversed">Reversed</option>
+                    </select>
+                </div>
+                <div class="toolbar-group">
+                    <label>Phase</label>
+                    <select id="seismicPhase" class="depth-select" style="min-width:80px">
+                        <option value="0" selected>0°</option>
+                        <option value="90">90°</option>
+                    </select>
                 </div>
                 <button class="btn-primary" onclick="app.runSeismic()"><i data-lucide="refresh-cw"></i> Generate</button>
             </div>

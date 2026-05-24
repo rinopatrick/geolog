@@ -31,6 +31,10 @@ class LogRenderer {
         this.zones = [];              // Picked zones [{name, top, bottom, color}]
         this.dstIntervals = [];
         this.rftPoints = [];
+        this.badHoleIntervals = [];
+        this.completionData = [];
+        this.showCompletionTrack = true;
+        this.completionTrackWidth = 72;
 
         // View state
         this.viewStart = 5000;
@@ -45,6 +49,7 @@ class LogRenderer {
 
         // Curve config (from backend)
         this.curveConfig = {};
+        this.lithologyData = null;
 
         // Manual edit overlay state
         this.editOverlay = {
@@ -54,6 +59,9 @@ class LogRenderer {
             edited: [],
             ghosts: [],
         };
+
+        // Run overlay state (same-track run comparison)
+        this.overlayData = null;
 
         // Colors
         this.colors = {
@@ -113,8 +121,28 @@ class LogRenderer {
         this.render();
     }
 
+    setLithologyData(lithologyData) {
+        this.lithologyData = lithologyData || null;
+        this.render();
+    }
+
     setZones(zones) {
         this.zones = zones || [];
+        this.render();
+    }
+
+    setBadHoleIntervals(intervals) {
+        this.badHoleIntervals = Array.isArray(intervals) ? intervals : [];
+        this.render();
+    }
+
+    setCompletionData(components) {
+        this.completionData = Array.isArray(components) ? components : [];
+        this.render();
+    }
+
+    setCompletionTrackVisible(visible) {
+        this.showCompletionTrack = !!visible;
         this.render();
     }
 
@@ -311,23 +339,29 @@ class LogRenderer {
 
         // Calculate layout
         const totalTrackWidth = this.tracks.reduce((s, t) => s + t.width, 0);
-        const startX = this.margin.left + this.depthTrackWidth;
+        const completionTrackWidth = this.showCompletionTrack ? this.completionTrackWidth : 0;
+        const totalPlotWidth = totalTrackWidth + completionTrackWidth;
+        const lithTrackWidth = (this._showLithology && this.lithologyData?.lith_code?.length) ? 46 : 0;
+        const startX = this.margin.left + this.depthTrackWidth + lithTrackWidth;
         const plotTop = this.margin.top;
         const plotBottom = h - this.margin.bottom;
         const plotHeight = plotBottom - plotTop;
 
         // Draw formation tops (background)
-        this._drawFormationTops(ctx, startX, totalTrackWidth, plotTop, plotBottom);
+        this._drawFormationTops(ctx, startX, totalPlotWidth, plotTop, plotBottom);
 
         // Draw DST intervals (background)
-        this._drawDSTIntervals(ctx, startX, totalTrackWidth, plotTop, plotBottom);
+        this._drawDSTIntervals(ctx, startX, totalPlotWidth, plotTop, plotBottom);
 
         // Draw zones (background)
-        this._drawZones(ctx, startX, totalTrackWidth, plotTop, plotBottom);
+        this._drawZones(ctx, startX, totalPlotWidth, plotTop, plotBottom);
+
+        // Draw bad-hole intervals (LQC overlay)
+        this._drawBadHoleIntervals(ctx, startX, totalPlotWidth, plotTop, plotBottom);
 
         // Draw lithology track (if enabled)
-        if (this._showLithology && this.curveData['VSH']) {
-            this._drawLithTrack(ctx, startX - 30, 28, plotTop, plotBottom);
+        if (lithTrackWidth > 0) {
+            this._drawLithTrack(ctx, startX - lithTrackWidth, lithTrackWidth, plotTop, plotBottom);
         }
 
         // Draw depth ruler
@@ -344,11 +378,15 @@ class LogRenderer {
             trackX += track.width;
         }
 
+        if (completionTrackWidth > 0) {
+            this._drawCompletionTrack(ctx, trackX, plotTop, plotBottom, completionTrackWidth);
+        }
+
         // Manual edit overlay
         this._drawEditOverlay(ctx);
 
         // Draw header
-        this._drawHeaders(ctx, startX, totalTrackWidth);
+        this._drawHeaders(ctx, startX, totalTrackWidth, completionTrackWidth);
 
         // Draw cursor line
         if (this.mouseY > plotTop && this.mouseY < plotBottom) {
@@ -371,10 +409,10 @@ class LogRenderer {
         }
 
         // Draw formation top labels
-        this._drawFormationTopLabels(ctx, startX, totalTrackWidth, plotTop, plotBottom);
+        this._drawFormationTopLabels(ctx, startX, totalPlotWidth, plotTop, plotBottom);
 
         // Draw RFT points (foreground)
-        this._drawRFTPoints(ctx, startX, totalTrackWidth, plotTop, plotBottom);
+        this._drawRFTPoints(ctx, startX, totalPlotWidth, plotTop, plotBottom);
     }
 
     setEditOverlay(overlay = {}) {
@@ -386,6 +424,11 @@ class LogRenderer {
             ghosts: Array.isArray(overlay.ghosts) ? overlay.ghosts : [],
         };
         this.render();
+    }
+
+    setOverlayData(overlay = null) {
+        this.overlayData = overlay;
+        this.requestRender();
     }
 
     _drawEditOverlay(ctx) {
@@ -634,6 +677,77 @@ class LogRenderer {
         for (const mnemonic of activeCurves) {
             this._drawCurve(ctx, mnemonic, x, plotTop, plotBottom, width, useLog);
         }
+
+        // Draw run overlay curve + optional difference shading
+        this._drawOverlayForTrack(ctx, track, x, plotTop, plotBottom, width, useLog);
+    }
+
+    _drawOverlayForTrack(ctx, track, trackX, plotTop, plotBottom, width, useLog) {
+        const overlay = this.overlayData;
+        if (!overlay || !overlay.enabled || !overlay.mnemonic || !track.curves.includes(overlay.mnemonic)) return;
+        const baseCfg = this.curveConfig[overlay.mnemonic] || {};
+        const scale = baseCfg.scale || [0, 100];
+        const depth = overlay.depth || [];
+        const runA = overlay.runA || [];
+        const runB = overlay.runB || [];
+        if (!depth.length || !runB.length) return;
+
+        const visible = depth.filter(d => d >= this.viewStart && d <= this.viewStop).length;
+        const stride = this._computeRenderStride(visible);
+        const alpha = Math.max(0.05, Math.min(1, Number(overlay.opacity ?? 0.5)));
+        const color = overlay.color || '#ff3b30';
+
+        if (overlay.showDifference && runA.length === runB.length) {
+            for (let i = 0; i < depth.length - 1; i += stride) {
+                const i2 = Math.min(i + stride, depth.length - 1);
+                const d1 = depth[i], d2 = depth[i2];
+                if (d2 < this.viewStart || d1 > this.viewStop) continue;
+                const a1 = runA[i], a2 = runA[i2], b1 = runB[i], b2 = runB[i2];
+                if (![a1, a2, b1, b2].every(v => Number.isFinite(v))) continue;
+                const y1 = this._depthToY(d1);
+                const y2 = this._depthToY(d2);
+                if ((y1 < plotTop && y2 < plotTop) || (y1 > plotBottom && y2 > plotBottom)) continue;
+                const xa1 = this._valueToXInTrack(a1, scale, useLog, trackX, width);
+                const xa2 = this._valueToXInTrack(a2, scale, useLog, trackX, width);
+                const xb1 = this._valueToXInTrack(b1, scale, useLog, trackX, width);
+                const xb2 = this._valueToXInTrack(b2, scale, useLog, trackX, width);
+                const avgDiff = ((b1 - a1) + (b2 - a2)) / 2;
+                const fill = avgDiff >= 0
+                    ? `rgba(34,197,94,${0.28 * alpha})`
+                    : `rgba(239,68,68,${0.28 * alpha})`;
+                ctx.fillStyle = fill;
+                ctx.beginPath();
+                ctx.moveTo(xa1, y1);
+                ctx.lineTo(xa2, y2);
+                ctx.lineTo(xb2, y2);
+                ctx.lineTo(xb1, y1);
+                ctx.closePath();
+                ctx.fill();
+            }
+        }
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        let started = false;
+        for (let i = 0; i < depth.length; i += stride) {
+            const d = depth[i];
+            if (d < this.viewStart || d > this.viewStop) continue;
+            const v = runB[i];
+            if (!Number.isFinite(v)) { started = false; continue; }
+            const y = this._depthToY(d);
+            const px = this._valueToXInTrack(v, scale, useLog, trackX, width);
+            if (!started) {
+                ctx.moveTo(px, y);
+                started = true;
+            } else {
+                ctx.lineTo(px, y);
+            }
+        }
+        ctx.stroke();
+        ctx.restore();
     }
 
     _drawCurve(ctx, mnemonic, trackX, plotTop, plotBottom, width, useLog) {
@@ -700,7 +814,7 @@ class LogRenderer {
         ctx.fillText(scale[1].toString(), trackX + width - 2, plotBottom + 12);
     }
 
-    _drawHeaders(ctx, startX, totalWidth) {
+    _drawHeaders(ctx, startX, totalWidth, completionTrackWidth = 0) {
         let trackX = startX;
         for (const track of this.tracks) {
             // Track header background
@@ -732,6 +846,107 @@ class LogRenderer {
             }
 
             trackX += track.width;
+        }
+
+        if (completionTrackWidth > 0) {
+            ctx.fillStyle = this.colors.headerBg;
+            ctx.fillRect(trackX, 0, completionTrackWidth, this.margin.top - 15);
+            ctx.strokeStyle = this.colors.trackBorder;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(trackX, 0, completionTrackWidth, this.margin.top - 15);
+            ctx.fillStyle = this.colors.headerText;
+            ctx.font = 'bold 10px IBM Plex Mono';
+            ctx.textAlign = 'center';
+            ctx.fillText('Completion', trackX + completionTrackWidth / 2, 18);
+        }
+    }
+
+    _drawCompletionTrack(ctx, x, plotTop, plotBottom, width) {
+        const h = plotBottom - plotTop;
+        ctx.fillStyle = '#11161d';
+        ctx.fillRect(x, plotTop, width, h);
+        ctx.strokeStyle = this.colors.trackBorder;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, plotTop, width, h);
+
+        const items = (this.completionData || []).filter(c => Number.isFinite(Number(c.depth_top)) && Number.isFinite(Number(c.depth_base)));
+        for (const c of items) {
+            let top = Number(c.depth_top);
+            let base = Number(c.depth_base);
+            if (base < top) [top, base] = [base, top];
+            const y1 = Math.max(plotTop, Math.min(plotBottom, this._depthToY(top)));
+            const y2 = Math.max(plotTop, Math.min(plotBottom, this._depthToY(base)));
+            if (y2 < plotTop || y1 > plotBottom) continue;
+            const t = String(c.component_type || '').toLowerCase();
+
+            if (t === 'cement') {
+                ctx.fillStyle = 'rgba(148, 163, 184, 0.45)';
+                ctx.fillRect(x + 1, y1, width - 2, Math.max(1, y2 - y1));
+                continue;
+            }
+            if (t === 'casing' || t === 'liner') {
+                ctx.strokeStyle = t === 'liner' ? '#f59e0b' : '#60a5fa';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(x + 12, y1);
+                ctx.lineTo(x + 12, y2);
+                ctx.moveTo(x + width - 12, y1);
+                ctx.lineTo(x + width - 12, y2);
+                ctx.stroke();
+                if (c.size) {
+                    ctx.fillStyle = '#c9d1d9';
+                    ctx.font = '9px IBM Plex Mono';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(String(c.size), x + width / 2, Math.min(y2 - 2, y1 + 10));
+                }
+                continue;
+            }
+            if (t === 'tubing') {
+                ctx.strokeStyle = '#93c5fd';
+                ctx.lineWidth = 1.2;
+                ctx.beginPath();
+                ctx.moveTo(x + width / 2, y1);
+                ctx.lineTo(x + width / 2, y2);
+                ctx.stroke();
+                continue;
+            }
+            if (t === 'perforation') {
+                ctx.strokeStyle = '#ef4444';
+                ctx.setLineDash([4, 3]);
+                ctx.beginPath();
+                ctx.moveTo(x + 8, y1);
+                ctx.lineTo(x + 8, y2);
+                ctx.moveTo(x + width - 8, y1);
+                ctx.lineTo(x + width - 8, y2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                continue;
+            }
+            if (t === 'screen') {
+                ctx.strokeStyle = '#22c55e';
+                ctx.setLineDash([1, 3]);
+                ctx.beginPath();
+                ctx.moveTo(x + width / 2, y1);
+                ctx.lineTo(x + width / 2, y2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                continue;
+            }
+            if (t === 'packer' || t === 'valve') {
+                ctx.fillStyle = '#111111';
+                ctx.fillRect(x + 8, y1, width - 16, Math.max(4, y2 - y1 || 6));
+                continue;
+            }
+            if (t === 'pump') {
+                ctx.fillStyle = '#f97316';
+                const hh = Math.max(10, y2 - y1 || 10);
+                ctx.fillRect(x + 10, y1, width - 20, hh);
+                ctx.fillStyle = '#111827';
+                ctx.font = 'bold 9px IBM Plex Mono';
+                ctx.textAlign = 'center';
+                ctx.fillText('P', x + width / 2, y1 + Math.min(hh - 2, 9));
+                continue;
+            }
         }
     }
 
@@ -854,6 +1069,32 @@ class LogRenderer {
         }
     }
 
+    _drawBadHoleIntervals(ctx, startX, totalWidth, plotTop, plotBottom) {
+        if (!Array.isArray(this.badHoleIntervals) || !this.badHoleIntervals.length) return;
+        for (const itv of this.badHoleIntervals) {
+            const top = Number(itv.top);
+            const bottom = Number(itv.bottom);
+            if (!Number.isFinite(top) || !Number.isFinite(bottom) || bottom <= top) continue;
+            const yTop = this._depthToY(top);
+            const yBottom = this._depthToY(bottom);
+            if (yBottom < plotTop || yTop > plotBottom) continue;
+            const y1 = Math.max(plotTop, yTop);
+            const y2 = Math.min(plotBottom, yBottom);
+            ctx.fillStyle = 'rgba(220, 38, 38, 0.18)';
+            ctx.fillRect(startX, y1, totalWidth, y2 - y1);
+            ctx.strokeStyle = 'rgba(220, 38, 38, 0.8)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 3]);
+            ctx.beginPath();
+            ctx.moveTo(startX, y1);
+            ctx.lineTo(startX + totalWidth, y1);
+            ctx.moveTo(startX, y2);
+            ctx.lineTo(startX + totalWidth, y2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+    }
+
     _drawRFTPoints(ctx, startX, totalWidth, plotTop, plotBottom) {
         if (!Array.isArray(this.rftPoints) || !this.rftPoints.length) return;
         const fluidColor = (f) => {
@@ -881,36 +1122,55 @@ class LogRenderer {
 
     // ─── Export ──────────────────────────────────────────────
     _drawLithTrack(ctx, x, width, plotTop, plotBottom) {
-        if (!this.curveData["VSH"] || !this.depthData.length) return;
-        const vsh = this.curveData["VSH"];
-        const facies = this.curveData["FACIES"];
-        ctx.fillStyle = "#0d1117";
+        const lith = this.lithologyData?.lith_code;
+        if (!Array.isArray(lith) || !this.depthData.length) return;
+
+        const colorMap = {
+            1: '#F5DEB3',
+            2: '#D2B48C',
+            3: '#808080',
+            4: '#87CEEB',
+            5: '#FFB6C1',
+            6: '#DDA0DD',
+            7: '#FFFFFF',
+            8: '#2F2F2F',
+        };
+
+        ctx.fillStyle = '#0d1117';
         ctx.fillRect(x, plotTop, width, plotBottom - plotTop);
-        ctx.strokeStyle = "#30363d";
+        ctx.strokeStyle = '#30363d';
         ctx.lineWidth = 1;
         ctx.strokeRect(x, plotTop, width, plotBottom - plotTop);
-        const faciesColors = ["#58a6ff", "#3fb950", "#f0883e", "#f85149", "#a371f7", "#f2cc60", "#79c0ff", "#d2a8ff"];
-        for (let i = 0; i < this.depthData.length; i++) {
+
+        const len = Math.min(this.depthData.length, lith.length);
+        let lastLabelY = -1e9;
+        for (let i = 0; i < len; i++) {
             const depth = this.depthData[i];
             if (depth < this.viewStart || depth > this.viewStop) continue;
+            const code = Number(lith[i] || 0);
+            if (!code || !colorMap[code]) continue;
+
             const y = this._depthToY(depth);
-            const step = Math.abs(this._depthToY(depth + (this.depthData[1] - this.depthData[0])) - y);
-            const bh = Math.max(step, 1);
-            let color;
-            if (facies && facies[i] >= 0) {
-                color = faciesColors[facies[i] % faciesColors.length] + "cc";
-            } else if (vsh[i] !== null && vsh[i] !== undefined && !isNaN(vsh[i])) {
-                if (vsh[i] < 0.2) color = "#f2cc60cc";
-                else if (vsh[i] < 0.5) color = "#f0883ecc";
-                else color = "#8b949ecc";
-            } else { continue; }
-            ctx.fillStyle = color;
-            ctx.fillRect(x + 1, y - bh / 2, width - 2, bh);
+            const nextDepth = (i + 1 < len) ? this.depthData[i + 1] : depth + (len > 1 ? (this.depthData[1] - this.depthData[0]) : 0.5);
+            const y2 = this._depthToY(nextDepth);
+            const bh = Math.max(1, Math.abs(y2 - y));
+
+            ctx.fillStyle = colorMap[code];
+            ctx.fillRect(x + 1, y - bh / 2, width - 2, bh + 0.5);
+
+            if (Math.abs(y - lastLabelY) > 36) {
+                ctx.fillStyle = code === 8 || code === 3 ? '#f8fafc' : '#111827';
+                ctx.font = 'bold 9px IBM Plex Mono';
+                ctx.textAlign = 'center';
+                ctx.fillText(String(code), x + width / 2, y + 3);
+                lastLabelY = y;
+            }
         }
-        ctx.fillStyle = "#8b949e";
-        ctx.font = "9px DM Sans";
-        ctx.textAlign = "center";
-        ctx.fillText("LITH", x + width / 2, plotTop - 4);
+
+        ctx.fillStyle = '#8b949e';
+        ctx.font = 'bold 9px DM Sans';
+        ctx.textAlign = 'center';
+        ctx.fillText('LITH', x + width / 2, 16);
     }
     exportPNG() {
         // Create high-res export canvas

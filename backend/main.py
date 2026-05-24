@@ -29,12 +29,14 @@ from email.utils import format_datetime, parsedate_to_datetime
 
 try:
     from database import engine, Base, get_db, SessionLocal
-    from models import Project, Well, LogRun, CurveData, FormationTop, Annotation, DSTTest, RFTPoint, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
+    from models import Project, Well, LogRun, CurveData, FormationTop, Annotation, DSTTest, RFTPoint, CompletionData, ProductionData, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
     from las_parser import LASParser, CURVE_TRACKS
+    from dlis_lis_parser import parse_dlis_content, parse_lis_content
 except ImportError:
     from backend.database import engine, Base, get_db, SessionLocal
-    from backend.models import Project, Well, LogRun, CurveData, FormationTop, Annotation, DSTTest, RFTPoint, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
+    from backend.models import Project, Well, LogRun, CurveData, FormationTop, Annotation, DSTTest, RFTPoint, CompletionData, ProductionData, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
     from backend.las_parser import LASParser, CURVE_TRACKS
+    from backend.dlis_lis_parser import parse_dlis_content, parse_lis_content
 
 # Create tables
 # Configure logging
@@ -65,6 +67,65 @@ def _ensure_well_coordinate_columns():
 
 
 _ensure_well_coordinate_columns()
+
+
+def _ensure_production_table():
+    """Create production table for existing deployments without migrations."""
+    ddl = """
+    CREATE TABLE IF NOT EXISTS production_data (
+        id INTEGER PRIMARY KEY,
+        well_id INTEGER NOT NULL,
+        date DATE NOT NULL,
+        oil_rate FLOAT,
+        gas_rate FLOAT,
+        water_rate FLOAT,
+        water_cut FLOAT,
+        gor FLOAT,
+        bhp FLOAT,
+        whp FLOAT,
+        choke_size FLOAT,
+        cumulative_oil FLOAT,
+        cumulative_gas FLOAT,
+        cumulative_water FLOAT,
+        notes TEXT DEFAULT '',
+        created_at DATETIME,
+        FOREIGN KEY(well_id) REFERENCES wells(id)
+    );
+    """
+    with engine.begin() as conn:
+        try:
+            conn.execute(text(ddl))
+        except Exception:
+            pass
+
+
+_ensure_production_table()
+
+
+def _ensure_completion_table():
+    """Create completion table for existing deployments without migrations."""
+    ddl = """
+    CREATE TABLE IF NOT EXISTS completion_data (
+        id INTEGER PRIMARY KEY,
+        well_id INTEGER NOT NULL,
+        depth_top FLOAT NOT NULL,
+        depth_base FLOAT NOT NULL,
+        component_type VARCHAR(50) NOT NULL,
+        size VARCHAR(100) DEFAULT '',
+        description TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        created_at DATETIME,
+        FOREIGN KEY(well_id) REFERENCES wells(id)
+    );
+    """
+    with engine.begin() as conn:
+        try:
+            conn.execute(text(ddl))
+        except Exception:
+            pass
+
+
+_ensure_completion_table()
 
 
 def _to_float_or_none(value):
@@ -127,6 +188,78 @@ def _extract_las_coordinates(las):
         lon = None
 
     return lat, lon
+
+
+PETRO_TEMPLATES = [
+    {
+        "name": "Sandstone Standard",
+        "description": "Balanced clean-sand default for conventional clastics.",
+        "params": {"saturation_model": "archie", "a": 1.0, "m": 2.0, "n": 2.0, "rw": 0.08},
+        "recommended_cutoffs": {"vsh_cutoff": 0.4, "phie_cutoff": 0.1, "sw_cutoff": 0.6, "gr_min": 0, "gr_max": 150},
+        "suggested_rw": 0.08,
+        "log_track_layout": ["GR", "RT", "NPHI", "RHOB", "DT", "VSH", "PHIE", "SW"],
+    },
+    {
+        "name": "Carbonate",
+        "description": "Conservative carbonate interpretation with tighter shale screening.",
+        "params": {"saturation_model": "archie", "a": 1.0, "m": 2.0, "n": 2.0, "rw": 0.05},
+        "recommended_cutoffs": {"vsh_cutoff": 0.3, "phie_cutoff": 0.05, "sw_cutoff": 0.5, "gr_min": 0, "gr_max": 100},
+        "suggested_rw": 0.05,
+        "log_track_layout": ["GR", "PEF", "RHOB", "NPHI", "RT", "PHIE", "SW"],
+    },
+    {
+        "name": "Shale Gas",
+        "description": "Lower-porosity unconventional shale gas workflow baseline.",
+        "params": {"saturation_model": "simandoux", "a": 1.0, "m": 1.8, "n": 1.8, "rw": 0.12},
+        "recommended_cutoffs": {"vsh_cutoff": 0.6, "phie_cutoff": 0.02, "sw_cutoff": 0.4, "gr_min": 0, "gr_max": 200},
+        "suggested_rw": 0.12,
+        "log_track_layout": ["GR", "RT", "RHOB", "NPHI", "DT", "TOC_PROXY", "SW"],
+    },
+    {
+        "name": "Deepwater Turbidite",
+        "description": "Deepwater clastic setting tuned for variable lamination and pay continuity.",
+        "params": {"saturation_model": "archie", "a": 0.8, "m": 2.2, "n": 2.2, "rw": 0.09},
+        "recommended_cutoffs": {"vsh_cutoff": 0.35, "phie_cutoff": 0.08, "sw_cutoff": 0.65, "gr_min": 0, "gr_max": 180},
+        "suggested_rw": 0.09,
+        "log_track_layout": ["GR", "RT", "NPHI", "RHOB", "DT", "VSH", "PHIE", "SW"],
+    },
+    {
+        "name": "Tight Gas Sand",
+        "description": "Tight-gas sand screening with stricter porosity and water saturation limits.",
+        "params": {"saturation_model": "archie", "a": 1.0, "m": 2.5, "n": 2.0, "rw": 0.07},
+        "recommended_cutoffs": {"vsh_cutoff": 0.25, "phie_cutoff": 0.03, "sw_cutoff": 0.45, "gr_min": 0, "gr_max": 120},
+        "suggested_rw": 0.07,
+        "log_track_layout": ["GR", "RT", "NPHI", "RHOB", "DT", "PHIE", "SW"],
+    },
+]
+
+
+def _find_template(template_name: str):
+    target = (template_name or "").strip().lower()
+    for tpl in PETRO_TEMPLATES:
+        if tpl["name"].lower() == target:
+            return tpl
+    return None
+
+
+def _build_petro_summary(wid: int, params: dict, db: Session):
+    well = db.query(Well).filter(Well.id == wid).first()
+    latest = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.id.desc()).first()
+    gross = None
+    if latest and latest.start_depth is not None and latest.stop_depth is not None:
+        gross = float(latest.stop_depth - latest.start_depth)
+    return {
+        "well_id": wid,
+        "well_name": well.name if well else None,
+        "log_run_id": latest.id if latest else None,
+        "interval": {
+            "top": latest.start_depth if latest else None,
+            "base": latest.stop_depth if latest else None,
+            "gross": gross,
+        },
+        "petro_params": params,
+        "notes": "Template applied and petrophysical defaults updated.",
+    }
 
 app = FastAPI(
     title="GeoLog",
@@ -524,6 +657,60 @@ def update_well(wid: int, data: dict, db: Session = Depends(get_db)):
 # ─── LAS Upload ───────────────────────────────────────────────
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 
+
+def _persist_non_las_runs(db: Session, well: Well, filename: str, parsed, source_format: str):
+    created_runs = []
+    for run in parsed.runs:
+        curves_def = [
+            {"mnemonic": c.mnemonic, "unit": c.unit, "description": c.description}
+            for c in run.curves
+        ]
+
+        lr = LogRun(
+            well_id=well.id,
+            run_number=len(well.log_runs) + len(created_runs) + 1,
+            filename=f"{filename}::{run.run_name}" if len(parsed.runs) > 1 else filename,
+            las_version=run.version,
+            start_depth=run.start_depth,
+            stop_depth=run.stop_depth,
+            step=run.step,
+            null_value=run.null_value,
+            num_points=int(len(run.depth)),
+            curves_json=json.dumps(curves_def),
+            parameters_json=json.dumps(run.parameters or []),
+        )
+        db.add(lr)
+        db.flush()
+
+        for curve in run.curves:
+            arr = run.data.get(curve.mnemonic)
+            if arr is None:
+                continue
+            arr = np.asarray(arr, dtype=np.float64)
+            valid = arr[~np.isnan(arr)]
+            db.add(CurveData(
+                log_run_id=lr.id,
+                mnemonic=curve.mnemonic,
+                unit=curve.unit,
+                description=curve.description,
+                num_points=len(arr),
+                min_value=float(np.min(valid)) if len(valid) else None,
+                max_value=float(np.max(valid)) if len(valid) else None,
+                data_binary=arr.tobytes(),
+            ))
+
+        created_runs.append(lr)
+
+    if parsed.well_name and (not well.name or well.name.startswith("Well")):
+        well.name = parsed.well_name
+    if parsed.uwi and not well.uwi:
+        well.uwi = parsed.uwi
+    if created_runs:
+        well.total_depth = max((r.stop_depth or 0.0) for r in created_runs)
+
+    return created_runs
+
+
 @app.post("/api/wells/{wid}/upload-las")
 async def upload_las(wid: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Upload a LAS file and attach it to a well."""
@@ -614,6 +801,86 @@ async def upload_las(wid: int, file: UploadFile = File(...), db: Session = Depen
         "start_depth": las.well.start,
         "stop_depth": las.well.stop,
         "step": las.well.step,
+    }
+
+
+@app.post("/api/wells/{wid}/upload-dlis")
+async def upload_dlis(wid: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Upload DLIS file and attach one/many frame-runs to a well."""
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(413, f"File too large (max {MAX_UPLOAD_SIZE // 1024 // 1024}MB)")
+    if len(content) == 0:
+        raise HTTPException(400, "Empty file")
+
+    try:
+        parsed = parse_dlis_content(content, file.filename or "upload.dlis")
+    except Exception as e:
+        raise HTTPException(400, f"Failed to parse DLIS file: {str(e)}")
+
+    created = _persist_non_las_runs(db, well, file.filename or "unknown.dlis", parsed, "DLIS")
+    if not created:
+        raise HTTPException(400, "No frame data found in DLIS")
+    db.commit()
+
+    primary = parsed.runs[0]
+    return {
+        "status": "ok",
+        "source_format": "DLIS",
+        "log_run_id": created[0].id,
+        "log_run_ids": [r.id for r in created],
+        "filename": file.filename,
+        "runs_created": len(created),
+        "curves": [c.mnemonic for c in primary.curves],
+        "num_points": int(primary.depth.size),
+        "start_depth": primary.start_depth,
+        "stop_depth": primary.stop_depth,
+        "step": primary.step,
+        "version": primary.version,
+    }
+
+
+@app.post("/api/wells/{wid}/upload-lis")
+async def upload_lis(wid: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Upload LIS file and attach log sets as runs to a well."""
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(413, f"File too large (max {MAX_UPLOAD_SIZE // 1024 // 1024}MB)")
+    if len(content) == 0:
+        raise HTTPException(400, "Empty file")
+
+    try:
+        parsed = parse_lis_content(content, file.filename or "upload.lis")
+    except Exception as e:
+        raise HTTPException(400, f"Failed to parse LIS file: {str(e)}")
+
+    created = _persist_non_las_runs(db, well, file.filename or "unknown.lis", parsed, "LIS")
+    if not created:
+        raise HTTPException(400, "No data records found in LIS")
+    db.commit()
+
+    primary = parsed.runs[0]
+    return {
+        "status": "ok",
+        "source_format": "LIS",
+        "log_run_id": created[0].id,
+        "log_run_ids": [r.id for r in created],
+        "filename": file.filename,
+        "runs_created": len(created),
+        "curves": [c.mnemonic for c in primary.curves],
+        "num_points": int(primary.depth.size),
+        "start_depth": primary.start_depth,
+        "stop_depth": primary.stop_depth,
+        "step": primary.step,
+        "version": primary.version,
     }
 
 
@@ -868,6 +1135,217 @@ def get_curve_data(
     return JSONResponse(content=result, headers=headers)
 
 
+def _group_flagged_intervals(depth: np.ndarray, flags: np.ndarray):
+    if depth is None or flags is None or len(depth) == 0 or len(flags) == 0:
+        return []
+    n = min(len(depth), len(flags))
+    intervals = []
+    active = False
+    start_idx = 0
+    for i in range(n):
+        is_on = bool(flags[i])
+        if is_on and not active:
+            active = True
+            start_idx = i
+        elif not is_on and active:
+            end_idx = i - 1
+            intervals.append({
+                "top": round(float(depth[start_idx]), 2),
+                "bottom": round(float(depth[end_idx]), 2),
+                "thickness": round(float(max(0.0, depth[end_idx] - depth[start_idx])), 2),
+            })
+            active = False
+    if active:
+        end_idx = n - 1
+        intervals.append({
+            "top": round(float(depth[start_idx]), 2),
+            "bottom": round(float(depth[end_idx]), 2),
+            "thickness": round(float(max(0.0, depth[end_idx] - depth[start_idx])), 2),
+        })
+    return intervals
+
+
+@app.post("/api/log-runs/{lr_id}/shoulder-bed-correction")
+def shoulder_bed_correction(lr_id: int, data: dict, db: Session = Depends(get_db)):
+    lr = db.query(LogRun).filter(LogRun.id == lr_id).first()
+    if not lr:
+        raise HTTPException(404, "Log run not found")
+
+    mnemonic = str(data.get("mnemonic", "")).strip().upper()
+    if not mnemonic:
+        raise HTTPException(400, "mnemonic is required")
+
+    method = str(data.get("method", "linear")).strip().lower()
+    if method not in {"linear", "simandoux"}:
+        raise HTTPException(400, "method must be 'linear' or 'simandoux'")
+
+    bed_thickness_threshold = float(data.get("bed_thickness_threshold", 2.0) or 2.0)
+    if bed_thickness_threshold <= 0:
+        raise HTTPException(400, "bed_thickness_threshold must be > 0")
+
+    curve_cd = db.query(CurveData).filter(CurveData.log_run_id == lr_id, CurveData.mnemonic == mnemonic).first()
+    if not curve_cd:
+        raise HTTPException(404, f"Curve {mnemonic} not found")
+
+    depth_cd = db.query(CurveData).filter(CurveData.log_run_id == lr_id, CurveData.mnemonic.in_(["DEPT", "DEPTH", "MD", "TVD"])).first()
+    if not depth_cd:
+        raise HTTPException(404, "Depth curve not found")
+
+    z_meas = np.frombuffer(curve_cd.data_binary, dtype=np.float64).copy()
+    depth = np.frombuffer(depth_cd.data_binary, dtype=np.float64).copy()
+    n = min(len(depth), len(z_meas))
+    depth = depth[:n]
+    z_meas = z_meas[:n]
+    if int(np.sum(~np.isnan(z_meas))) < 5:
+        raise HTTPException(400, "Not enough valid data points")
+
+    rt_cd = db.query(CurveData).filter(CurveData.log_run_id == lr_id, CurveData.mnemonic.in_(["RT", "RESD", "RILD", "ILD"])) .first()
+    rxo_cd = db.query(CurveData).filter(CurveData.log_run_id == lr_id, CurveData.mnemonic.in_(["RXO", "RILM", "RLLS", "MSFL"])) .first()
+    gr_cd = db.query(CurveData).filter(CurveData.log_run_id == lr_id, CurveData.mnemonic.in_(["GR", "SGR", "CGR"])) .first()
+    cali_cd = db.query(CurveData).filter(CurveData.log_run_id == lr_id, CurveData.mnemonic.in_(["CALI", "CAL", "HCAL"])) .first()
+    bs_cd = db.query(CurveData).filter(CurveData.log_run_id == lr_id, CurveData.mnemonic.in_(["BS", "BIT", "BITSIZE"])) .first()
+
+    rt = np.frombuffer(rt_cd.data_binary, dtype=np.float64).copy()[:n] if rt_cd else None
+    rxo = np.frombuffer(rxo_cd.data_binary, dtype=np.float64).copy()[:n] if rxo_cd else None
+    gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy()[:n] if gr_cd else None
+    cali = np.frombuffer(cali_cd.data_binary, dtype=np.float64).copy()[:n] if cali_cd else None
+    bs = np.frombuffer(bs_cd.data_binary, dtype=np.float64).copy()[:n] if bs_cd else None
+
+    dv = np.abs(np.diff(z_meas))
+    dv = dv[~np.isnan(dv)]
+    if len(dv) == 0:
+        raise HTTPException(400, "Cannot detect bed boundaries")
+    mad = np.median(np.abs(dv - np.median(dv)))
+    change_threshold = max(np.percentile(dv, 75), np.median(dv) + 3.0 * mad, 1e-9)
+
+    boundaries = [0]
+    for i in range(1, n):
+        p = z_meas[i - 1]
+        c = z_meas[i]
+        if np.isnan(p) or np.isnan(c):
+            continue
+        if abs(c - p) > change_threshold:
+            boundaries.append(i)
+    if boundaries[-1] != n - 1:
+        boundaries.append(n - 1)
+
+    z_corr = z_meas.copy()
+    thin_bed_flags = np.zeros(n, dtype=bool)
+    thin_beds = []
+
+    for b in range(len(boundaries) - 1):
+        i0 = boundaries[b]
+        i1 = boundaries[b + 1]
+        if i1 <= i0:
+            continue
+        top_d = float(depth[i0])
+        bot_d = float(depth[i1])
+        thickness = max(0.0, bot_d - top_d)
+        if thickness >= bed_thickness_threshold:
+            continue
+
+        seg = z_meas[i0:i1 + 1]
+        if len(seg) == 0 or np.all(np.isnan(seg)):
+            continue
+        thin_bed_flags[i0:i1 + 1] = True
+
+        up_shoulder = np.nan
+        down_shoulder = np.nan
+        if b > 0:
+            up_shoulder = np.nanmean(z_meas[boundaries[b - 1]:i0])
+        if b + 2 < len(boundaries):
+            down_shoulder = np.nanmean(z_meas[i1 + 1:boundaries[b + 2] + 1])
+        shoulders = [v for v in (up_shoulder, down_shoulder) if np.isfinite(v)]
+        z_shoulder = float(np.mean(shoulders)) if shoulders else float(np.nanmean(seg))
+
+        for i in range(i0, i1 + 1):
+            if np.isnan(z_meas[i]):
+                continue
+            thickness_scale = max(0.25, min(2.0, bed_thickness_threshold / max(thickness, 0.25)))
+            invasion_mod = 1.0
+            if rt is not None and rxo is not None and np.isfinite(rt[i]) and np.isfinite(rxo[i]) and rt[i] > 0 and rxo[i] > 0:
+                ratio = rt[i] / rxo[i]
+                invasion_mod = 1.0 + 0.35 * min(2.0, abs(np.log10(max(ratio, 1e-6))))
+            correction_factor = float(max(0.15, min(1.5, 0.5 * thickness_scale * invasion_mod)))
+
+            if method == "simandoux":
+                vsh = 0.2
+                if gr is not None:
+                    gv = gr[~np.isnan(gr)]
+                    if len(gv) > 5 and np.isfinite(gr[i]):
+                        gmin = float(np.percentile(gv, 5))
+                        gmax = float(np.percentile(gv, 95))
+                        if gmax > gmin:
+                            vsh = max(0.0, min(1.0, (gr[i] - gmin) / (gmax - gmin)))
+                correction_factor *= (1.0 - 0.45 * vsh)
+
+            z_corr[i] = z_meas[i] + (z_meas[i] - z_shoulder) * correction_factor
+
+        thin_beds.append({
+            "top": round(top_d, 2),
+            "bottom": round(bot_d, 2),
+            "thickness": round(thickness, 2),
+            "indices": [int(i0), int(i1)],
+        })
+
+    bad_hole_flags = np.zeros(n, dtype=bool)
+    washout_flags = np.zeros(n, dtype=bool)
+    tight_flags = np.zeros(n, dtype=bool)
+    bit_size = float(np.nanmedian(bs)) if bs is not None and np.sum(~np.isnan(bs)) > 0 else 8.5
+    if cali is not None:
+        washout_flags = np.nan_to_num(cali > (bit_size + 1.0), nan=False)
+        tight_flags = np.nan_to_num(cali < (bit_size - 0.5), nan=False)
+        bad_hole_flags = washout_flags | tight_flags
+    bad_hole_intervals = _group_flagged_intervals(depth, bad_hole_flags)
+
+    invaded_flags = np.zeros(n, dtype=bool)
+    invasion_indicator = [None] * n
+    if rt is not None and rxo is not None:
+        for i in range(n):
+            if not (np.isfinite(rt[i]) and np.isfinite(rxo[i])) or rt[i] <= 0 or rxo[i] <= 0:
+                continue
+            ratio = rt[i] / rxo[i]
+            if ratio >= 1.5:
+                invaded_flags[i] = True
+                invasion_indicator[i] = "deep_invasion_or_oil_mud"
+            elif ratio <= 0.67:
+                invaded_flags[i] = True
+                invasion_indicator[i] = "shallow_invasion_or_supercharged"
+            else:
+                invasion_indicator[i] = "normal"
+
+    total = max(1, n)
+    qc_summary = {
+        "thin_beds_pct": round(float(np.sum(thin_bed_flags)) * 100.0 / total, 2),
+        "bad_hole_pct": round(float(np.sum(bad_hole_flags)) * 100.0 / total, 2),
+        "invaded_pct": round(float(np.sum(invaded_flags)) * 100.0 / total, 2),
+        "thin_bed_count": len(thin_beds),
+        "bad_hole_interval_count": len(bad_hole_intervals),
+    }
+
+    return {
+        "log_run_id": lr_id,
+        "mnemonic": mnemonic,
+        "method": method,
+        "bed_thickness_threshold": bed_thickness_threshold,
+        "corrected_curve": [None if np.isnan(v) else round(float(v), 4) for v in z_corr],
+        "thin_beds": thin_beds,
+        "thin_bed_flags": thin_bed_flags.astype(bool).tolist(),
+        "bad_hole": {
+            "bit_size": round(bit_size, 3),
+            "washout_flags": washout_flags.astype(bool).tolist(),
+            "tight_hole_flags": tight_flags.astype(bool).tolist(),
+            "bad_hole_flags": bad_hole_flags.astype(bool).tolist(),
+            "intervals": bad_hole_intervals,
+        },
+        "invasion": {
+            "flags": invaded_flags.astype(bool).tolist(),
+            "indicator": invasion_indicator,
+        },
+        "qc_summary": qc_summary,
+    }
+
+
 # ─── Formation Tops ───────────────────────────────────────────
 @app.get("/api/wells/{wid}/tops")
 def list_tops(wid: int, db: Session = Depends(get_db)):
@@ -1040,6 +1518,68 @@ def get_curve_config():
 
 
 
+@app.get("/api/templates")
+def list_templates():
+    return {"templates": PETRO_TEMPLATES}
+
+
+@app.post("/api/wells/{wid}/apply-template")
+def apply_template_to_well(wid: int, data: dict, db: Session = Depends(get_db)):
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+
+    template_name = data.get("template_name") or data.get("name") or data.get("template")
+    template = _find_template(template_name) if template_name else None
+
+    if template is None and not data.get("custom_params"):
+        raise HTTPException(400, "Provide valid template_name or custom_params")
+
+    payload = template["params"].copy() if template else {}
+    cutoffs = template["recommended_cutoffs"].copy() if template else {}
+
+    custom = data.get("custom_params") or {}
+    for key in ("saturation_model", "a", "m", "n", "rw"):
+        if key in custom:
+            payload[key] = custom[key]
+    for key in ("vsh_cutoff", "phie_cutoff", "sw_cutoff"):
+        if key in custom:
+            cutoffs[key] = custom[key]
+
+    fields = {
+        "saturation_model": payload.get("saturation_model", "archie"),
+        "a": float(payload.get("a", 1.0)),
+        "m": float(payload.get("m", 2.0)),
+        "n": float(payload.get("n", 2.0)),
+        "rw": float(payload.get("rw", template.get("suggested_rw", 0.1) if template else 0.1)),
+        "vsh_cutoff": float(cutoffs.get("vsh_cutoff", 0.35)),
+        "phie_cutoff": float(cutoffs.get("phie_cutoff", 0.10)),
+        "sw_cutoff": float(cutoffs.get("sw_cutoff", 0.60)),
+        "template": template["name"] if template else "custom",
+    }
+
+    existing = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
+    if existing:
+        for k, v in fields.items():
+            setattr(existing, k, v)
+    else:
+        db.add(PetroParams(well_id=wid, **fields))
+    db.commit()
+
+    summary = _build_petro_summary(wid, {
+        **fields,
+        "gr_min": cutoffs.get("gr_min"),
+        "gr_max": cutoffs.get("gr_max"),
+        "log_track_layout": template.get("log_track_layout", []) if template else data.get("log_track_layout", []),
+    }, db)
+
+    return {
+        "status": "ok",
+        "applied_template": template["name"] if template else "custom",
+        "summary": summary,
+    }
+
+
 # ─── Petrophysics Parameters Persistence ──────────────────────
 @app.get("/api/wells/{wid}/petro-params")
 def get_petro_params(wid: int, db: Session = Depends(get_db)):
@@ -1072,6 +1612,171 @@ def save_petro_params(wid: int, data: dict, db: Session = Depends(get_db)):
         db.add(PetroParams(**kwargs))
     db.commit()
     return {"status": "ok"}
+
+
+@app.post("/api/wells/{wid}/rw-estimation")
+def estimate_rw(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Estimate formation water resistivity (Rw) using SP, Ro, and Hingle workflows."""
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+
+    method = str(data.get("method", "all")).strip().lower()
+    if method not in {"sp", "ro", "hingle", "all"}:
+        raise HTTPException(400, "method must be one of: sp, ro, hingle, all")
+
+    pp = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
+    a_val = float(data.get("a", pp.a if pp and pp.a is not None else 1.0))
+    m_default = float(pp.m) if pp and pp.m is not None else 2.0
+
+    results = {
+        "method_requested": method,
+        "inputs": {},
+        "methods": {},
+        "catalog": {
+            "fresh_water_ohm_m": [0.5, 1.0],
+            "saline_water_ohm_m": [0.01, 0.1],
+            "typical_gulf_coast_ohm_m": [0.02, 0.05],
+            "typical_north_sea_ohm_m": [0.03, 0.08],
+        },
+    }
+
+    rw_candidates = []
+    weights = []
+
+    if method in {"sp", "all"}:
+        r = {"rw": None, "rw_77f": None, "confidence": 0.0, "notes": []}
+        try:
+            rmf = float(data.get("rmf"))
+            ssp = float(data.get("ssp"))
+            t_val = float(data.get("temperature"))
+            t_unit = str(data.get("temperature_unit", "F")).strip().upper()
+            if t_unit not in {"F", "C"}:
+                raise ValueError("temperature_unit must be F or C")
+            t_f = t_val if t_unit == "F" else (t_val * 9.0 / 5.0 + 32.0)
+            if rmf <= 0:
+                raise ValueError("Rmf must be > 0")
+            if t_f <= -459.67:
+                raise ValueError("Temperature below absolute zero")
+
+            k = 61.0 + 0.133 * t_f
+            denom = k * t_f
+            if denom == 0:
+                raise ValueError("Invalid temperature produces zero denominator")
+
+            rw = rmf * (10.0 ** (-ssp / denom))
+            rw_77 = rw * ((t_f + 6.77) / (77.0 + 6.77))
+
+            r.update({
+                "rw": float(rw),
+                "rw_77f": float(rw_77),
+                "k": float(k),
+                "temperature_f": float(t_f),
+                "formula": "Rw = Rmf * 10^(-SSP/(K*T)), K=61+0.133*T(F)",
+                "confidence": 0.75,
+            })
+            rw_candidates.append(float(rw_77))
+            weights.append(0.75)
+            results["inputs"].update({"rmf": rmf, "ssp": ssp, "temperature": t_val, "temperature_unit": t_unit})
+        except Exception as e:
+            r["notes"].append(str(e))
+        results["methods"]["sp"] = r
+
+    if method in {"ro", "all"}:
+        r = {"rw": None, "a": a_val, "confidence": 0.0, "notes": []}
+        try:
+            rt_clean = float(data.get("rt_clean"))
+            phi_clean = float(data.get("phi_clean"))
+            m_val = float(data.get("m", m_default))
+            if rt_clean <= 0:
+                raise ValueError("Rt_clean must be > 0")
+            if phi_clean <= 0 or phi_clean > 1.0:
+                raise ValueError("phi_clean must be in (0,1]")
+            rw = rt_clean * (phi_clean ** m_val)
+            r.update({
+                "rw": float(rw),
+                "m": float(m_val),
+                "formula": "Rw = Rt_clean * phi_clean^m",
+                "confidence": 0.80,
+            })
+            rw_candidates.append(float(rw))
+            weights.append(0.80)
+            results["inputs"].update({"rt_clean": rt_clean, "phi_clean": phi_clean, "m": m_val})
+        except Exception as e:
+            r["notes"].append(str(e))
+        results["methods"]["ro"] = r
+
+    if method in {"hingle", "all"}:
+        r = {"rw": None, "r2": None, "a": a_val, "confidence": 0.0, "notes": []}
+        try:
+            rt_curve = str(data.get("rt_curve", "RT")).upper()
+            phi_curve = str(data.get("phi_curve", "NPHI")).upper()
+            lr = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.id.desc()).first()
+            if not lr:
+                raise ValueError("No log run found")
+            rt_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == rt_curve).first()
+            phi_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == phi_curve).first()
+            if not rt_cd or not phi_cd:
+                raise ValueError("Required curves not found for Hingle")
+
+            rt = np.frombuffer(rt_cd.data_binary, dtype=np.float64).copy()
+            phi = np.frombuffer(phi_cd.data_binary, dtype=np.float64).copy()
+            npts = min(len(rt), len(phi))
+            rt = rt[:npts]
+            phi = phi[:npts]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                inv_rt = np.where(rt > 0, 1.0 / rt, np.nan)
+            valid = (~np.isnan(inv_rt)) & (~np.isnan(phi)) & np.isfinite(inv_rt) & np.isfinite(phi) & (phi >= 0) & (phi <= 1.0)
+            if np.sum(valid) < 3:
+                raise ValueError("Not enough valid points for Hingle fit")
+
+            x = phi[valid]
+            y = inv_rt[valid]
+            slope, intercept = np.polyfit(x, y, 1)
+            yhat = slope * x + intercept
+            ss_res = float(np.sum((y - yhat) ** 2))
+            ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+            r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+            rwa_intercept = float(intercept)
+            rw_est = (rwa_intercept / a_val) if (a_val > 0 and rwa_intercept > 0) else None
+            conf = max(0.0, min(1.0, r2)) * (1.0 if np.sum(valid) >= 50 else max(0.4, np.sum(valid) / 50.0))
+
+            sample_step = max(1, len(x) // 400)
+            x_s = x[::sample_step]
+            y_s = y[::sample_step]
+            r.update({
+                "rw": float(rw_est) if rw_est is not None else None,
+                "intercept_rwa": float(rwa_intercept),
+                "slope": float(slope),
+                "r2": round(float(r2), 6),
+                "points": int(np.sum(valid)),
+                "formula": "Linear fit on Hingle axes: (1/Rt) vs phi; intercept(phi=0)=Rw*a",
+                "confidence": float(conf),
+                "crossplot": {
+                    "x_phi": [round(float(v), 6) for v in x_s],
+                    "y_inv_rt": [round(float(v), 6) for v in y_s],
+                },
+            })
+            if rw_est is not None:
+                rw_candidates.append(float(rw_est))
+                weights.append(max(0.25, float(conf)))
+            results["inputs"].update({"rt_curve": rt_curve, "phi_curve": phi_curve})
+        except Exception as e:
+            r["notes"].append(str(e))
+        results["methods"]["hingle"] = r
+
+    if rw_candidates:
+        wsum = sum(weights) if sum(weights) > 0 else float(len(rw_candidates))
+        recommended = float(sum(v * w for v, w in zip(rw_candidates, weights)) / wsum)
+        confidence = min(1.0, max(weights) * (0.6 + 0.4 * min(1.0, len(rw_candidates) / 3.0)))
+    else:
+        recommended = None
+        confidence = 0.0
+
+    results["recommended_rw"] = recommended
+    results["confidence_score"] = round(confidence * 100.0, 1)
+    return results
 
 
 # ─── Sensitivity Analysis (Monte Carlo) ───────────────────────
@@ -1379,6 +2084,92 @@ def list_rft(wid: int, db: Session = Depends(get_db)):
     return [{c.name: getattr(r, c.name) for c in RFTPoint.__table__.columns} for r in rows]
 
 
+COMPLETION_COMPONENT_TYPES = {"casing", "tubing", "packer", "perforation", "screen", "liner", "cement", "pump", "valve"}
+
+
+@app.post("/api/wells/{wid}/completion", status_code=201)
+def create_completion_component(wid: int, data: dict, db: Session = Depends(get_db)):
+    ctype = str(data.get("component_type", "")).strip().lower()
+    if ctype not in COMPLETION_COMPONENT_TYPES:
+        raise HTTPException(400, f"Invalid component_type. Allowed: {sorted(COMPLETION_COMPONENT_TYPES)}")
+
+    top = float(data.get("depth_top"))
+    base = float(data.get("depth_base"))
+    if base < top:
+        top, base = base, top
+
+    row = CompletionData(
+        well_id=wid,
+        depth_top=top,
+        depth_base=base,
+        component_type=ctype,
+        size=str(data.get("size", "") or ""),
+        description=str(data.get("description", "") or ""),
+        notes=str(data.get("notes", "") or ""),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {c.name: getattr(row, c.name) for c in CompletionData.__table__.columns}
+
+
+@app.get("/api/wells/{wid}/completion")
+def list_completion_components(wid: int, db: Session = Depends(get_db)):
+    rows = db.query(CompletionData).filter(CompletionData.well_id == wid).order_by(CompletionData.depth_top.asc(), CompletionData.id.asc()).all()
+    return [{c.name: getattr(r, c.name) for c in CompletionData.__table__.columns} for r in rows]
+
+
+@app.delete("/api/completion/{cid}")
+def delete_completion_component(cid: int, db: Session = Depends(get_db)):
+    row = db.query(CompletionData).filter(CompletionData.id == cid).first()
+    if not row:
+        raise HTTPException(404, "Completion component not found")
+    db.delete(row)
+    db.commit()
+    return {"status": "ok"}
+
+
+@app.post("/api/wells/{wid}/completion/upload-csv")
+async def upload_completion_csv(wid: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    content = await file.read()
+    text_data = content.decode("utf-8", errors="replace")
+    reader = csv.DictReader(io.StringIO(text_data))
+    inserted = 0
+
+    for rec in reader:
+        if not rec:
+            continue
+        ctype = str(rec.get("component_type") or rec.get("ComponentType") or rec.get("type") or "").strip().lower()
+        if ctype not in COMPLETION_COMPONENT_TYPES:
+            continue
+        top_raw = rec.get("depth_top") or rec.get("DepthTop") or rec.get("top")
+        base_raw = rec.get("depth_base") or rec.get("DepthBase") or rec.get("base")
+        if top_raw in (None, "") or base_raw in (None, ""):
+            continue
+        try:
+            top = float(str(top_raw).strip())
+            base = float(str(base_raw).strip())
+        except Exception:
+            continue
+        if base < top:
+            top, base = base, top
+
+        row = CompletionData(
+            well_id=wid,
+            depth_top=top,
+            depth_base=base,
+            component_type=ctype,
+            size=str(rec.get("size") or rec.get("Size") or ""),
+            description=str(rec.get("description") or rec.get("Description") or ""),
+            notes=str(rec.get("notes") or rec.get("Notes") or ""),
+        )
+        db.add(row)
+        inserted += 1
+
+    db.commit()
+    return {"status": "ok", "inserted": inserted}
+
+
 @app.post("/api/wells/{wid}/rft/upload-csv")
 async def upload_rft_csv(wid: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
     content = await file.read()
@@ -1416,22 +2207,118 @@ async def upload_rft_csv(wid: int, file: UploadFile = File(...), db: Session = D
 def rft_pressure_gradient(wid: int, db: Session = Depends(get_db)):
     rows = db.query(RFTPoint).filter(RFTPoint.well_id == wid).order_by(RFTPoint.depth.asc()).all()
     points = [{c.name: getattr(r, c.name) for c in RFTPoint.__table__.columns} for r in rows]
-    valid = [(float(r.depth), float(r.pressure), (r.fluid_type or "unknown").lower()) for r in rows if r.depth is not None and r.pressure is not None]
+    valid = [{
+        "id": r.id,
+        "depth": float(r.depth),
+        "pressure": float(r.pressure),
+        "fluid_type": (r.fluid_type or "unknown").lower(),
+    } for r in rows if r.depth is not None and r.pressure is not None]
     if len(valid) < 2:
-        return {"count": len(valid), "points": points, "overall": None, "by_fluid": []}
+        return {
+            "count": len(valid),
+            "points": points,
+            "overall": None,
+            "by_fluid": [],
+            "fluid_segments": [],
+            "fluid_contacts": [],
+            "gradient_lines": {},
+            "pressure_regime_summary": {},
+            "formation_pressure": {"points": [], "intervals": []},
+        }
 
-    depths = np.array([v[0] for v in valid], dtype=float)
-    pressures = np.array([v[1] for v in valid], dtype=float)
+    fluid_windows = {
+        "gas": (0.05, 0.20),
+        "oil": (0.25, 0.35),
+        "water": (0.40, 0.50),
+    }
+
+    def classify_fluid_by_gradient(grad):
+        if grad is None or not np.isfinite(grad):
+            return "unknown"
+        for name, (lo, hi) in fluid_windows.items():
+            if lo <= grad <= hi:
+                return name
+        return "unknown"
+
+    def classify_pressure_regime(grad):
+        if grad is None or not np.isfinite(grad):
+            return "unknown"
+        if grad < 0.43:
+            return "underpressure"
+        if grad > 0.47:
+            return "overpressure"
+        return "normal"
+
+    depths = np.array([v["depth"] for v in valid], dtype=float)
+    pressures = np.array([v["pressure"] for v in valid], dtype=float)
     slope, intercept = np.polyfit(depths, pressures, 1)
     overall = {
         "gradient": float(slope),
         "intercept": float(intercept),
         "equation": f"P = {slope:.6f}*Depth + {intercept:.3f}",
+        "fluid_guess": classify_fluid_by_gradient(float(slope)),
+        "regime": classify_pressure_regime(float(slope)),
     }
 
+    # Segment data by local two-point gradients into contiguous fluid-gradient clusters.
+    for i in range(len(valid)):
+        if i == 0:
+            pair_grad = (valid[i + 1]["pressure"] - valid[i]["pressure"]) / max(valid[i + 1]["depth"] - valid[i]["depth"], 1e-9)
+        elif i == len(valid) - 1:
+            pair_grad = (valid[i]["pressure"] - valid[i - 1]["pressure"]) / max(valid[i]["depth"] - valid[i - 1]["depth"], 1e-9)
+        else:
+            pair_grad = (valid[i + 1]["pressure"] - valid[i - 1]["pressure"]) / max(valid[i + 1]["depth"] - valid[i - 1]["depth"], 1e-9)
+        valid[i]["pair_gradient"] = float(pair_grad)
+        valid[i]["fluid_from_gradient"] = classify_fluid_by_gradient(valid[i]["pair_gradient"])
+        valid[i]["pressure_regime"] = classify_pressure_regime(valid[i]["pair_gradient"])
+
+    segments = []
+    seg_start = 0
+    for i in range(1, len(valid)):
+        if valid[i]["fluid_from_gradient"] != valid[i - 1]["fluid_from_gradient"]:
+            segments.append((seg_start, i - 1))
+            seg_start = i
+    segments.append((seg_start, len(valid) - 1))
+
+    fluid_segments = []
+    for sidx, (a, b) in enumerate(segments):
+        seg_pts = valid[a:b + 1]
+        if len(seg_pts) < 2:
+            seg_slope = seg_pts[0]["pair_gradient"]
+            seg_intercept = seg_pts[0]["pressure"] - seg_slope * seg_pts[0]["depth"]
+        else:
+            seg_d = np.array([p["depth"] for p in seg_pts], dtype=float)
+            seg_p = np.array([p["pressure"] for p in seg_pts], dtype=float)
+            seg_slope, seg_intercept = np.polyfit(seg_d, seg_p, 1)
+        fluid_guess = classify_fluid_by_gradient(float(seg_slope))
+        fluid_segments.append({
+            "segment_index": sidx,
+            "start_depth": float(seg_pts[0]["depth"]),
+            "end_depth": float(seg_pts[-1]["depth"]),
+            "count": len(seg_pts),
+            "gradient": float(seg_slope),
+            "intercept": float(seg_intercept),
+            "fluid_type": fluid_guess,
+            "equation": f"P = {seg_slope:.6f}*Depth + {seg_intercept:.3f}",
+        })
+
+    fluid_contacts = []
+    for i in range(1, len(fluid_segments)):
+        prev_seg = fluid_segments[i - 1]
+        curr_seg = fluid_segments[i]
+        if prev_seg["fluid_type"] != curr_seg["fluid_type"]:
+            contact_depth = 0.5 * (prev_seg["end_depth"] + curr_seg["start_depth"])
+            fluid_contacts.append({
+                "depth": float(contact_depth),
+                "from_fluid": prev_seg["fluid_type"],
+                "to_fluid": curr_seg["fluid_type"],
+                "type": f"{prev_seg['fluid_type']}/{curr_seg['fluid_type']}",
+            })
+
+    # Legacy by_fluid from stored fluid labels (if present), plus gradient-derived summary.
     by_fluid = []
-    for fluid in sorted(set(v[2] for v in valid)):
-        arr = [(d, p) for d, p, f in valid if f == fluid]
+    for fluid in sorted(set(v["fluid_type"] for v in valid)):
+        arr = [(d["depth"], d["pressure"]) for d in valid if d["fluid_type"] == fluid]
         if len(arr) < 2:
             continue
         d = np.array([a[0] for a in arr], dtype=float)
@@ -1445,7 +2332,288 @@ def rft_pressure_gradient(wid: int, db: Session = Depends(get_db)):
             "equation": f"P = {s:.6f}*Depth + {b:.3f}",
         })
 
-    return {"count": len(valid), "points": points, "overall": overall, "by_fluid": by_fluid}
+    td = float(np.max(depths))
+    d0 = float(np.min(depths))
+    # Oilfield gradients in psi/ft.
+    hydro_g = 0.433
+    litho_g = 1.0
+    gradient_lines = {
+        "overall": {"gradient": float(slope), "intercept": float(intercept), "label": "RFT Best Fit"},
+        "hydrostatic": {"gradient": hydro_g, "intercept": 0.0, "label": "Hydrostatic (0.433 psi/ft)"},
+        "lithostatic": {"gradient": litho_g, "intercept": 0.0, "label": "Lithostatic (1.00 psi/ft)"},
+        "segments": fluid_segments,
+        "plot_depth_min": d0,
+        "plot_depth_max": td,
+    }
+
+    regime_counts = {"normal": 0, "underpressure": 0, "overpressure": 0, "unknown": 0}
+    for p in valid:
+        regime_counts[p["pressure_regime"]] = regime_counts.get(p["pressure_regime"], 0) + 1
+
+    # Formation pressure extraction and interval communication diagnostics.
+    fp_points = []
+    for p in valid:
+        fp_points.append({
+            "id": p["id"],
+            "depth": p["depth"],
+            "formation_pressure": p["pressure"],
+            "gradient": p["pair_gradient"],
+            "fluid_type": p["fluid_from_gradient"],
+            "pressure_regime": p["pressure_regime"],
+        })
+
+    intervals = []
+    for i in range(1, len(valid)):
+        p1, p2 = valid[i - 1], valid[i]
+        dz = p2["depth"] - p1["depth"]
+        if abs(dz) < 1e-9:
+            continue
+        g = (p2["pressure"] - p1["pressure"]) / dz
+        expected = 0.433 * dz
+        delta = abs((p2["pressure"] - p1["pressure"]) - expected)
+        state = "communicating" if delta <= 75.0 else "sealed"
+        intervals.append({
+            "top_depth": float(min(p1["depth"], p2["depth"])),
+            "bottom_depth": float(max(p1["depth"], p2["depth"])),
+            "gradient": float(g),
+            "pressure_change": float(p2["pressure"] - p1["pressure"]),
+            "expected_hydrostatic_change": float(expected),
+            "pressure_deviation": float(delta),
+            "communication": state,
+        })
+
+    classified_points = []
+    for p in valid:
+        classified_points.append({
+            "id": p["id"],
+            "depth": p["depth"],
+            "pressure": p["pressure"],
+            "fluid_type": p["fluid_type"],
+            "fluid_from_gradient": p["fluid_from_gradient"],
+            "pair_gradient": p["pair_gradient"],
+            "pressure_regime": p["pressure_regime"],
+        })
+
+    return {
+        "count": len(valid),
+        "points": points,
+        "classified_points": classified_points,
+        "overall": overall,
+        "by_fluid": by_fluid,
+        "fluid_segments": fluid_segments,
+        "fluid_contacts": fluid_contacts,
+        "gradient_lines": gradient_lines,
+        "pressure_regime_summary": regime_counts,
+        "formation_pressure": {"points": fp_points, "intervals": intervals},
+    }
+
+
+# ─── Production Data ──────────────────────────────────────────
+def _parse_iso_date(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime.date):
+        return value
+    try:
+        return datetime.datetime.strptime(str(value).strip(), "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _fit_exponential_decline(t, q):
+    # ln(q) = ln(qi) - d*t
+    if len(t) < 2:
+        return None
+    y = np.log(np.clip(q, 1e-9, None))
+    m, c = np.polyfit(t, y, 1)
+    d = max(0.0, -float(m))
+    qi = float(np.exp(c))
+    qhat = qi * np.exp(-d * t)
+    sse = float(np.sum((q - qhat) ** 2))
+    return {"model": "exponential", "qi": qi, "d": d, "qhat": qhat, "sse": sse}
+
+
+def _fit_hyperbolic_decline(t, q):
+    # q = qi / (1 + b*di*t)^(1/b)
+    if len(t) < 2:
+        return None
+    qi0 = float(np.max(q))
+    best = None
+    b_grid = np.linspace(0.1, 1.5, 57)
+    di_grid = np.linspace(1e-4, 2.0, 200)
+    for b in b_grid:
+        denom = 1.0 + (b * di_grid[:, None] * t[None, :])
+        model_unit = np.power(np.clip(denom, 1e-9, None), -1.0 / b)
+        # solve qi (least squares) for each di candidate
+        num = np.sum(model_unit * q[None, :], axis=1)
+        den = np.sum(model_unit * model_unit, axis=1)
+        qi_vals = np.where(den > 0, num / den, qi0)
+        qhat_all = qi_vals[:, None] * model_unit
+        sse_all = np.sum((qhat_all - q[None, :]) ** 2, axis=1)
+        idx = int(np.argmin(sse_all))
+        sse = float(sse_all[idx])
+        qi = float(max(qi_vals[idx], 1e-9))
+        di = float(di_grid[idx])
+        qhat = qi * np.power(np.clip(1.0 + b * di * t, 1e-9, None), -1.0 / b)
+        candidate = {"model": "hyperbolic", "qi": qi, "di": di, "b": float(b), "qhat": qhat, "sse": sse}
+        if best is None or sse < best["sse"]:
+            best = candidate
+    return best
+
+
+def _compute_eur(best_fit, days_to_limit=3650.0, q_limit=1.0):
+    if not best_fit:
+        return None
+    t = np.linspace(0, days_to_limit, 2500)
+    if best_fit["model"] == "exponential":
+        q = best_fit["qi"] * np.exp(-best_fit["d"] * t)
+    else:
+        q = best_fit["qi"] * np.power(np.clip(1.0 + best_fit["b"] * best_fit["di"] * t, 1e-9, None), -1.0 / max(best_fit["b"], 1e-6))
+    q = np.clip(q, 0.0, None)
+    mask = q >= q_limit
+    if np.any(mask):
+        t = t[mask]
+        q = q[mask]
+    eur = float(np.trapz(q, t))
+    return eur
+
+
+@app.post("/api/wells/{wid}/production", status_code=201)
+def create_production_row(wid: int, data: dict, db: Session = Depends(get_db)):
+    d = _parse_iso_date(data.get("date"))
+    if not d:
+        raise HTTPException(400, "date is required in YYYY-MM-DD format")
+    row = ProductionData(
+        well_id=wid,
+        date=d,
+        oil_rate=float(data["oil_rate"]) if data.get("oil_rate") not in (None, "") else None,
+        gas_rate=float(data["gas_rate"]) if data.get("gas_rate") not in (None, "") else None,
+        water_rate=float(data["water_rate"]) if data.get("water_rate") not in (None, "") else None,
+        water_cut=float(data["water_cut"]) if data.get("water_cut") not in (None, "") else None,
+        gor=float(data["gor"]) if data.get("gor") not in (None, "") else None,
+        bhp=float(data["bhp"]) if data.get("bhp") not in (None, "") else None,
+        whp=float(data["whp"]) if data.get("whp") not in (None, "") else None,
+        choke_size=float(data["choke_size"]) if data.get("choke_size") not in (None, "") else None,
+        cumulative_oil=float(data["cumulative_oil"]) if data.get("cumulative_oil") not in (None, "") else None,
+        cumulative_gas=float(data["cumulative_gas"]) if data.get("cumulative_gas") not in (None, "") else None,
+        cumulative_water=float(data["cumulative_water"]) if data.get("cumulative_water") not in (None, "") else None,
+        notes=str(data.get("notes", "")),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {c.name: getattr(row, c.name) for c in ProductionData.__table__.columns}
+
+
+@app.get("/api/wells/{wid}/production")
+def list_production_rows(wid: int, db: Session = Depends(get_db)):
+    rows = db.query(ProductionData).filter(ProductionData.well_id == wid).order_by(ProductionData.date.asc(), ProductionData.id.asc()).all()
+    result = []
+    for r in rows:
+        d = {c.name: getattr(r, c.name) for c in ProductionData.__table__.columns}
+        if d.get("date") is not None:
+            d["date"] = d["date"].isoformat()
+        result.append(d)
+    return result
+
+
+@app.post("/api/wells/{wid}/production/upload-csv")
+async def upload_production_csv(wid: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    content = await file.read()
+    text_data = content.decode("utf-8", errors="replace")
+    reader = csv.DictReader(io.StringIO(text_data))
+    inserted = 0
+    for rec in reader:
+        if not rec:
+            continue
+        date_val = rec.get("date") or rec.get("Date") or rec.get("DATE")
+        d = _parse_iso_date(date_val)
+        if not d:
+            continue
+
+        def f(*keys):
+            for k in keys:
+                v = rec.get(k)
+                if v not in (None, ""):
+                    try:
+                        return float(str(v).strip())
+                    except Exception:
+                        return None
+            return None
+
+        row = ProductionData(
+            well_id=wid,
+            date=d,
+            oil_rate=f("oil_rate", "OilRate", "oil"),
+            gas_rate=f("gas_rate", "GasRate", "gas"),
+            water_rate=f("water_rate", "WaterRate", "water"),
+            water_cut=f("water_cut", "WaterCut"),
+            gor=f("gor", "GOR"),
+            bhp=f("bhp", "BHP"),
+            whp=f("whp", "WHP"),
+            choke_size=f("choke_size", "ChokeSize"),
+            cumulative_oil=f("cumulative_oil", "CumOil"),
+            cumulative_gas=f("cumulative_gas", "CumGas"),
+            cumulative_water=f("cumulative_water", "CumWater"),
+            notes=str(rec.get("notes") or rec.get("Notes") or ""),
+        )
+        db.add(row)
+        inserted += 1
+    db.commit()
+    return {"status": "ok", "inserted": inserted}
+
+
+@app.get("/api/wells/{wid}/production/decline-curve")
+def production_decline_curve(wid: int, db: Session = Depends(get_db)):
+    rows = db.query(ProductionData).filter(ProductionData.well_id == wid).order_by(ProductionData.date.asc(), ProductionData.id.asc()).all()
+    valid = [(r.date, float(r.oil_rate)) for r in rows if r.date is not None and r.oil_rate is not None and r.oil_rate > 0]
+    if len(valid) < 3:
+        return {"count": len(valid), "detail": "Need at least 3 positive oil-rate data points", "best_model": None}
+
+    t0 = valid[0][0]
+    t = np.array([(d - t0).days for d, _ in valid], dtype=float)
+    q = np.array([v for _, v in valid], dtype=float)
+
+    exp_fit = _fit_exponential_decline(t, q)
+    hyp_fit = _fit_hyperbolic_decline(t, q)
+    fits = [f for f in [exp_fit, hyp_fit] if f is not None]
+    if not fits:
+        return {"count": len(valid), "best_model": None}
+
+    best = min(fits, key=lambda f: f["sse"])
+    eur = _compute_eur(best)
+
+    fitted_points = []
+    qhat = best.get("qhat", np.array([]))
+    for i, (d, q_obs) in enumerate(valid):
+        fitted_points.append({
+            "date": d.isoformat(),
+            "t_days": float(t[i]),
+            "q_obs": float(q_obs),
+            "q_fit": float(qhat[i]) if i < len(qhat) else None,
+        })
+
+    payload = {
+        "count": len(valid),
+        "best_model": best["model"],
+        "sse": float(best["sse"]),
+        "eur_oil_bbl": eur,
+        "fitted_points": fitted_points,
+        "models": {
+            "exponential": {
+                "qi": exp_fit["qi"],
+                "d": exp_fit["d"],
+                "sse": exp_fit["sse"],
+            } if exp_fit else None,
+            "hyperbolic": {
+                "qi": hyp_fit["qi"],
+                "di": hyp_fit["di"],
+                "b": hyp_fit["b"],
+                "sse": hyp_fit["sse"],
+            } if hyp_fit else None,
+        },
+    }
+    return payload
 
 
 # ─── Curve Alias/Mnemonic Remap ──────────────────────────────
@@ -2374,7 +3542,7 @@ def strat_normalize(wid: int, data: dict, db: Session = Depends(get_db)):
 # ─── Sprint 21: Professional Petrophysics / Plotting ─────────
 @app.post("/api/wells/{wid}/permeability")
 def compute_permeability(wid: int, data: dict, db: Session = Depends(get_db)):
-    """Compute permeability from PHIE using Timur, Coates, or SDR model."""
+    """Compute permeability (mD) via Coates, Timur, SDR, with crossplot + FZI diagnostics."""
     well = db.query(Well).filter(Well.id == wid).first()
     if not well:
         raise HTTPException(404, "Well not found")
@@ -2383,76 +3551,230 @@ def compute_permeability(wid: int, data: dict, db: Session = Depends(get_db)):
     if not lr:
         raise HTTPException(404, "No log run")
 
-    method = str(data.get("method", "timur")).lower()
+    model = str(data.get("model", data.get("method", "timur"))).strip().lower()
+    if model not in {"coates", "timur", "sdr", "all"}:
+        raise HTTPException(400, "model must be one of: coates, timur, sdr, all")
+
     phie_curve = data.get("phie_curve", "PHIE")
-    vsh_curve = data.get("vsh_curve", "VSH")
+    sw_curve = data.get("sw_curve", "SW")
+    rhob_curve = data.get("rhob_curve", "RHOB")
     grain_density = float(data.get("grain_density", 2.65))
+    water_cut = float(data.get("water_cut", 0.0) or 0.0)
+    water_cut = max(0.0, min(1.0, water_cut))
 
-    phie_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == phie_curve).first()
+    # Model constants (industry-typical defaults)
+    coates_c = float(data.get("coates_c", 1e4))
+    timur_a = float(data.get("timur_a", 0.136))
+    sdr_a = float(data.get("sdr_a", 4.0))
+
     depth_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
-
-    # Fallback: if PHIE not found, compute from RHOB
-    if not phie_cd:
-        rho_curve = data.get("rhob_curve", "RHOB")
-        rho_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == rho_curve).first()
-        if rho_cd:
-            rho_arr = np.frombuffer(rho_cd.data_binary, dtype=np.float64).copy()
-            rho_ma = grain_density
-            rho_f = 1.0
-            phie_arr = np.clip((rho_ma - rho_arr) / (rho_ma - rho_f), 1e-6, 0.6)
-            phie_arr[np.isnan(rho_arr)] = np.nan
-            phie = phie_arr
-        else:
-            raise HTTPException(404, f"Curve {phie_curve} not found and no RHOB for fallback")
     if not depth_cd:
         raise HTTPException(404, "Depth curve not found")
 
-    vsh_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == vsh_curve).first()
-    phie = np.frombuffer(phie_cd.data_binary, dtype=np.float64).copy() if phie_cd else phie  # phie set by RHOB fallback above
+    phie_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == phie_curve).first()
+    sw_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == sw_curve).first()
+
     depth = np.frombuffer(depth_cd.data_binary, dtype=np.float64).copy()
-    vsh = np.frombuffer(vsh_cd.data_binary, dtype=np.float64).copy() if vsh_cd else np.full_like(phie, np.nan)
 
-    pp = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
-    sw_cutoff = float(pp.sw_cutoff) if pp and pp.sw_cutoff is not None else 0.6
-    sw_irr = max(0.05, min(0.95, sw_cutoff))
-
-    phie_clip = np.clip(phie, 1e-6, 0.6)
-    # BVW approximation using PHIE and Sw_irr cutoff proxy
-    bvw = np.clip(phie_clip * sw_irr, 1e-6, None)
-    a = float(pp.a) if pp and pp.a is not None else 4.0
-
-    k = np.full_like(phie_clip, np.nan)
-    valid = ~np.isnan(phie_clip) & (phie_clip > 0)
-
-    if method == "timur":
-        k[valid] = (10 ** 4) * (phie_clip[valid] ** 2.25) / (sw_irr ** 2)
-    elif method == "coates":
-        ratio = (phie_clip[valid] ** 2) * ((1 - sw_irr) / sw_irr)
-        k[valid] = (ratio ** 2) * (10 ** 4)
-    elif method == "sdr":
-        k[valid] = a * (phie_clip[valid] ** 4) * ((1.0 / bvw[valid]) ** 2)
+    # PHIE fallback from RHOB if needed
+    if phie_cd:
+        phie = np.frombuffer(phie_cd.data_binary, dtype=np.float64).copy()
     else:
-        raise HTTPException(400, "method must be one of: timur, coates, sdr")
+        rho_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == rhob_curve).first()
+        if not rho_cd:
+            raise HTTPException(404, f"Curve {phie_curve} not found and no {rhob_curve} for fallback")
+        rho_arr = np.frombuffer(rho_cd.data_binary, dtype=np.float64).copy()
+        rho_ma = grain_density
+        rho_f = 1.0
+        phie = np.clip((rho_ma - rho_arr) / max(1e-9, (rho_ma - rho_f)), 0.0, 0.6)
+        phie[np.isnan(rho_arr)] = np.nan
 
-    # Mild density scaling hook for professional workflows (kept bounded)
-    dens_scale = max(0.8, min(1.2, grain_density / 2.65))
-    k[valid] = k[valid] * dens_scale
+    # Sw / Swir handling
+    if sw_cd:
+        sw = np.frombuffer(sw_cd.data_binary, dtype=np.float64).copy()
+    else:
+        sw = np.full_like(phie, np.nan)
 
-    k_valid = k[~np.isnan(k)]
-    step = max(1, len(depth) // 500)
+    # User Swir takes priority. Else estimate Swir = Sw * (1 - water_cut)
+    user_swir = data.get("swir")
+    if user_swir is not None and str(user_swir).strip() != "":
+        swir = np.full_like(phie, float(user_swir), dtype=np.float64)
+    else:
+        swir = sw * (1.0 - water_cut)
+
+    # If Sw missing, fall back to PetroParams sw_cutoff (legacy behavior)
+    pp = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
+    sw_fallback = float(pp.sw_cutoff) if pp and pp.sw_cutoff is not None else 0.2
+    swir[np.isnan(swir)] = sw_fallback
+
+    # Sanitize
+    phie_clip = np.clip(phie, 0.0, 0.6)
+    swir_clip = np.clip(swir, 1e-4, 1.0)
+
+    def _stats(arr: np.ndarray):
+        v = arr[np.isfinite(arr) & (arr > 0)]
+        if len(v) == 0:
+            return {"count": 0, "min": None, "max": None, "mean": None, "median": None}
+        return {
+            "count": int(len(v)),
+            "min": round(float(np.min(v)), 4),
+            "max": round(float(np.max(v)), 4),
+            "mean": round(float(np.mean(v)), 4),
+            "median": round(float(np.median(v)), 4),
+        }
+
+    def _crossplot(phi_arr: np.ndarray, k_arr: np.ndarray):
+        mask = np.isfinite(phi_arr) & np.isfinite(k_arr) & (phi_arr > 0) & (k_arr > 0)
+        if np.sum(mask) < 3:
+            return {
+                "A": None, "B": None, "r2": None, "n_points": int(np.sum(mask)),
+                "equation": "insufficient data",
+                "phi": [], "k": [], "k_fit": []
+            }
+        x = phi_arr[mask]
+        y = np.log10(k_arr[mask])
+        A, B = np.polyfit(x, y, 1)
+        yhat = A * x + B
+        ss_res = float(np.sum((y - yhat) ** 2))
+        ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+        r2 = (1.0 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+        return {
+            "A": round(float(A), 6),
+            "B": round(float(B), 6),
+            "r2": round(float(r2), 6),
+            "n_points": int(len(x)),
+            "equation": f"log10(k) = {A:.4f} * phi + {B:.4f}",
+            "phi": [round(float(v), 6) for v in x],
+            "k": [round(float(v), 6) for v in k_arr[mask]],
+            "k_fit": [round(float(10 ** v), 6) for v in yhat],
+        }
+
+    def _fzi(k_arr: np.ndarray, phi_arr: np.ndarray):
+        # RQI = 0.0314 * sqrt(k/phi), phi_z = phi/(1-phi), FZI = RQI/phi_z
+        valid = np.isfinite(k_arr) & np.isfinite(phi_arr) & (k_arr > 0) & (phi_arr > 0) & (phi_arr < 1)
+        if np.sum(valid) == 0:
+            return {"values": [], "histogram": [], "hfu": []}
+
+        phi_v = phi_arr[valid]
+        k_v = k_arr[valid]
+        rqi = 0.0314 * np.sqrt(k_v / np.clip(phi_v, 1e-9, None))
+        phi_z = phi_v / np.clip(1.0 - phi_v, 1e-9, None)
+        fzi = rqi / np.clip(phi_z, 1e-9, None)
+
+        fzi = fzi[np.isfinite(fzi) & (fzi > 0)]
+        if len(fzi) == 0:
+            return {"values": [], "histogram": [], "hfu": []}
+
+        # HFU grouping by FZI terciles
+        q1, q2 = np.percentile(fzi, [33.33, 66.67])
+        hfu = []
+        for v in fzi:
+            if v <= q1:
+                hfu.append("HFU-1")
+            elif v <= q2:
+                hfu.append("HFU-2")
+            else:
+                hfu.append("HFU-3")
+
+        hist_counts, hist_edges = np.histogram(fzi, bins=10)
+        histogram = []
+        for i in range(len(hist_counts)):
+            histogram.append({
+                "from": round(float(hist_edges[i]), 6),
+                "to": round(float(hist_edges[i + 1]), 6),
+                "count": int(hist_counts[i]),
+            })
+
+        return {
+            "values": [round(float(v), 6) for v in fzi],
+            "histogram": histogram,
+            "hfu": hfu,
+            "stats": _stats(fzi),
+        }
+
+    # Load optional NMR T2 geometric mean curve
+    t2_cd = None
+    for t2_mn in [data.get("t2gm_curve", "T2GM"), "T2LM", "T2_LOG_MEAN", "T2GEOM"]:
+        if not t2_mn:
+            continue
+        t2_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == t2_mn).first()
+        if t2_cd:
+            break
+    t2gm = np.frombuffer(t2_cd.data_binary, dtype=np.float64).copy() if t2_cd else None
+
+    available = {}
+
+    def _add_model(name: str, arr: np.ndarray):
+        arr = np.where(np.isfinite(arr) & (arr > 0), arr, np.nan)
+        available[name] = {
+            "k_md": arr,
+            "stats": _stats(arr),
+            "crossplot": _crossplot(phie_clip, arr),
+            "fzi": _fzi(arr, phie_clip),
+        }
+
+    # Coates: k = ((phi^4)/(Swir^2))*C
+    k_coates = ((phie_clip ** 4) / (swir_clip ** 2)) * coates_c
+    _add_model("coates", k_coates)
+
+    # Timur: k = a*(phi^4.4)/(Swir^2)
+    k_timur = timur_a * (phie_clip ** 4.4) / (swir_clip ** 2)
+    _add_model("timur", k_timur)
+
+    # SDR (requires NMR T2gm): k = a * phi^4 * T2gm^2
+    if t2gm is not None:
+        t2_clip = np.where(np.isfinite(t2gm) & (t2gm > 0), t2gm, np.nan)
+        k_sdr = sdr_a * (phie_clip ** 4) * (t2_clip ** 2)
+        _add_model("sdr", k_sdr)
+
+    selected_models = list(available.keys()) if model == "all" else [model]
+    selected_models = [m for m in selected_models if m in available]
+    if not selected_models:
+        raise HTTPException(400, "Requested model unavailable (SDR requires NMR T2gm data)")
+
+    step = max(1, len(depth) // 800)
     idx = list(range(0, len(depth), step))
 
+    k_values = {}
+    summary = {}
+    crossplot = {}
+    fzi = {}
+
+    for m in selected_models:
+        k_arr = available[m]["k_md"]
+        k_values[m] = [round(float(k_arr[i]), 6) if np.isfinite(k_arr[i]) else None for i in idx]
+        summary[m] = available[m]["stats"]
+        crossplot[m] = available[m]["crossplot"]
+        fzi[m] = available[m]["fzi"]
+
+    primary = selected_models[0]
+    primary_valid = available[primary]["k_md"][np.isfinite(available[primary]["k_md"]) & (available[primary]["k_md"] > 0)]
+
     return {
-        "curve_name": f"K_{method.upper()}",
-        "points": int(len(k_valid)),
-        "values": [round(float(k[i]), 3) if not np.isnan(k[i]) else None for i in idx],
-        "depths": [round(float(depth[i]), 3) for i in idx],
-        "method": method,
-        "stats": {
-            "min": round(float(np.min(k_valid)), 3) if len(k_valid) else None,
-            "max": round(float(np.max(k_valid)), 3) if len(k_valid) else None,
-            "mean": round(float(np.mean(k_valid)), 3) if len(k_valid) else None,
-            "median": round(float(np.median(k_valid)), 3) if len(k_valid) else None,
+        "well_id": wid,
+        "log_run_id": lr.id,
+        "model": model,
+        "models_computed": selected_models,
+        "units": "md",
+        "curve_name": "PERM",
+        "depth": [round(float(depth[i]), 3) for i in idx],
+        "phi": [round(float(phie_clip[i]), 6) if np.isfinite(phie_clip[i]) else None for i in idx],
+        "swir": [round(float(swir_clip[i]), 6) if np.isfinite(swir_clip[i]) else None for i in idx],
+        "k_values": k_values,
+        "summary": summary,
+        "crossplot": crossplot,
+        "fzi": fzi,
+        "points": int(len(primary_valid)),
+        "stats": summary[primary],
+        "constants": {
+            "coates_c": coates_c,
+            "timur_a": timur_a,
+            "sdr_a": sdr_a,
+            "water_cut": water_cut,
+        },
+        "availability": {
+            "sdr_available": t2gm is not None,
+            "nmr_t2_curve": t2_cd.mnemonic if t2_cd else None,
         },
     }
 
@@ -4070,6 +5392,111 @@ def compute_vcl_models(wid: int, data: dict, db: Session = Depends(get_db)):
     return {"results": results, "summary": summary, "params": {"gr_clean": gr_clean, "gr_shale": gr_shale}}
 
 
+@app.post("/api/wells/{wid}/lithology")
+def classify_lithology(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Automated lithology classification from GR with optional RHOB/NPHI crossplot criteria."""
+    lr_id = data.get("log_run_id")
+    lr = db.query(LogRun).filter(LogRun.id == lr_id).first() if lr_id else \
+         db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+
+    method = str(data.get("method", "gr_rhob_nphi")).strip().lower()
+    if method not in {"gr_only", "gr_rhob_nphi", "crossplot"}:
+        raise HTTPException(400, "method must be one of: gr_only, gr_rhob_nphi, crossplot")
+
+    gr_min = float(data.get("gr_min", 0.0))
+    gr_max = float(data.get("gr_max", 150.0))
+    if gr_max <= gr_min:
+        raise HTTPException(400, "gr_max must be greater than gr_min")
+
+    gr_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["GR", "SGR", "CGR"])).first()
+    if not gr_cd:
+        raise HTTPException(400, "GR curve required")
+
+    rhob_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["RHOB", "RHOZ", "DEN"])) .first()
+    nphi_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["NPHI", "NPHI_LS"])) .first()
+    dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH", "MD", "TVD"])) .first()
+
+    gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy()
+    n = len(gr)
+    rhob = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy() if rhob_cd else np.full(n, np.nan)
+    nphi = np.frombuffer(nphi_cd.data_binary, dtype=np.float64).copy() if nphi_cd else np.full(n, np.nan)
+    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(n, dtype=np.float64)
+
+    lith_code = np.zeros(n, dtype=np.int32)
+    vcl_array = np.full(n, np.nan)
+
+    for i in range(n):
+        gv = gr[i]
+        if np.isnan(gv):
+            continue
+
+        igr = (gv - gr_min) / (gr_max - gr_min)
+        igr = max(0.0, min(1.0, float(igr)))
+
+        # Vcl models from GR (Larionov tertiary default)
+        vcl_larionov_tertiary = 0.083 * (2 ** (3.7 * igr) - 1)
+        _vcl_clavier = 0.33 * (2 ** (2 * igr) - 1)
+        _vcl_linear = igr
+        vcl = max(0.0, min(1.0, float(vcl_larionov_tertiary)))
+        vcl_array[i] = vcl
+
+        rv = rhob[i] if i < len(rhob) else np.nan
+        nv = nphi[i] if i < len(nphi) else np.nan
+        has_rhob_nphi = (not np.isnan(rv)) and (not np.isnan(nv))
+
+        if method == "gr_only" or ((method in {"gr_rhob_nphi", "crossplot"}) and not has_rhob_nphi):
+            if vcl < 0.3:
+                lith_code[i] = 1
+            elif vcl < 0.5:
+                lith_code[i] = 2
+            else:
+                lith_code[i] = 3
+            continue
+
+        if rv < 2.0 and nv > 0.4:
+            lith_code[i] = 8
+        elif 2.0 < rv < 2.1 and nv < 0.05:
+            lith_code[i] = 7
+        elif rv > 2.85 and nv < 0.05:
+            lith_code[i] = 6
+        elif vcl < 0.2 and 2.7 < rv < 2.9 and -0.05 < nv < 0.1:
+            lith_code[i] = 5
+        elif vcl < 0.2 and 2.6 < rv < 2.75 and -0.05 < nv < 0.15:
+            lith_code[i] = 4
+        elif vcl >= 0.5 and rv > 2.2:
+            lith_code[i] = 3
+        elif 0.3 <= vcl < 0.5 and 2.0 < rv < 2.75:
+            lith_code[i] = 2
+        elif vcl < 0.3 and 2.0 < rv < 2.65 and nv < 0.35:
+            lith_code[i] = 1
+
+    labels = {
+        1: "sand",
+        2: "shaly_sand",
+        3: "shale",
+        4: "limestone",
+        5: "dolomite",
+        6: "anhydrite",
+        7: "salt",
+        8: "coal",
+    }
+    total_valid = int(np.sum(lith_code > 0))
+    summary = {}
+    for code, label in labels.items():
+        count = int(np.sum(lith_code == code))
+        if count > 0:
+            summary[label] = round((count / max(1, total_valid)) * 100.0, 2)
+
+    return {
+        "depth": dept.tolist(),
+        "lith_code": lith_code.astype(int).tolist(),
+        "vcl_array": vcl_array.tolist(),
+        "summary": summary,
+    }
+
+
 # ─── Sprint 27: Tornado Chart Data ──────────────────────────
 @app.post("/api/wells/{wid}/tornado")
 def tornado_analysis(wid: int, data: dict, db: Session = Depends(get_db)):
@@ -4427,6 +5854,22 @@ def delete_user(uid: int, db: Session = Depends(get_db), _role: str = Depends(re
 
 
 # ─── Sprint 28: Synthetic Seismogram ─────────────────────────
+def _hilbert_transform(x: np.ndarray) -> np.ndarray:
+    """Compute Hilbert transform using FFT (SciPy-free)."""
+    n = len(x)
+    Xf = np.fft.fft(x)
+    h = np.zeros(n)
+    if n % 2 == 0:
+        h[0] = 1
+        h[n // 2] = 1
+        h[1:n // 2] = 2
+    else:
+        h[0] = 1
+        h[1:(n + 1) // 2] = 2
+    analytic = np.fft.ifft(Xf * h)
+    return np.imag(analytic)
+
+
 def _compute_synthetic_seismogram(wid: int, data: dict, db: Session):
     lr_id = data.get("log_run_id")
     lr = db.query(LogRun).filter(LogRun.id == lr_id).first() if lr_id else \
@@ -4453,33 +5896,75 @@ def _compute_synthetic_seismogram(wid: int, data: dict, db: Session):
     if len(dt_v) < 10:
         raise HTTPException(400, "Not enough valid DT/RHOB data")
 
-    velocity = 1e6 / dt_v
-    ai = velocity * rhob_v
-    rc = np.zeros(len(ai))
-    for i in range(1, len(ai)):
-        rc[i] = (ai[i] - ai[i-1]) / (ai[i] + ai[i-1]) if (ai[i] + ai[i-1]) > 0 else 0
+    velocity = 1e6 / dt_v  # ft/s when DT is us/ft
+    ai = rhob_v * velocity
 
-    freq = float(data.get("frequency", 30))
-    dt_sample = float(lr.step) if lr.step else 0.5
-    t_wav = np.arange(-0.05, 0.05, dt_sample / np.mean(velocity))
-    wav = (1 - 2 * (np.pi * freq * t_wav) ** 2) * np.exp(-(np.pi * freq * t_wav) ** 2)
-    wav = wav / np.max(np.abs(wav))
+    rc = np.zeros(len(ai), dtype=np.float64)
+    ai_sum = ai[1:] + ai[:-1]
+    safe = np.abs(ai_sum) > 1e-12
+    rc_vals = np.zeros(len(ai) - 1, dtype=np.float64)
+    rc_vals[safe] = (ai[1:][safe] - ai[:-1][safe]) / ai_sum[safe]
+    rc[1:] = rc_vals
+
+    wavelet_freq = float(data.get("wavelet_freq", data.get("frequency", 30)))
+    wavelet_freq = float(np.clip(wavelet_freq, 10.0, 80.0))
+    polarity = str(data.get("polarity", "normal")).lower()
+    phase = int(float(data.get("phase", 0)))
+    phase = 90 if phase == 90 else 0
+
+    # Time-depth relationship: TWT = 2 * cumsum(DT * dD) / 1e6
+    d_depth = np.diff(dept_v)
+    if len(d_depth) == 0:
+        raise HTTPException(400, "Not enough depth samples")
+    median_dd = float(np.nanmedian(np.abs(d_depth[d_depth != 0]))) if np.any(d_depth != 0) else 0.5
+    d_depth_safe = np.where(np.abs(d_depth) > 0, np.abs(d_depth), median_dd if median_dd > 0 else 0.5)
+    twt = np.zeros(len(dept_v), dtype=np.float64)
+    twt[1:] = 2.0 * np.cumsum(dt_v[:-1] * d_depth_safe) / 1e6
+
+    dt_time = float(np.nanmedian(np.diff(twt))) if len(twt) > 2 else 0.0005
+    if not np.isfinite(dt_time) or dt_time <= 0:
+        dt_time = 0.0005
+
+    half_len_s = 0.064
+    t_wav = np.arange(-half_len_s, half_len_s + dt_time, dt_time)
+    wav = (1 - 2 * (np.pi ** 2) * (wavelet_freq ** 2) * (t_wav ** 2)) * np.exp(-(np.pi ** 2) * (wavelet_freq ** 2) * (t_wav ** 2))
+    max_w = float(np.max(np.abs(wav))) if len(wav) else 0.0
+    if max_w > 0:
+        wav = wav / max_w
+
     synthetic = np.convolve(rc, wav, mode='same')
+    if phase == 90:
+        synthetic = _hilbert_transform(synthetic)
+    if polarity == "reversed":
+        synthetic = -synthetic
+
     step = max(1, len(dept_v) // 2000)
 
     return {
         "depth": dept_v[::step].tolist(),
+        "twt": twt[::step].tolist(),
         "ai": ai[::step].tolist(),
         "rc": rc[::step].tolist(),
         "synthetic": synthetic[::step].tolist(),
-        "wavelet": wav.tolist(),
-        "params": {"frequency": freq, "dt_sample": dt_sample, "n_points": len(dept_v)},
+        "wavelet": {
+            "time": t_wav.tolist(),
+            "amplitude": wav.tolist(),
+        },
+        "params": {
+            "wavelet_freq": wavelet_freq,
+            "polarity": polarity,
+            "phase": phase,
+            "time_sample_s": dt_time,
+            "n_points": len(dept_v)
+        },
         "stats": {
             "ai_min": round(float(np.min(ai)), 1),
             "ai_max": round(float(np.max(ai)), 1),
             "ai_mean": round(float(np.mean(ai)), 1),
             "rc_min": round(float(np.min(rc)), 4),
             "rc_max": round(float(np.max(rc)), 4),
+            "twt_min_s": round(float(np.min(twt)), 4),
+            "twt_max_s": round(float(np.max(twt)), 4),
         }
     }
 
