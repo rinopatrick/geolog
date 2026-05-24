@@ -1,0 +1,10 @@
+{
+  "name": "geolog-app",
+  "private": true,
+  "scripts": {
+    "e2e:smoke": "node scripts/e2e_panel_smoke.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.54.0"
+  }
+}

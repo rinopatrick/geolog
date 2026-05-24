@@ -1,0 +1,19 @@
+name: quality-gate
+on: [push, pull_request]
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r backend/requirements.txt
+      - run: python -m pytest tests/ -q
+      - name: Start API
+        run: |
+          cd backend
+          nohup python -m uvicorn main:app --host 127.0.0.1 --port 8000 > /tmp/api.log 2>&1 &
+          sleep 4
+      - run: python scripts/regression_harness.py
+      - run: python scripts/rbac_gate.py

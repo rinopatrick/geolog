@@ -42,5 +42,7 @@ Thumbs.db
 *.lfs
 test-data/
 data/public/
+node_modules/
+backend/artifacts/
 *.db
 __pycache__/

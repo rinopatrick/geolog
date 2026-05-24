@@ -41,6 +41,7 @@ class SafeJSONResponse(JSONResponse):
 import datetime
 import csv
 import io
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -1552,6 +1553,174 @@ def export_package(wid: int, db: Session = Depends(get_db)):
     runs = [{c.name: getattr(lr, c.name) for c in LogRun.__table__.columns}
             for lr in db.query(LogRun).filter(LogRun.well_id == wid).all()]
     return {"well": well_dict, "formation_tops": tops, "zones": zones, "log_runs": runs}
+
+
+# ─── Interpretation Auditability + Delivery Bundle ───────────
+SNAPSHOT_DIR = os.path.join(os.path.dirname(__file__), "artifacts", "snapshots")
+os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+
+
+def _snapshot_path(wid: int) -> str:
+    return os.path.join(SNAPSHOT_DIR, f"well_{wid}.json")
+
+
+def _load_snapshots(wid: int):
+    p = _snapshot_path(wid)
+    if not os.path.exists(p):
+        return []
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        # Corrupt/partial file fallback
+        return []
+
+
+def _save_snapshots(wid: int, snapshots):
+    # Atomic write + datetime-safe serialization
+    out = _snapshot_path(wid)
+    tmp = out + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(snapshots, f, indent=2, default=str)
+    os.replace(tmp, out)
+
+
+@app.post("/api/wells/{wid}/snapshots", status_code=201)
+def create_snapshot(wid: int, data: dict = None, db: Session = Depends(get_db)):
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+    snapshots = _load_snapshots(wid)
+    snap_id = str(uuid.uuid4())
+
+    tops = [{c.name: getattr(t, c.name) for c in FormationTop.__table__.columns}
+            for t in db.query(FormationTop).filter(FormationTop.well_id == wid).order_by(FormationTop.depth).all()]
+    zones = [{c.name: getattr(z, c.name) for c in Zone.__table__.columns}
+             for z in db.query(Zone).filter(Zone.well_id == wid).order_by(Zone.sort_order.asc()).all()]
+    params = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
+    params_dict = {c.name: getattr(params, c.name) for c in PetroParams.__table__.columns} if params else {}
+
+    payload = {
+        "snapshot_id": snap_id,
+        "well_id": wid,
+        "well_name": well.name,
+        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "label": (data or {}).get("label", f"snapshot-{len(snapshots)+1}"),
+        "approved": False,
+        "approved_by": None,
+        "approved_at": None,
+        "tops": tops,
+        "zones": zones,
+        "petro_params": params_dict,
+    }
+    snapshots.append(payload)
+    _save_snapshots(wid, snapshots)
+    return payload
+
+
+@app.get("/api/wells/{wid}/snapshots")
+def list_snapshots(wid: int):
+    snaps = _load_snapshots(wid)
+    return {"count": len(snaps), "snapshots": snaps}
+
+
+@app.get("/api/wells/{wid}/snapshots/{snapshot_id}")
+def get_snapshot(wid: int, snapshot_id: str):
+    snaps = _load_snapshots(wid)
+    for s in snaps:
+        if s.get("snapshot_id") == snapshot_id:
+            return s
+    raise HTTPException(404, "Snapshot not found")
+
+
+@app.post("/api/wells/{wid}/snapshots/{snapshot_id}/approve")
+def approve_snapshot(wid: int, snapshot_id: str, data: dict = None):
+    actor = (data or {}).get("approved_by", "interpreter")
+    snaps = _load_snapshots(wid)
+    for s in snaps:
+        if s.get("snapshot_id") == snapshot_id:
+            s["approved"] = True
+            s["approved_by"] = actor
+            s["approved_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+            _save_snapshots(wid, snaps)
+            return s
+    raise HTTPException(404, "Snapshot not found")
+
+
+@app.get("/api/wells/{wid}/snapshots/{base_id}/diff/{target_id}")
+def diff_snapshot(wid: int, base_id: str, target_id: str):
+    snaps = _load_snapshots(wid)
+    base = next((s for s in snaps if s.get("snapshot_id") == base_id), None)
+    target = next((s for s in snaps if s.get("snapshot_id") == target_id), None)
+    if not base or not target:
+        raise HTTPException(404, "Snapshot not found")
+
+    def key_tops(items):
+        return {(i.get("formation_name"), round(float(i.get("depth", 0)), 3)): i for i in items}
+
+    btops = key_tops(base.get("tops", []))
+    ttops = key_tops(target.get("tops", []))
+    added_tops = [v for k, v in ttops.items() if k not in btops]
+    removed_tops = [v for k, v in btops.items() if k not in ttops]
+
+    bz = {(z.get("name"), z.get("top_depth"), z.get("base_depth")) for z in base.get("zones", [])}
+    tz = {(z.get("name"), z.get("top_depth"), z.get("base_depth")) for z in target.get("zones", [])}
+
+    changed_params = {}
+    bp = base.get("petro_params", {})
+    tp = target.get("petro_params", {})
+    for k in sorted(set(bp.keys()) | set(tp.keys())):
+        if bp.get(k) != tp.get(k):
+            changed_params[k] = {"from": bp.get(k), "to": tp.get(k)}
+
+    return {
+        "base": base_id,
+        "target": target_id,
+        "added_tops": added_tops,
+        "removed_tops": removed_tops,
+        "added_zones": list(tz - bz),
+        "removed_zones": list(bz - tz),
+        "changed_petro_params": changed_params,
+    }
+
+
+@app.get("/api/wells/{wid}/delivery-bundle")
+def delivery_bundle(wid: int, db: Session = Depends(get_db)):
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+
+    package = export_package(wid, db)
+    snaps = _load_snapshots(wid)
+    manifest = {
+        "well_id": wid,
+        "well_name": well.name,
+        "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "files": [
+            "well.json",
+            "tops.json",
+            "zones.json",
+            "log_runs.json",
+            "snapshots.json",
+            "manifest.json",
+        ],
+    }
+
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("well.json", json.dumps(package.get("well", {}), indent=2, default=str))
+        zf.writestr("tops.json", json.dumps(package.get("formation_tops", []), indent=2, default=str))
+        zf.writestr("zones.json", json.dumps(package.get("zones", []), indent=2, default=str))
+        zf.writestr("log_runs.json", json.dumps(package.get("log_runs", []), indent=2, default=str))
+        zf.writestr("snapshots.json", json.dumps(snaps, indent=2, default=str))
+        zf.writestr("manifest.json", json.dumps(manifest, indent=2, default=str))
+
+    mem.seek(0)
+    return StreamingResponse(
+        mem,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{well.name}_delivery_bundle.zip"'},
+    )
 
 
 # ─── Curve Metadata ───────────────────────────────────────────
