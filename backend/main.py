@@ -928,11 +928,7 @@ def delete_log_run(lr_id: int, db: Session = Depends(get_db)):
     if not lr:
         raise HTTPException(404, "Log run not found")
     db.query(CurveData).filter(CurveData.log_run_id == lr_id).delete()
-    db.query(Zone).filter(Zone.log_run_id == lr_id).delete()
-    db.query(CorrelationMarker).filter(CorrelationMarker.log_run_id == lr_id).delete()
-    db.query(CorrelationProfile).filter(CorrelationProfile.log_run_id == lr_id).delete()
     db.query(LogRunDepthShift).filter(LogRunDepthShift.log_run_id == lr_id).delete()
-    db.query(Annotation).filter(Annotation.log_run_id == lr_id).delete()
     db.delete(lr)
     db.commit()
 
