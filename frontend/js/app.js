@@ -8006,6 +8006,185 @@ class GeoLogApp {
         GeoToast.success('User deleted');
         this.loadUsers();
     }
+
+    // ═══ Professional Petrophysics Engine (Sprint 29) ═══
+
+    async computeSwMultiEquation() {
+        if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
+        const result = document.getElementById('petroResults');
+        if (result) result.innerHTML = '<p style="color:#58a6ff">⏳ Computing multi-equation saturation...</p>';
+        try {
+            const a = parseFloat(document.getElementById('archA')?.value || '1');
+            const m = parseFloat(document.getElementById('archM')?.value || '2');
+            const n = parseFloat(document.getElementById('archN')?.value || '2');
+            const rw = parseFloat(document.getElementById('archRw')?.value || '0.1');
+            const resp = await this._api(`/wells/${this.currentWell.id}/compute-sw`, {
+                method: 'POST',
+                body: JSON.stringify({ rw, a, m, n })
+            });
+            if (result) {
+                let html = '<h3 style="color:#58a6ff">Multi-Equation Saturation Results</h3>';
+                html += '<div style="font-size:12px;color:#8b949e;margin:6px 0">' + (resp.depth?.length || 0) + ' points</div>';
+                if (resp.equations_used) html += '<div style="margin:8px 0"><strong>Equations:</strong> ' + resp.equations_used.join(', ') + '</div>';
+                html += '<table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:10px">';
+                html += '<tr style="border-bottom:1px solid #30363d"><th style="text-align:left;padding:4px">Model</th><th>Mean Sw</th><th>Median</th><th>Min</th><th>Max</th></tr>';
+                for (const [key, vals] of Object.entries(resp)) {
+                    if (key.startsWith('sw_') && Array.isArray(vals)) {
+                        const valid = vals.filter(v => v != null && !isNaN(v));
+                        if (valid.length > 0) {
+                            const sorted = [...valid].sort((a,b) => a-b);
+                            const mean = valid.reduce((s,v) => s+v, 0) / valid.length;
+                            html += '<tr style="border-bottom:1px solid #21262d"><td style="padding:4px">' + key.replace('sw_','').toUpperCase() + '</td><td style="text-align:center">' + mean.toFixed(4) + '</td><td style="text-align:center">' + sorted[Math.floor(sorted.length/2)].toFixed(4) + '</td><td style="text-align:center">' + sorted[0].toFixed(4) + '</td><td style="text-align:center">' + sorted[sorted.length-1].toFixed(4) + '</td></tr>';
+                        }
+                    }
+                }
+                html += '</table>';
+                if (resp.gas_detected !== undefined) html += '<div style="margin-top:6px;color:' + (resp.gas_detected ? '#f0883e' : '#8b949e') + '"><strong>Gas:</strong> ' + (resp.gas_detected ? '⚠️ YES' : 'No') + '</div>';
+                result.innerHTML = html;
+            }
+            GeoToast.success('Multi-equation Sw computed');
+        } catch(e) { if (result) result.innerHTML = '<p style="color:#f85149">Error: ' + e.message + '</p>'; GeoToast.error('Sw failed: ' + e.message); }
+    }
+
+    async runMultimineral() {
+        if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
+        const result = document.getElementById('petroResults');
+        if (result) result.innerHTML = '<p style="color:#58a6ff">⏳ Running mineral solver...</p>';
+        try {
+            const resp = await this._api(`/wells/${this.currentWell.id}/multimineral`, {
+                method: 'POST', body: JSON.stringify({})
+            });
+            if (result) {
+                let html = '<h3 style="color:#58a6ff">Multimineral Solver</h3>';
+                html += '<table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:10px">';
+                html += '<tr style="border-bottom:1px solid #30363d"><th style="text-align:left;padding:4px">Mineral</th><th>Mean</th><th>Min</th><th>Max</th></tr>';
+                for (const mineral of ['quartz','calcite','dolomite','clay','porosity']) {
+                    if (resp[mineral]) {
+                        const valid = resp[mineral].filter(v => v != null && !isNaN(v));
+                        if (valid.length > 0) {
+                            const mean = valid.reduce((s,v) => s+v, 0) / valid.length;
+                            const sorted = [...valid].sort((a,b) => a-b);
+                            html += '<tr style="border-bottom:1px solid #21262d"><td style="padding:4px">' + mineral + '</td><td style="text-align:center">' + (mean*100).toFixed(1) + '%</td><td style="text-align:center">' + (sorted[0]*100).toFixed(1) + '%</td><td style="text-align:center">' + (sorted[sorted.length-1]*100).toFixed(1) + '%</td></tr>';
+                        }
+                    }
+                }
+                html += '</table>';
+                if (resp.rms_error !== undefined) html += '<div style="margin-top:8px"><strong>RMS Error:</strong> ' + resp.rms_error.toFixed(6) + '</div>';
+                result.innerHTML = html;
+            }
+            GeoToast.success('Multimineral complete');
+        } catch(e) { if (result) result.innerHTML = '<p style="color:#f85149">Error: ' + e.message + '</p>'; GeoToast.error('Multimineral failed: ' + e.message); }
+    }
+
+    async runPermeabilityMulti() {
+        if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
+        const result = document.getElementById('petroResults');
+        if (result) result.innerHTML = '<p style="color:#58a6ff">⏳ Computing multi-model permeability...</p>';
+        try {
+            const rw = parseFloat(document.getElementById('archRw')?.value || '0.1');
+            const resp = await this._api(`/wells/${this.currentWell.id}/permeability-multi`, {
+                method: 'POST', body: JSON.stringify({ rw })
+            });
+            if (result) {
+                let html = '<h3 style="color:#58a6ff">Multi-Model Permeability</h3>';
+                html += '<table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:10px">';
+                html += '<tr style="border-bottom:1px solid #30363d"><th style="text-align:left;padding:4px">Model</th><th>Mean (mD)</th><th>Median</th><th>Min</th><th>Max</th></tr>';
+                for (const [model, vals] of Object.entries(resp)) {
+                    if (model === 'depth' || model === 'swirr' || !Array.isArray(vals)) continue;
+                    const valid = vals.filter(v => v != null && !isNaN(v) && v > 0);
+                    if (valid.length > 0) {
+                        const sorted = [...valid].sort((a,b) => a-b);
+                        const mean = valid.reduce((s,v) => s+v, 0) / valid.length;
+                        html += '<tr style="border-bottom:1px solid #21262d"><td style="padding:4px">' + model.toUpperCase() + '</td><td style="text-align:center">' + mean.toFixed(2) + '</td><td style="text-align:center">' + sorted[Math.floor(sorted.length/2)].toFixed(2) + '</td><td style="text-align:center">' + sorted[0].toFixed(4) + '</td><td style="text-align:center">' + sorted[sorted.length-1].toFixed(1) + '</td></tr>';
+                    }
+                }
+                html += '</table>';
+                result.innerHTML = html;
+            }
+            GeoToast.success('Multi-permeability computed');
+        } catch(e) { if (result) result.innerHTML = '<p style="color:#f85149">Error: ' + e.message + '</p>'; GeoToast.error('Multi-perm failed: ' + e.message); }
+    }
+
+    async runVclEnhanced() {
+        if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
+        const result = document.getElementById('petroResults');
+        if (result) result.innerHTML = '<p style="color:#58a6ff">⏳ Computing enhanced Vclay...</p>';
+        try {
+            const resp = await this._api(`/wells/${this.currentWell.id}/vcl-enhanced`, {
+                method: 'POST', body: JSON.stringify({})
+            });
+            if (result) {
+                let html = '<h3 style="color:#58a6ff">VClay QC (5 Methods)</h3>';
+                html += '<table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:10px">';
+                html += '<tr style="border-bottom:1px solid #30363d"><th style="text-align:left;padding:4px">Method</th><th>Mean</th><th>Median</th><th>Std</th></tr>';
+                for (const [method, vals] of Object.entries(resp)) {
+                    if (method === 'depth' || !Array.isArray(vals)) continue;
+                    const valid = vals.filter(v => v != null && !isNaN(v));
+                    if (valid.length > 0) {
+                        const mean = valid.reduce((s,v) => s+v, 0) / valid.length;
+                        const sorted = [...valid].sort((a,b) => a-b);
+                        const variance = valid.reduce((s,v) => s + (v-mean)**2, 0) / valid.length;
+                        html += '<tr style="border-bottom:1px solid #21262d"><td style="padding:4px">' + method.replace('vcl_','').toUpperCase() + '</td><td style="text-align:center">' + mean.toFixed(4) + '</td><td style="text-align:center">' + sorted[Math.floor(sorted.length/2)].toFixed(4) + '</td><td style="text-align:center">' + Math.sqrt(variance).toFixed(4) + '</td></tr>';
+                    }
+                }
+                html += '</table>';
+                result.innerHTML = html;
+            }
+            GeoToast.success('VClay QC complete');
+        } catch(e) { if (result) result.innerHTML = '<p style="color:#f85149">Error: ' + e.message + '</p>'; GeoToast.error('VClay QC failed: ' + e.message); }
+    }
+
+    async runDualWater() {
+        if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
+        const result = document.getElementById('petroResults');
+        if (result) result.innerHTML = '<p style="color:#58a6ff">⏳ Running Dual-Water model...</p>';
+        try {
+            const rw = parseFloat(document.getElementById('archRw')?.value || '0.1');
+            const resp = await this._api(`/wells/${this.currentWell.id}/dual-water`, {
+                method: 'POST', body: JSON.stringify({ rw })
+            });
+            if (result) {
+                let html = '<h3 style="color:#58a6ff">Dual-Water Model</h3>';
+                const sw = resp.sw_dual_water || resp.sw || [];
+                const valid = sw.filter(v => v != null && !isNaN(v));
+                if (valid.length > 0) {
+                    const mean = valid.reduce((s,v) => s+v, 0) / valid.length;
+                    html += '<div style="margin:8px 0"><strong>Mean Sw:</strong> ' + mean.toFixed(4) + ' (' + valid.length + ' pts)</div>';
+                }
+                result.innerHTML = html;
+            }
+            GeoToast.success('Dual-Water complete');
+        } catch(e) { if (result) result.innerHTML = '<p style="color:#f85149">Error: ' + e.message + '</p>'; GeoToast.error('Dual-Water failed: ' + e.message); }
+    }
+
+    async runStratNormalize() {
+        if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
+        // Get first formation top as reference, or ask user
+        try {
+            const tops = await this._api(`/wells/${this.currentWell.id}/tops`);
+            if (!tops || tops.length === 0) { GeoToast.warn('Add formation tops first for strat normalization'); return; }
+            const refFormation = tops[0].formation_name || tops[0].name;
+            await this._api(`/wells/${this.currentWell.id}/strat-normalize`, {
+                method: 'POST', body: JSON.stringify({ reference_formation: refFormation })
+            });
+            GeoToast.success('Strat normalization complete (ref: ' + refFormation + ')');
+        } catch(e) { GeoToast.error('Strat normalize failed: ' + e.message); }
+    }
+
+    async downloadReportPDF() {
+        if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
+        try {
+            const resp = await fetch(`/api/wells/${this.currentWell.id}/report-pdf`);
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = (this.currentWell.name || 'well') + '_report.pdf';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            GeoToast.success('PDF downloaded');
+        } catch(e) { GeoToast.error('PDF failed: ' + e.message); }
+    }
 }
 // Initialize
 const app = new GeoLogApp();
@@ -8155,5 +8334,6 @@ document.addEventListener('keydown', (e) => {
             if (app.renderer) app.renderer.render();
             GeoToast.info('Refreshed');
             break;
+
     }
 });
