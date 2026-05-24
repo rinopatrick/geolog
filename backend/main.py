@@ -13,6 +13,31 @@ from sqlalchemy.orm import Session
 import numpy as np
 import json
 import os
+import math
+
+
+class SafeJSONResponse(JSONResponse):
+    """JSONResponse that sanitizes NaN/Inf to null for JSON compliance."""
+    def render(self, content):
+        def _sanitize(obj):
+            if isinstance(obj, float):
+                if math.isnan(obj) or math.isinf(obj):
+                    return None
+                return obj
+            if isinstance(obj, dict):
+                return {k: _sanitize(v) for k, v in obj.items()}
+            if isinstance(obj, (list, tuple)):
+                return [_sanitize(v) for v in obj]
+            if isinstance(obj, np.floating):
+                v = float(obj)
+                return None if (math.isnan(v) or math.isinf(v)) else v
+            if isinstance(obj, np.integer):
+                return int(obj)
+            if isinstance(obj, np.ndarray):
+                return _sanitize(obj.tolist())
+            return obj
+        sanitized = _sanitize(content)
+        return super().render(sanitized)
 import datetime
 import csv
 import io
@@ -267,6 +292,7 @@ app = FastAPI(
     version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    default_response_class=SafeJSONResponse,
 )
 
 JOB_EXECUTOR = ThreadPoolExecutor(max_workers=2)
@@ -397,6 +423,11 @@ def _lttb_indices(x: np.ndarray, y: np.ndarray, threshold: int):
             avg_x = x[idx]
             avg_y = y[idx]
 
+        if np.isnan(avg_y):
+            sampled[i + 1] = min(avg_start, n - 2)
+            a = sampled[i + 1]
+            continue
+
         range_offs = int(np.floor(i * every)) + 1
         range_to = int(np.floor((i + 1) * every)) + 1
         range_to = min(range_to, n - 1)
@@ -408,9 +439,14 @@ def _lttb_indices(x: np.ndarray, y: np.ndarray, threshold: int):
 
         ax = x[a]
         ay = y[a]
+        if np.isnan(ay):
+            sampled[i + 1] = min(range_offs, n - 2)
+            a = sampled[i + 1]
+            continue
         bx = x[range_offs:range_to]
         by = y[range_offs:range_to]
         area = np.abs((ax - avg_x) * (by - ay) - (ax - bx) * (avg_y - ay)) * 0.5
+        area = np.where(np.isnan(area), 0, area)
         idx = int(np.nanargmax(area))
         a = range_offs + idx
         sampled[i + 1] = a
@@ -445,7 +481,7 @@ class RBACWriteGuardMiddleware(BaseHTTPMiddleware):
                 required = "viewer"
 
             if ROLE_RANK.get(role, 0) < ROLE_RANK.get(required, 99):
-                return JSONResponse(status_code=403, content={"detail": f"{required} role required"})
+                return SafeJSONResponse(status_code=403, content={"detail": f"{required} role required"})
 
         return await call_next(request)
 
@@ -460,7 +496,7 @@ class ErrorLoggingMiddleware(BaseHTTPMiddleware):
         except Exception as e:
             logger.error(f"Unhandled error on {request.method} {request.url.path}: {e}")
             logger.debug(traceback.format_exc())
-            return JSONResponse(
+            return SafeJSONResponse(
                 status_code=500,
                 content={"detail": "Internal server error", "error": str(e)},
             )
@@ -1086,10 +1122,10 @@ def get_curve_data(
     headers["Last-Modified"] = _httpdate(last_modified_dt)
 
     if if_none_match and if_none_match.strip() == headers["ETag"]:
-        return JSONResponse(status_code=304, content=None, headers=headers)
+        return SafeJSONResponse(status_code=304, content=None, headers=headers)
     ims = _parse_if_modified_since(if_modified_since)
     if ims is not None and last_modified_dt <= ims:
-        return JSONResponse(status_code=304, content=None, headers=headers)
+        return SafeJSONResponse(status_code=304, content=None, headers=headers)
 
     # Get depth curve with fallback candidates, then first curve in run
     depth_curve = db.query(CurveData).filter(
@@ -1132,7 +1168,7 @@ def get_curve_data(
             d = d[::step]
         result["DEPTH"] = [round(float(v), 2) for v in d]
 
-    return JSONResponse(content=result, headers=headers)
+    return SafeJSONResponse(content=result, headers=headers)
 
 
 def _group_flagged_intervals(depth: np.ndarray, flags: np.ndarray):
@@ -3866,19 +3902,39 @@ def moveable_oil_index(wid: int, data: dict, db: Session = Depends(get_db)):
         raise HTTPException(404, "No log run")
 
     rt_curve = data.get("rt_curve", "RT")
-    rxo_curve = data.get("rxo_curve", "RXO")
     phie_curve = data.get("phie_curve", "PHIE")
 
     rt_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == rt_curve).first()
-    rxo_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == rxo_curve).first()
+    # RXO fallback: try RXO → RS → RD → RILD → RILM
+    rxo_cd = None
+    for rxo_name in ["RXO", "RS", "RD", "RILD", "RILM", "RMED"]:
+        rxo_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == rxo_name).first()
+        if rxo_cd and rxo_cd != rt_cd:
+            break
     phie_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == phie_curve).first()
+    # PHIE fallback: compute from RHOB if not available
+    if not phie_cd:
+        rhob_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == "RHOB").first()
+        if rhob_cd:
+            rhob_arr = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy()
+            phie_arr = np.clip((2.65 - rhob_arr) / (2.65 - 1.0), 0, 1)
+            phie_arr[rhob_arr <= 0] = np.nan
+            phie_cd = rhob_cd  # reuse for length reference
+            phie_computed = True
+        else:
+            phie_computed = False
+    else:
+        phie_computed = False
     depth_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
-    if not rt_cd or not rxo_cd or not phie_cd or not depth_cd:
-        raise HTTPException(404, "Required curves not found")
+    if not rt_cd or not rxo_cd or not depth_cd:
+        raise HTTPException(404, f"Required curves not found (need RT + at least one shallow resistivity + DEPTH). Available: {[c.mnemonic for c in db.query(CurveData).filter(CurveData.log_run_id == lr.id).all()]}")
 
     rt = np.frombuffer(rt_cd.data_binary, dtype=np.float64).copy()
     rxo = np.frombuffer(rxo_cd.data_binary, dtype=np.float64).copy()
-    phie = np.frombuffer(phie_cd.data_binary, dtype=np.float64).copy()
+    if phie_computed:
+        phie = phie_arr
+    else:
+        phie = np.frombuffer(phie_cd.data_binary, dtype=np.float64).copy()
     depth = np.frombuffer(depth_cd.data_binary, dtype=np.float64).copy()
 
     pp = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
@@ -3918,7 +3974,29 @@ def dip_plot(wid: int, data: dict, db: Session = Depends(get_db)):
 
     points = db.query(DeviationSurvey).filter(DeviationSurvey.well_id == wid).order_by(DeviationSurvey.md).all()
     if not points:
-        raise HTTPException(404, "No deviation survey")
+        # Fallback: generate vertical well from log run depth data
+        lr = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.id.desc()).first()
+        if not lr:
+            raise HTTPException(404, "No deviation survey or log run data")
+        depth_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
+        if not depth_cd:
+            depth_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id).order_by(CurveData.id.asc()).first()
+        if not depth_cd or not depth_cd.data_binary:
+            raise HTTPException(404, "No deviation survey and no depth data available")
+        depths = np.frombuffer(depth_cd.data_binary, dtype=np.float64).copy()
+        step = max(1, len(depths) // 200)
+        idx = list(range(0, len(depths), step))
+        return SafeJSONResponse({
+            "md": [float(depths[i]) for i in idx],
+            "inc": [0.0] * len(idx),
+            "azi": [0.0] * len(idx),
+            "dip": [0.0] * len(idx),
+            "dip_direction": [0.0] * len(idx),
+            "tvd": [float(depths[i]) for i in idx],
+            "north": [0.0] * len(idx),
+            "east": [0.0] * len(idx),
+            "note": "Vertical well assumed (no deviation survey loaded)"
+        })
 
     dip_type = str(data.get("dip_type", "structural")).lower()
     if dip_type not in ("structural", "apparent"):
@@ -4716,7 +4794,40 @@ def auto_zone_from_tops(wid: int, db: Session = Depends(get_db),
         .all()
     )
     if len(tops) < 2:
-        raise HTTPException(400, "Need at least 2 formation tops to create zones")
+        # Auto-pick tops from GR curve if no manual tops
+        lr = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.id.desc()).first()
+        if lr:
+            gr_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == "GR").first()
+            depth_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
+            if gr_cd and depth_cd:
+                gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy()
+                depth = np.frombuffer(depth_cd.data_binary, dtype=np.float64).copy()
+                # Find significant peaks/valleys in GR
+                from scipy.signal import find_peaks
+                # Smooth GR for robust peak detection
+                kernel = np.ones(21) / 21
+                gr_smooth = np.convolve(gr, kernel, mode='same')
+                # Find peaks (sand tops = low GR)
+                valleys, _ = find_peaks(-gr_smooth, prominence=np.nanstd(gr) * 0.5, distance=100)
+                if len(valleys) >= 2:
+                    for vi, v in enumerate(valleys[:10]):
+                        ft = FormationTop(
+                            well_id=wid,
+                            formation_name=f"Auto_Top_{vi+1}",
+                            depth=float(depth[v]),
+                            depth_unit="FT",
+                            color=f"#{hash(str(vi)) % 0xFFFFFF:06x}",
+                        )
+                        db.add(ft)
+                    db.commit()
+                    tops = (
+                        db.query(FormationTop)
+                        .filter(FormationTop.well_id == wid)
+                        .order_by(FormationTop.depth.asc())
+                        .all()
+                    )
+    if len(tops) < 2:
+        raise HTTPException(400, "Need at least 2 formation tops to create zones (could not auto-detect from GR)")
 
     # Delete existing zones for this well
     db.query(Zone).filter(Zone.well_id == wid).delete()
@@ -5172,10 +5283,10 @@ def get_decimated_data(
     headers["Last-Modified"] = _httpdate(last_modified_dt)
 
     if if_none_match and if_none_match.strip() == headers["ETag"]:
-        return JSONResponse(status_code=304, content=None, headers=headers)
+        return SafeJSONResponse(status_code=304, content=None, headers=headers)
     ims = _parse_if_modified_since(if_modified_since)
     if ims is not None and last_modified_dt <= ims:
-        return JSONResponse(status_code=304, content=None, headers=headers)
+        return SafeJSONResponse(status_code=304, content=None, headers=headers)
 
     depth_curve = db.query(CurveData).filter(
         CurveData.log_run_id == lr_id,
@@ -5206,18 +5317,18 @@ def get_decimated_data(
             original_points = n
 
         if n <= max_points:
-            sampled = arr.tolist()
+            sampled = [None if np.isnan(v) else float(v) for v in arr]
         else:
             x_axis = (depth_arr[mask] if mask is not None else depth_arr) if (depth_arr is not None and len(full_arr) == len(depth_arr)) else np.arange(n, dtype=np.float64)
             indices = _lttb_indices(np.asarray(x_axis, dtype=np.float64), np.asarray(arr, dtype=np.float64), max_points)
-            sampled = [float(arr[i]) for i in indices]
+            sampled = [None if np.isnan(arr[i]) else float(arr[i]) for i in indices]
             decimated = True
 
         if len(sampled) > output_points:
             output_points = len(sampled)
         result[cd.mnemonic] = sampled
 
-    return JSONResponse(content={
+    return SafeJSONResponse(content={
         "curves": result,
         "decimated": decimated,
         "original_points": original_points,
