@@ -300,6 +300,16 @@ JOBS = {}
 JOBS_LOCK = Lock()
 
 
+def _safe_float(val, default=None):
+    """Safely convert value to float, return default on failure."""
+    if val is None or val == "":
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
 def _utc_now_iso() -> str:
     return datetime.datetime.utcnow().isoformat() + "Z"
 
@@ -508,7 +518,9 @@ app.add_middleware(ErrorLoggingMiddleware)
 # ─── Auto-seed demo data on first startup ───────────────────
 @app.on_event("startup")
 def _auto_seed():
-    """Seed demo data if database is empty."""
+    """Seed demo data if database is empty. Gate behind GEOLOG_ENABLE_DEMO_SEED=true."""
+    if os.environ.get("GEOLOG_ENABLE_DEMO_SEED", "false").lower() != "true":
+        return
     db = SessionLocal()
     try:
         if db.query(Project).count() > 0:
@@ -2224,7 +2236,7 @@ async def upload_rft_csv(wid: int, file: UploadFile = File(...), db: Session = D
             well_id=wid,
             depth=depth,
             pressure=pressure,
-            mobility=float(rec.get("mobility")) if rec.get("mobility") not in (None, "") else None,
+            mobility=_safe_float(rec.get("mobility")),
             fluid_type=str(rec.get("fluid_type") or rec.get("FluidType") or rec.get("fluid") or "unknown").lower(),
             sample_recovered=str(rec.get("sample_recovered") or rec.get("sample") or ""),
             notes=str(rec.get("notes") or ""),
@@ -2841,7 +2853,7 @@ def compute_electrofacies(wid: int, data: dict, db: Session = Depends(get_db)):
     X_norm = (X - means) / stds
 
     # K-means (simple implementation)
-    np.random.seed(42)
+    # Use random seed for non-deterministic clustering (pass seed param for reproducibility if needed)
     centroids = X_norm[np.random.choice(len(X_norm), n_clusters, replace=False)]
     for _ in range(50):
         dists = np.sqrt(((X_norm[:, None] - centroids[None]) ** 2).sum(axis=2))
@@ -3110,7 +3122,10 @@ def curve_edit(lr_id: int, data: dict, db: Session = Depends(get_db)):
             originals[idx] = None if np.isnan(old_val) else float(old_val)
 
         nv_raw = e.get("new_value")
-        new_val = np.nan if nv_raw is None else float(nv_raw)
+        try:
+            new_val = np.nan if nv_raw is None else float(nv_raw)
+        except (ValueError, TypeError):
+            raise HTTPException(400, f"Invalid new_value: {nv_raw}")
         arr[idx] = new_val
         changed += 1
         if np.isnan(new_val):
@@ -3434,17 +3449,6 @@ async def upload_csv(wid: int, file: UploadFile = File(...), db: Session = Depen
 
 
 # ─── Well Trajectory / Deviation Survey ──────────────────────
-    id = Column(Integer, primary_key=True, index=True)
-    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False)
-    md = Column(Float, nullable=False)
-    inc = Column(Float, nullable=False)
-    azi = Column(Float, nullable=False)
-    tvd = Column(Float, nullable=True)
-    northing = Column(Float, nullable=True)
-    easting = Column(Float, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-
-    well = relationship("Well")
 
 
 @app.get("/api/wells/{wid}/trajectory")
@@ -3465,6 +3469,8 @@ def save_trajectory(wid: int, data: dict, db: Session = Depends(get_db)):
         md_arr = data["md"]
         inc_arr = data["inc"]
         azi_arr = data["azi"]
+        if not (len(md_arr) == len(inc_arr) == len(azi_arr)):
+            raise HTTPException(400, "md, inc, azi arrays must have equal length")
         points = [{"md": md_arr[i], "inc": inc_arr[i], "azi": azi_arr[i]} for i in range(len(md_arr))]
     if not points:
         raise HTTPException(400, "No points provided")
@@ -3556,8 +3562,8 @@ def strat_normalize(wid: int, data: dict, db: Session = Depends(get_db)):
     depth = np.frombuffer(dept_cd.data_binary, dtype=np.float64)
     values = np.frombuffer(cd.data_binary, dtype=np.float64)
 
-    # Normalize: positive = above reference, negative = below
-    normalized_depth = depth - ref_depth
+    # Normalize: positive = above reference (shallower), negative = below (deeper)
+    normalized_depth = ref_depth - depth
 
     # Subsample
     step = max(1, len(depth) // 500)
@@ -6330,7 +6336,7 @@ def image_log(wid: int, data: dict, db: Session = Depends(get_db)):
         raise HTTPException(404, "No log run")
 
     curve_name = data.get("curve", "RT")
-    n_bins = min(int(data.get("n_bins", 72)), 360)  # angular bins around borehole
+    n_bins = max(4, min(int(data.get("n_bins", 72)), 360))  # angular bins around borehole
 
     cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == curve_name).first()
     if not cd:

@@ -7123,7 +7123,7 @@ class GeoLogApp {
         if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
         GeoLoading.show('Generating report...');
         try {
-            const resp = await fetch(`/api/wells/${this.currentWell}/report`);
+            const resp = await fetch(`/api/wells/${this.currentWell.id}/report`);
             const data = await resp.json();
             GeoLoading.hide();
             this._renderReportPreview(data);
@@ -7237,7 +7237,7 @@ class GeoLogApp {
         const variation = document.getElementById('tornadoVar')?.value || 20;
         GeoLoading.show('Running tornado analysis...');
         try {
-            const resp = await fetch(`/api/wells/${this.currentWell}/tornado`, {
+            const resp = await fetch(`/api/wells/${this.currentWell.id}/tornado`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ variation_pct: parseFloat(variation) })
             });
@@ -7294,7 +7294,7 @@ class GeoLogApp {
         const grShale = parseFloat(document.getElementById('vclGrShale')?.value || 120);
         GeoLoading.show('Computing Vclay models...');
         try {
-            const resp = await fetch(`/api/wells/${this.currentWell}/vcl-models`, {
+            const resp = await fetch(`/api/wells/${this.currentWell.id}/vcl-models`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ gr_clean: grClean, gr_shale: grShale })
             });
@@ -7433,7 +7433,7 @@ class GeoLogApp {
         const curve = document.getElementById('coreCalCurve')?.value || 'NPHI';
         GeoLoading.show('Calibrating...');
         try {
-            const resp = await fetch(`/api/wells/${this.currentWell}/core-calibration`, {
+            const resp = await fetch(`/api/wells/${this.currentWell.id}/core-calibration`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ core_depth: depths, core_phi: phi, core_k: perm, log_curve: curve })
             });
@@ -7555,7 +7555,7 @@ class GeoLogApp {
         if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
         GeoLoading.show('Running enhanced QC...');
         try {
-            const resp = await fetch(`/api/wells/${this.currentWell}/qc-autofix`, {
+            const resp = await fetch(`/api/wells/${this.currentWell.id}/qc-autofix`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({})
             });
@@ -7616,7 +7616,7 @@ class GeoLogApp {
         const phase = parseInt(document.getElementById('seismicPhase')?.value || '0', 10);
         GeoLoading.show('Generating synthetic seismogram...');
         try {
-            const data = await this._api(`/wells/${this.currentWell}/synthetic-seismogram`, {
+            const data = await this._api(`/wells/${this.currentWell.id}/synthetic-seismogram`, {
                 method: 'POST',
                 body: JSON.stringify({ wavelet_freq: parseFloat(freq), polarity, phase })
             });
@@ -7815,7 +7815,7 @@ class GeoLogApp {
         if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
         GeoLoading.show('Generating borehole image...');
         try {
-            const resp = await fetch(`/api/wells/${this.currentWell}/image-log`, {
+            const resp = await fetch(`/api/wells/${this.currentWell.id}/image-log`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({})
             });
@@ -7897,7 +7897,7 @@ class GeoLogApp {
         GeoLoading.show('Finding analog wells...');
         try {
             const pid = this.projects[0]?.id;
-            const resp = await fetch(`/api/projects/${pid}/well-analogs?reference_well_id=${this.currentWell}`);
+            const resp = await fetch(`/api/projects/${pid}/well-analogs?reference_well_id=${this.currentWell.id}`);
             const data = await resp.json();
             GeoLoading.hide();
             if (data.detail) { GeoToast.error(data.detail); return; }
