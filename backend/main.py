@@ -15,6 +15,19 @@ import json
 import os
 import math
 
+try:
+    from routers.qc import router as qc_router
+    from routers.correlation import router as corr_router
+    from routers.zonation import router as zonation_router
+    from routers.units import router as units_router
+    from routers.templates import router as templates_router
+except ImportError:
+    from backend.routers.qc import router as qc_router
+    from backend.routers.correlation import router as corr_router
+    from backend.routers.zonation import router as zonation_router
+    from backend.routers.units import router as units_router
+    from backend.routers.templates import router as templates_router
+
 
 class SafeJSONResponse(JSONResponse):
     """JSONResponse that sanitizes NaN/Inf to null for JSON compliance."""
@@ -295,6 +308,11 @@ app = FastAPI(
     redoc_url="/redoc",
     default_response_class=SafeJSONResponse,
 )
+app.include_router(qc_router)
+app.include_router(corr_router)
+app.include_router(zonation_router)
+app.include_router(units_router)
+app.include_router(templates_router)
 
 JOB_EXECUTOR = ThreadPoolExecutor(max_workers=2)
 JOBS = {}

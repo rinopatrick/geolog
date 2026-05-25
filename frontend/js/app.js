@@ -525,6 +525,10 @@ class GeoLogApp {
         document.getElementById('analogsPanel').style.display = view === 'analogs' ? 'block' : 'none';
         document.getElementById('usersPanel').style.display = view === 'users' ? 'block' : 'none';
         document.getElementById('jobmonitorPanel').style.display = view === 'jobmonitor' ? 'block' : 'none';
+        document.getElementById('advancedqcPanel').style.display = view === 'advancedqc' ? 'block' : 'none';
+        document.getElementById('zonationPanel').style.display = view === 'zonation' ? 'block' : 'none';
+        document.getElementById('unitsPanel').style.display = view === 'units' ? 'block' : 'none';
+        document.getElementById('templatesPanel').style.display = view === 'templates' ? 'block' : 'none';
 
         // Sprint 26: Update status bar + trigger panel-specific loads
         this._updateStatusBar(view);
@@ -561,6 +565,10 @@ class GeoLogApp {
         if (view === 'batch') { /* user fills form */ }
         if (view === 'map') this.renderWellMap();
         if (view === 'dashboard') this.loadDashboard();
+        if (view === 'advancedqc' && this.currentWell) this._initAdvancedQC();
+        if (view === 'zonation' && this.currentWell) this._initZonation();
+        if (view === 'units' && this.currentWell) this._initUnits();
+        if (view === 'templates' && this.currentWell) this._initTemplates();
         localStorage.setItem('geolog_last_view', view);
     }
 
@@ -8581,6 +8589,51 @@ class GeoLogApp {
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         URL.revokeObjectURL(url);
         GeoToast.success('SVG exported');
+    }
+
+    // ─── Tier 1 Panel Initializers ──────────────────────────────
+    _initAdvancedQC() {
+        const el = document.getElementById('advancedQCDashboard');
+        if (!el) return;
+        if (typeof AdvancedQCPanel !== 'undefined') {
+            if (!this._qcPanel) this._qcPanel = new AdvancedQCPanel('advancedQCDashboard');
+            this._qcPanel.render(this.currentWell.id);
+        } else {
+            el.innerHTML = '<div style="padding:20px;color:#8b949e">Advanced QC module not loaded.</div>';
+        }
+    }
+
+    _initZonation() {
+        const el = document.getElementById('zonationDashboard');
+        if (!el) return;
+        if (typeof ZoneReportPanel !== 'undefined') {
+            if (!this._znPanel) this._znPanel = new ZoneReportPanel('zonationDashboard');
+            this._znPanel.render(this.currentWell.id);
+        } else {
+            el.innerHTML = '<div style="padding:20px;color:#8b949e">Zonation module not loaded.</div>';
+        }
+    }
+
+    _initUnits() {
+        const el = document.getElementById('unitsDashboard');
+        if (!el) return;
+        if (typeof UnitNormalizationPanel !== 'undefined') {
+            if (!this._unitPanel) this._unitPanel = new UnitNormalizationPanel('unitsDashboard');
+            this._unitPanel.render(this.currentWell.id);
+        } else {
+            el.innerHTML = '<div style="padding:20px;color:#8b949e">Unit normalization module not loaded.</div>';
+        }
+    }
+
+    _initTemplates() {
+        const el = document.getElementById('templatesDashboard');
+        if (!el) return;
+        if (typeof TemplateWorkflowPanel !== 'undefined') {
+            if (!this._tmplPanel) this._tmplPanel = new TemplateWorkflowPanel('templatesDashboard');
+            this._tmplPanel.render(this.currentWell.id);
+        } else {
+            el.innerHTML = '<div style="padding:20px;color:#8b949e">Template workflow module not loaded.</div>';
+        }
     }
 }
 // Initialize

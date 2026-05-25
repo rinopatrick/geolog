@@ -69,6 +69,10 @@
                     <button class="nav-btn" data-view="production" title="Production rates, pressures, and decline curve analysis"><i data-lucide="line-chart"></i><span>Production</span></button>
                     <button class="nav-btn" data-view="corecal" title="Core calibration — depth shift and porosity/permeability transforms"><i data-lucide="target"></i><span>Core Cal</span></button>
                     <button class="nav-btn" data-view="qcautofix" title="Enhanced QC with auto-fix suggestions"><i data-lucide="sparkles"></i><span>QC Fix</span></button>
+                    <button class="nav-btn" data-view="advancedqc" title="Advanced QC — missing intervals, spikes, environmental flags"><i data-lucide="shield-check"></i><span>Adv QC</span></button>
+                    <button class="nav-btn" data-view="zonation" title="Zonation & net pay report — auto-zone from cutoffs"><i data-lucide="layers"></i><span>Zonation</span></button>
+                    <button class="nav-btn" data-view="units" title="Unit normalization & alias resolution"><i data-lucide="ruler"></i><span>Units</span></button>
+                    <button class="nav-btn" data-view="templates" title="Reservoir template workflow — one-click presets"><i data-lucide="file-check"></i><span>Templates</span></button>
                     <button class="nav-btn" data-view="calculator" title="Quick petrophysical and engineering calculations"><i data-lucide="function-square"></i><span>Calc</span></button>
                     <button class="nav-btn" data-view="datatable" title="Inspect raw curve samples in a table"><i data-lucide="table"></i><span>Data Table</span></button>
                     <button class="nav-btn" data-view="batch" title="Run petrophysics in batch across wells"><i data-lucide="copy"></i><span>Batch</span></button>
@@ -1307,6 +1311,28 @@
         </div>
     </div>
 
+        <!-- Advanced QC Panel -->
+        <div id="advancedqcPanel" class="panel" style="display:none">
+            <div id="advancedQCDashboard"></div>
+        </div>
+
+        <!-- Zonation Panel -->
+        <div id="zonationPanel" class="panel" style="display:none">
+            <div id="zonationDashboard"></div>
+        </div>
+
+        <!-- Unit Normalization Panel -->
+        <div id="unitsPanel" class="panel" style="display:none">
+            <div id="unitsDashboard"></div>
+        </div>
+
+        <!-- Template Workflow Panel -->
+        <div id="templatesPanel" class="panel" style="display:none">
+            <div id="templatesDashboard"></div>
+        </div>
+
+    </div>
+
     <!-- Status Bar -->
     <div class="status-bar">
         <div class="status-item"><span class="status-dot"></span> <span id="statusConn">Connected</span></div>
@@ -1325,6 +1351,11 @@
     </div>
 
     <script src="/static/js/log-renderer.js"></script>
+    <script src="/static/js/correlation.js"></script>
+    <script src="/static/js/qc.js"></script>
+    <script src="/static/js/zonation.js"></script>
+    <script src="/static/js/units.js"></script>
+    <script src="/static/js/templates.js"></script>
     <script src="/static/js/app.js"></script>
 <script>
 function toggleSidebar() {
