@@ -8596,8 +8596,8 @@ class GeoLogApp {
         const el = document.getElementById('advancedQCDashboard');
         if (!el) return;
         if (typeof AdvancedQCPanel !== 'undefined') {
-            if (!this._qcPanel) this._qcPanel = new AdvancedQCPanel('advancedQCDashboard');
-            this._qcPanel.render(this.currentWell.id);
+            if (!this._qcPanel) this._qcPanel = new AdvancedQCPanel({ qcContentId: 'advancedQCDashboard', renderer: this.renderer });
+            this._qcPanel.load(this.currentWell.id);
         } else {
             el.innerHTML = '<div style="padding:20px;color:#8b949e">Advanced QC module not loaded.</div>';
         }

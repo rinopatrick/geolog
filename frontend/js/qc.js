@@ -118,7 +118,9 @@ class AdvancedQCPanel {
     }
 
     async load(wellId) {
-        const res = await fetch(`${this.apiBase}/wells/${wellId}/advanced-qc`);
+        const res = await fetch(`${this.apiBase}/wells/${wellId}/advanced-qc`, {
+            headers: { 'X-User-Role': (window.app?.currentRole || 'admin') },
+        });
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
         this.render(data);
@@ -165,4 +167,3 @@ window.MissingIntervalTable = MissingIntervalTable;
 window.SpikeVisualization = SpikeVisualization;
 window.EnvFlagBadges = EnvFlagBadges;
 
-export { AdvancedQCPanel, QualityScoreCard, MissingIntervalTable, SpikeVisualization, EnvFlagBadges };

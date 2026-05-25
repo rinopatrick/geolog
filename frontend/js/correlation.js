@@ -30,7 +30,7 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-export class CrossSectionRenderer {
+class CrossSectionRenderer {
   constructor(canvas, options = {}) {
     if (!canvas) throw new Error('CrossSectionRenderer requires a canvas element');
     this.canvas = canvas;
@@ -232,7 +232,7 @@ export class CrossSectionRenderer {
   }
 }
 
-export class TieLineOverlay {
+class TieLineOverlay {
   constructor(renderer, options = {}) {
     this.renderer = renderer;
     this.options = {
@@ -294,7 +294,7 @@ export class TieLineOverlay {
   }
 }
 
-export class MarkerSnapping {
+class MarkerSnapping {
   constructor({ tolerance = 8 } = {}) {
     this.tolerance = tolerance;
   }
@@ -329,7 +329,7 @@ export class MarkerSnapping {
   }
 }
 
-export class ShiftStretchControls {
+class ShiftStretchControls {
   constructor({ shiftInput, stretchInput, renderer, targetWellId, onPreview } = {}) {
     this.shiftInput = shiftInput;
     this.stretchInput = stretchInput;
@@ -379,7 +379,7 @@ export class ShiftStretchControls {
   }
 }
 
-export async function fetchCrossSection(baseUrl, wellIds = [], curve = 'GR') {
+async function fetchCrossSection(baseUrl, wellIds = [], curve = 'GR') {
   const ids = (wellIds || []).map(Number).filter(Number.isFinite);
   const qs = new URLSearchParams({ well_ids: ids.join(','), curve });
   const r = await fetch(`${baseUrl}/api/correlation/cross-section?${qs.toString()}`);
@@ -387,14 +387,14 @@ export async function fetchCrossSection(baseUrl, wellIds = [], curve = 'GR') {
   return r.json();
 }
 
-export async function fetchTieLines(baseUrl, wellAId, wellBId) {
+async function fetchTieLines(baseUrl, wellAId, wellBId) {
   const qs = new URLSearchParams({ well_a_id: String(wellAId), well_b_id: String(wellBId) });
   const r = await fetch(`${baseUrl}/api/correlation/tie-lines?${qs.toString()}`);
   if (!r.ok) throw new Error(`Tie-lines fetch failed: ${r.status}`);
   return r.json();
 }
 
-export async function autoCorrelate(baseUrl, payload) {
+async function autoCorrelate(baseUrl, payload) {
   const r = await fetch(`${baseUrl}/api/correlation/auto-correlate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
