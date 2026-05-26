@@ -7355,6 +7355,100 @@ def formation_tester(wid: int, db: Session = Depends(get_db)):
 
 
 
+
+# ─── Feature 18: Client Handoff Bundle ─────────────────────
+@app.get("/api/wells/{wid}/export-bundle")
+def export_client_bundle(wid: int, db: Session = Depends(get_db)):
+    """Export a ZIP bundle with LAS, tops, zones, params, and summary report."""
+    import zipfile
+    import io
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+
+    lr = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    tops = db.query(FormationTop).filter(FormationTop.well_id == wid).order_by(FormationTop.depth).all()
+    zones = db.query(Zone).filter(Zone.well_id == wid).order_by(Zone.top_depth).all()
+    params = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # 1. LAS file
+        if lr:
+            cds = db.query(CurveData).filter(CurveData.log_run_id == lr.id).all()
+            las_lines = [
+                "~Version Information",
+                "VERS.                  2.0:   CWLS Log ASCII Standard - VERSION 2.0",
+                "WRAP.                  NO:   One line per depth step",
+                "~Well Information",
+                f"WELL.                  {well.name}:   Well Name",
+                f"STRT. {float(lr.start_depth or 0):>10.2f} {getattr(lr, 'depth_unit', 'FT')}:   Start Depth",
+                f"STOP. {float(lr.stop_depth or 0):>10.2f} {getattr(lr, 'depth_unit', 'FT')}:   Stop Depth",
+                f"STEP. {float(lr.step or 1):>10.4f} {getattr(lr, 'depth_unit', 'FT')}:   Step",
+                f"NULL.              -999.25:   Null Value",
+                f"COMP.                  GeoLog:   Company",
+                f"DATE.          {__import__('datetime').date.today()}:   Date",
+                "~Curve Information",
+            ]
+            for c in cds:
+                las_lines.append(f"{c.mnemonic:>8}.{c.unit:>4}:   {c.description or c.mnemonic}")
+            las_lines.append("~Ascii")
+            depth_arr = None
+            curve_arrays = {}
+            for c in cds:
+                import numpy as np
+                arr = np.frombuffer(c.data_binary, dtype=np.float64)
+                if c.mnemonic in ('DEPT', 'DEPTH'):
+                    depth_arr = arr
+                else:
+                    curve_arrays[c.mnemonic] = arr
+            if depth_arr is not None:
+                for i in range(len(depth_arr)):
+                    vals = [f"{depth_arr[i]:>10.2f}"]
+                    for c in cds:
+                        if c.mnemonic not in ('DEPT', 'DEPTH'):
+                            v = curve_arrays.get(c.mnemonic, [])
+                            vals.append(f"{v[i]:>10.4f}" if i < len(v) else "   -999.25")
+                    las_lines.append(" ".join(vals))
+            zf.writestr(f"{well.name}.las", "\n".join(las_lines))
+
+        # 2. Tops CSV
+        if tops:
+            tops_csv = "depth,name,formation_name,color\n"
+            for t in tops:
+                tops_csv += f"{t.depth},{t.name or ''},{t.formation_name or ''},{t.color or ''}\n"
+            zf.writestr("tops.csv", tops_csv)
+
+        # 3. Zones CSV
+        if zones:
+            zones_csv = "name,top_depth,bottom_depth,sw_avg,vsh_avg,phie_avg,ntg\n"
+            for z in zones:
+                zones_csv += f"{z.zone_name or ''},{z.top_depth},{z.bottom_depth},{z.sw_avg or ''},{z.vsh_avg or ''},{z.phie_avg or ''},{z.net_to_gross or ''}\n"
+            zf.writestr("zones.csv", zones_csv)
+
+        # 4. Petro params JSON
+        if params:
+            import json
+            p = {k: getattr(params, k) for k in ['saturation_model', 'a', 'm', 'n', 'rw', 'vsh_cutoff', 'phie_cutoff', 'sw_cutoff', 'template'] if hasattr(params, k)}
+            zf.writestr("petro_params.json", json.dumps(p, indent=2))
+
+        # 5. Summary report
+        report = f"# GeoLog Export Report\nWell: {well.name}\nDate: {__import__('datetime').datetime.now().isoformat()}\n\n"
+        report += f"## Log Runs\n- Depth range: {lr.start_depth} - {lr.stop_depth} ft\n- Points: {lr.num_points}\n\n" if lr else ""
+        report += f"## Formation Tops ({len(tops)} entries)\n"
+        for t in tops:
+            report += f"- {t.depth:.1f} ft: {t.name or t.formation_name}\n"
+        report += f"\n## Zones ({len(zones)} entries)\n"
+        for z in zones:
+            report += f"- {z.zone_name}: {z.top_depth:.1f} - {z.bottom_depth:.1f} ft (NTG: {z.net_to_gross or 'N/A'})\n"
+        zf.writestr("report.md", report)
+
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/zip", headers={
+        "Content-Disposition": f"attachment; filename={well.name}_bundle.zip"
+    })
+
+
 # ─── Real-Time Collaboration WebSocket ──────────────────────
 import asyncio
 import json as _json

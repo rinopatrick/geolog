@@ -802,6 +802,15 @@ class GeoLogApp {
         }
     }
 
+    async _apiBlob(path, opts = {}) {
+        const resp = await fetch('/api' + path, {
+            headers: { 'X-User-Role': this.currentRole || 'viewer', ...opts.headers },
+            ...opts,
+        });
+        if (!resp.ok) throw new Error(`Export error: ${resp.status}`);
+        return resp.blob();
+    }
+
     async loadCurveConfig() {
         try {
             this.curveConfig = await this._api('/curve-config');
@@ -8924,6 +8933,83 @@ class GeoLogApp {
         }
     }
 
+    // ─── Feature 15: Render Metrics ───────────────────────
+    _showRenderMetrics() {
+        if (!this.renderer) return;
+        const m = this.renderer.getRenderMetrics();
+        GeoModal.show(`
+            <div style="padding:16px;min-width:300px">
+                <h3 style="margin:0 0 12px;color:#58a6ff;font-size:14px">Render Metrics</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+                    <div style="color:#8b949e">Total samples</div><div style="color:#c9d1d9;text-align:right">${m.total_samples.toLocaleString()}</div>
+                    <div style="color:#8b949e">Visible samples</div><div style="color:#c9d1d9;text-align:right">${m.visible_samples.toLocaleString()}</div>
+                    <div style="color:#8b949e">Rendered (stride ${m.stride})</div><div style="color:#c9d1d9;text-align:right">${m.rendered_samples.toLocaleString()}</div>
+                    <div style="color:#8b949e">Zoom window</div><div style="color:#c9d1d9;text-align:right">${m.zoom_ft} ft</div>
+                    <div style="color:#8b949e">View start</div><div style="color:#c9d1d9;text-align:right">${m.view_start.toFixed(1)} ft</div>
+                    <div style="color:#8b949e">View stop</div><div style="color:#c9d1d9;text-align:right">${m.view_stop.toFixed(1)} ft</div>
+                </div>
+            </div>
+        `);
+    }
+
+    // ─── Feature 17: Curve Legend Panel ────────────────────
+    _showCurveLegend() {
+        if (!this.renderer) return;
+        const legend = this.renderer.getCurveLegend();
+        if (!legend.length) { GeoToast.warn('No curves loaded'); return; }
+        let html = `<div style="padding:16px;max-height:70vh;overflow-y:auto;min-width:400px">
+            <h3 style="margin:0 0 12px;color:#58a6ff;font-size:14px">Curve Legend</h3>
+            <table style="width:100%;border-collapse:collapse;font-size:11px">
+            <tr style="color:#8b949e;border-bottom:1px solid #30363d">
+                <th style="text-align:left;padding:4px">Color</th>
+                <th style="text-align:left;padding:4px">Curve</th>
+                <th style="text-align:left;padding:4px">Track</th>
+                <th style="text-align:right;padding:4px">Scale</th>
+                <th style="text-align:right;padding:4px">Samples</th>
+                <th style="text-align:right;padding:4px">Mean</th>
+            </tr>`;
+        for (const c of legend) {
+            const scaleStr = c.log ? `[${c.scale[0]}, ${c.scale[1]}] log` : `[${c.scale[0]}, ${c.scale[1]}]`;
+            html += `<tr style="border-bottom:1px solid #21262d">
+                <td style="padding:4px"><span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:${c.color}"></span></td>
+                <td style="padding:4px;color:#c9d1d9;font-weight:bold">${c.mnemonic}</td>
+                <td style="padding:4px;color:#8b949e">${c.track}</td>
+                <td style="padding:4px;color:#8b949e;text-align:right">${scaleStr}</td>
+                <td style="padding:4px;color:#8b949e;text-align:right">${c.samples.toLocaleString()}</td>
+                <td style="padding:4px;color:#c9d1d9;text-align:right">${c.mean != null ? c.mean.toFixed(2) : '-'}</td>
+            </tr>`;
+        }
+        html += '</table></div>';
+        GeoModal.show(html);
+    }
+
+    // ─── Feature 18: Client Handoff Bundle ─────────────────
+    async _exportClientBundle() {
+        if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
+        try {
+            GeoLoading.show('Preparing client bundle...');
+            const wid = this.currentWell.id;
+            const blob = await this._apiBlob(`/wells/${wid}/export-bundle`);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${this.currentWell.name || 'well'}_bundle.zip`;
+            a.click();
+            URL.revokeObjectURL(url);
+            GeoToast.info('Bundle downloaded');
+        } catch (e) {
+            GeoToast.error('Bundle export failed: ' + (e.message || e));
+        } finally { GeoLoading.hide(); }
+    }
+
+    // ─── Feature 19: Formation Lines Toggle ────────────────
+    _toggleFormationLines() {
+        if (!this.renderer) return;
+        this.renderer._showFormationLines = !this.renderer._showFormationLines;
+        this.renderer.render();
+        GeoToast.info(`Formation lines: ${this.renderer._showFormationLines ? 'ON' : 'OFF'}`);
+    }
+
     // ─── Wire up renderer callbacks ───────────────────────
     _wireRendererCallbacks() {
         if (!this.renderer) return;
@@ -9101,6 +9187,24 @@ document.addEventListener('keydown', (e) => {
             e.preventDefault();
             if (app.renderer) app.renderer.render();
             GeoToast.info('Refreshed');
+            break;
+        case 'g':
+        case 'G':
+            if (isTyping || e.ctrlKey || e.metaKey || e.altKey) return;
+            e.preventDefault();
+            app._showCurveLegend();
+            break;
+        case 'b':
+        case 'B':
+            if (isTyping || e.ctrlKey || e.metaKey || e.altKey) return;
+            e.preventDefault();
+            app._toggleFormationLines();
+            break;
+        case 'e':
+        case 'E':
+            if (isTyping || e.ctrlKey || e.metaKey || e.altKey) return;
+            e.preventDefault();
+            app._showRenderMetrics();
             break;
 
     }

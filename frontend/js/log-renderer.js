@@ -191,6 +191,18 @@ class LogRenderer {
         this.mouseY = e.clientY - rect.top;
         this.hoverDepth = this._yToDepth(this.mouseY);
 
+        // Feature 16: Zone boundary drag
+        if (this._zoneEditState) {
+            const depth = this._yToDepth(this.mouseY);
+            if (depth > 0) {
+                const zone = this.zones[this._zoneEditState.zoneIdx];
+                if (this._zoneEditState.boundary === 'top') zone.top = depth;
+                else zone.bottom = depth;
+                this.render();
+            }
+            return;
+        }
+
         // Feature 3: Track resize dragging
         if (this._resizeState) {
             const dx = e.clientX - this._resizeState.startX;
@@ -213,8 +225,11 @@ class LogRenderer {
 
         // Update cursor style
         const borderIdx = this._getTrackBorderX(this.mouseX);
+        const zoneBound = this._getZoneBoundaryAt(this.mouseY);
         if (borderIdx >= 0 && this.mouseY < this.margin.top - 15) {
             this.canvas.style.cursor = 'col-resize';
+        } else if (zoneBound && this.mouseX > this.margin.left + this.depthTrackWidth) {
+            this.canvas.style.cursor = 'ns-resize';
         } else if (this._getCurveLabelAtPos(this.mouseX, this.mouseY)) {
             this.canvas.style.cursor = 'grab';
         } else {
@@ -262,6 +277,13 @@ class LogRenderer {
             return;
         }
 
+        // Feature 16: Zone boundary editing — check if near zone line
+        const zoneBound = this._getZoneBoundaryAt(y);\        if (zoneBound && x > this.margin.left + this.depthTrackWidth) {
+            this._zoneEditState = { ...zoneBound, startY: e.clientY };
+            e.preventDefault();
+            return;
+        }
+
         // Feature 4: Curve drag-drop — check if on curve label
         const curveLabel = this._getCurveLabelAtPos(x, y);
         if (curveLabel) {
@@ -274,6 +296,17 @@ class LogRenderer {
     }
 
     _onMouseUp(e) {
+        // Feature 16: Zone boundary edit end
+        if (this._zoneEditState) {
+            const zone = this.zones[this._zoneEditState.zoneIdx];
+            this._zoneEditState = null;
+            this.canvas.style.cursor = 'default';
+            if (typeof this.onZoneBoundaryEdit === 'function') {
+                this.onZoneBoundaryEdit(this._zoneEditState?.zoneIdx ?? -1, zone);
+            }
+            return;
+        }
+
         // Feature 3: Track resize end
         if (this._resizeState) {
             this._resizeState = null;
@@ -795,6 +828,9 @@ class LogRenderer {
 
         // Draw formation top labels
         this._drawFormationTopLabels(ctx, startX, totalPlotWidth, plotTop, plotBottom);
+
+        // Feature 19: Formation correlation lines
+        this._drawFormationLines(ctx, startX, totalPlotWidth, plotTop, plotBottom);
 
         // Draw RFT points (foreground)
         this._drawRFTPoints(ctx, startX, totalPlotWidth, plotTop, plotBottom);
@@ -1684,5 +1720,116 @@ class LogRenderer {
             median: valid[Math.floor(valid.length / 2)],
             std: Math.sqrt(valid.reduce((s, v) => s + (v - sum / valid.length) ** 2, 0) / valid.length),
         };
+    }
+
+    // ─── Feature 15: Progressive Rendering ──────────────────
+    _getVisibleIndexRange() {
+        if (!this.depthData || this.depthData.length === 0) return { start: 0, end: 0 };
+        // Binary search for first visible depth
+        let lo = 0, hi = this.depthData.length - 1;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (this.depthData[mid] < this.viewStart) lo = mid + 1;
+            else hi = mid;
+        }
+        const start = Math.max(0, lo - 1);
+        // Binary search for last visible depth
+        lo = start; hi = this.depthData.length - 1;
+        while (lo < hi) {
+            const mid = (lo + hi + 1) >> 1;
+            if (this.depthData[mid] > this.viewStop) hi = mid - 1;
+            else lo = mid;
+        }
+        const end = Math.min(this.depthData.length - 1, lo + 1);
+        return { start, end };
+    }
+
+    getRenderMetrics() {
+        const { start, end } = this._getVisibleIndexRange();
+        const visible = end - start;
+        const total = this.depthData?.length || 0;
+        const stride = this._computeRenderStride(visible);
+        return {
+            total_samples: total,
+            visible_samples: visible,
+            rendered_samples: Math.ceil(visible / stride),
+            stride,
+            view_start: this.viewStart,
+            view_stop: this.viewStop,
+            zoom_ft: (this.viewStop - this.viewStart).toFixed(1),
+        };
+    }
+
+    // ─── Feature 16: Zone Boundary Editing ──────────────────
+    _zoneEditState = null;
+
+    _getZoneBoundaryAt(y) {
+        if (!this.zones || this.zones.length === 0) return null;
+        const snapPx = 6;
+        for (let i = 0; i < this.zones.length; i++) {
+            const zone = this.zones[i];
+            const topY = this._depthToY(zone.top);
+            const botY = this._depthToY(zone.bottom);
+            if (Math.abs(y - topY) < snapPx) return { zoneIdx: i, boundary: 'top', depth: zone.top };
+            if (Math.abs(y - botY) < snapPx) return { zoneIdx: i, boundary: 'bottom', depth: zone.bottom };
+        }
+        return null;
+    }
+
+    // ─── Feature 17: Curve Legend ───────────────────────────
+    getCurveLegend() {
+        const legend = [];
+        for (const track of this.tracks) {
+            const activeCurves = track.curves.filter(m => this.curveData[m] && this.curveData[m].length > 0);
+            for (const mnemonic of activeCurves) {
+                const cfg = this.curveConfig[mnemonic] || {};
+                const stats = this.getCurveStats(mnemonic);
+                legend.push({
+                    mnemonic,
+                    track: track.name,
+                    color: cfg.color || '#8b949e',
+                    scale: cfg.scale || [0, 100],
+                    unit: cfg.unit || '',
+                    name: cfg.name || mnemonic,
+                    log: !!cfg.log,
+                    reverse: cfg.scale && cfg.scale[0] > cfg.scale[1],
+                    samples: stats?.count || 0,
+                    min: stats?.min,
+                    max: stats?.max,
+                    mean: stats?.mean,
+                });
+            }
+        }
+        return legend;
+    }
+
+    // ─── Feature 19: Formation Lines ────────────────────────
+    _showFormationLines = true;
+
+    _drawFormationLines(ctx, startX, totalWidth, plotTop, plotBottom) {
+        if (!this._showFormationLines || !this.formationTops || this.formationTops.length === 0) return;
+        const colors = ['#f0883e', '#58a6ff', '#3fb950', '#d2a8ff', '#f2cc60', '#ff7b72', '#79c0ff'];
+        ctx.setLineDash([6, 3]);
+        ctx.lineWidth = 1;
+        for (let i = 0; i < this.formationTops.length; i++) {
+            const top = this.formationTops[i];
+            if (top.depth < this.viewStart || top.depth > this.viewStop) continue;
+            const y = this._depthToY(top.depth);
+            if (y < plotTop || y > plotBottom) continue;
+            const color = colors[i % colors.length];
+            ctx.strokeStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(startX, y);
+            ctx.lineTo(startX + totalWidth, y);
+            ctx.stroke();
+            // Label
+            ctx.setLineDash([]);
+            ctx.fillStyle = color;
+            ctx.font = 'bold 9px IBM Plex Mono';
+            ctx.textAlign = 'right';
+            ctx.fillText(top.name || top.formation_name || '', startX + totalWidth - 4, y - 4);
+            ctx.setLineDash([6, 3]);
+        }
+        ctx.setLineDash([]);
     }
 }
