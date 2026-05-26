@@ -1,7 +1,7 @@
 """GeoLog — Oil & Gas Well Log Viewer."""
 import logging
 import traceback
-from fastapi import FastAPI, Request, UploadFile, File, Depends, HTTPException, Header
+from fastapi import FastAPI, Request, UploadFile, File, Depends, HTTPException, Header, WebSocket, WebSocketDisconnect
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware

@@ -376,6 +376,16 @@
                     </select>
                     <span id="cpActiveY" class="toolbar-hint"></span>
                 </div>
+                <div class="toolbar-group">
+                    <label style="display:flex;align-items:center;gap:4px">
+                        <input type="checkbox" id="cpSlbOverlay" onchange="app._renderCrossPlot()"> Schlumberger N-D
+                    </label>
+                </div>
+                <div class="toolbar-group">
+                    <label style="display:flex;align-items:center;gap:4px">
+                        <input type="checkbox" id="cpGridLines" checked onchange="app._renderCrossPlot()"> Grid
+                    </label>
+                </div>
             </div>
             <div class="crossplot-container">
                 <canvas id="crossplotCanvas"></canvas>

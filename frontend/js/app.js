@@ -2826,19 +2826,139 @@ class GeoLogApp {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         // Grid
-        ctx.strokeStyle = '#21262d';
-        ctx.lineWidth = 0.5;
-        for (let i = 0; i <= 5; i++) {
-            const x = margin.left + (plotW * i / 5);
-            const y = margin.top + (plotH * i / 5);
-            ctx.beginPath();
-            ctx.moveTo(x, margin.top);
-            ctx.lineTo(x, margin.top + plotH);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(margin.left, y);
-            ctx.lineTo(margin.left + plotW, y);
-            ctx.stroke();
+        const showGrid = document.getElementById('cpGridLines')?.checked !== false;
+        if (showGrid) {
+            ctx.strokeStyle = '#21262d';
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i <= 5; i++) {
+                const x = margin.left + (plotW * i / 5);
+                const y = margin.top + (plotH * i / 5);
+                ctx.beginPath();
+                ctx.moveTo(x, margin.top);
+                ctx.lineTo(x, margin.top + plotH);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(margin.left, y);
+                ctx.lineTo(margin.left + plotW, y);
+                ctx.stroke();
+            }
+        }
+
+        // Schlumberger Neutron-Density overlay
+        const slbOverlay = document.getElementById('cpSlbOverlay')?.checked;
+        const isNDPlot = (curveX === 'NPHI' && curveY === 'RHOB') || (curveX === 'RHOB' && curveY === 'NPHI');
+        if (slbOverlay && isNDPlot) {
+            // Force Schlumberger axes: NPHI on X (0.45→-0.15), RHOB on Y (1.95→2.95)
+            const slbXMin = -0.15, slbXMax = 0.45;  // NPHI reversed
+            const slbYMin = 1.95, slbYMax = 2.95;    // RHOB top=light, bottom=dense
+
+            // Override axis mapping for SLB mode
+            const slbToScreenX = (nphi) => margin.left + ((nphi - slbXMin) / (slbXMax - slbXMin)) * plotW;
+            const slbToScreenY = (rhob) => margin.top + ((rhob - slbYMin) / (slbYMax - slbYMin)) * plotH;
+
+            // Re-draw points in SLB coordinate space
+            ctx.fillStyle = '#58a6ff44';
+            ctx.strokeStyle = '#58a6ff';
+            ctx.lineWidth = 0.8;
+            for (const [px, py] of points) {
+                let nphi, rhob;
+                if (curveX === 'NPHI') { nphi = px; rhob = py; }
+                else { nphi = py; rhob = px; }
+                if (nphi < slbXMin || nphi > slbXMax || rhob < slbYMin || rhob > slbYMax) continue;
+                const sx = slbToScreenX(nphi);
+                const sy = slbToScreenY(rhob);
+                ctx.beginPath();
+                ctx.arc(sx, sy, 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+            }
+
+            // Lithology reference lines (porosity from 0% to 60%)
+            const lithLines = [
+                { name: 'Sandstone', rhoMa: 2.65, phiNMa: 0.02, color: '#3fb950' },
+                { name: 'Limestone', rhoMa: 2.71, phiNMa: 0.00, color: '#58a6ff' },
+                { name: 'Dolomite', rhoMa: 2.87, phiNMa: 0.02, color: '#f2cc60' },
+            ];
+            const rhoF = 1.0; // water
+            const phiNF = 1.0;
+
+            for (const lith of lithLines) {
+                ctx.strokeStyle = lith.color;
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([]);
+                ctx.beginPath();
+                let started = false;
+                for (let phi = 0; phi <= 0.60; phi += 0.01) {
+                    const rhob = phi * rhoF + (1 - phi) * lith.rhoMa;
+                    const phiN = phi * phiNF + (1 - phi) * lith.phiNMa;
+                    if (rhob < slbYMin || rhob > slbYMax || phiN < slbXMin || phiN > slbXMax) continue;
+                    const sx = slbToScreenX(phiN);
+                    const sy = slbToScreenY(rhob);
+                    if (!started) { ctx.moveTo(sx, sy); started = true; } else ctx.lineTo(sx, sy);
+                }
+                ctx.stroke();
+
+                // Label at 0% porosity end
+                const labelPhi = 0.0;
+                const labelRhob = labelPhi * rhoF + (1 - labelPhi) * lith.rhoMa;
+                const labelPhiN = labelPhi * phiNF + (1 - labelPhi) * lith.phiNMa;
+                if (labelRhob <= slbYMax && labelPhiN >= slbXMin) {
+                    ctx.fillStyle = lith.color;
+                    ctx.font = 'bold 10px IBM Plex Mono';
+                    ctx.textAlign = 'left';
+                    ctx.fillText(lith.name, slbToScreenX(labelPhiN) + 4, slbToScreenY(labelRhob) - 4);
+                }
+            }
+
+            // Porosity iso-lines (horizontal dashed)
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = '#30363d';
+            ctx.lineWidth = 0.8;
+            ctx.font = '9px IBM Plex Mono';
+            ctx.fillStyle = '#8b949e';
+            ctx.textAlign = 'right';
+            for (let phi = 0.1; phi <= 0.5; phi += 0.1) {
+                // Limestone reference for porosity label
+                const rhobLime = phi * rhoF + (1 - phi) * 2.71;
+                if (rhobLime < slbYMin || rhobLime > slbYMax) continue;
+                const sy = slbToScreenY(rhobLime);
+                ctx.beginPath();
+                ctx.moveTo(margin.left, sy);
+                ctx.lineTo(margin.left + plotW, sy);
+                ctx.stroke();
+                ctx.fillText((phi * 100).toFixed(0) + '%', margin.left + plotW - 4, sy - 3);
+            }
+            ctx.setLineDash([]);
+
+            // SLB axis labels (override)
+            ctx.fillStyle = '#c9d1d9';
+            ctx.font = 'bold 12px DM Sans';
+            ctx.textAlign = 'center';
+            ctx.fillText('NPHI (v/v) — Schlumberger', margin.left + plotW / 2, canvas.height - 10);
+            ctx.save();
+            ctx.translate(15, margin.top + plotH / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('RHOB (g/cc)', 0, 0);
+            ctx.restore();
+
+            // SLB axis ticks
+            ctx.font = '10px IBM Plex Mono';
+            ctx.textAlign = 'center';
+            for (let v = -0.1; v <= 0.4; v += 0.1) {
+                const sx = slbToScreenX(v);
+                ctx.fillText(v.toFixed(1), sx, margin.top + plotH + 18);
+            }
+            ctx.textAlign = 'right';
+            for (let v = 2.0; v <= 2.9; v += 0.1) {
+                const sy = slbToScreenY(v);
+                ctx.fillText(v.toFixed(1), margin.left - 5, sy + 4);
+            }
+
+            // Title
+            ctx.fillStyle = '#58a6ff';
+            ctx.font = 'bold 12px DM Sans';
+            ctx.textAlign = 'left';
+            ctx.fillText('Neutron-Density Crossplot (Schlumberger)', margin.left, margin.top - 14);
         }
 
         // Points
