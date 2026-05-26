@@ -1,7 +1,7 @@
 """GeoLog — Oil & Gas Well Log Viewer."""
 import logging
 import traceback
-from fastapi import FastAPI, Request, UploadFile, File, Depends, HTTPException, Header, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, UploadFile, File, Depends, HTTPException, Header, WebSocket, WebSocketDisconnect, Query
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -61,6 +61,9 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.graphics import renderPDF
 from threading import Lock
 import uuid
 import hashlib
@@ -5411,7 +5414,13 @@ def zonation_report(wid: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/wells/{wid}/report-pdf")
-def generate_petrophysical_report_pdf(wid: int, db: Session = Depends(get_db)):
+def generate_petrophysical_report_pdf(
+    wid: int,
+    db: Session = Depends(get_db),
+    template: str = Query(default="professional"),
+    include_curve_summary: bool = Query(default=True),
+    include_qc: bool = Query(default=True),
+):
     """Generate professional petrophysical report as PDF."""
     well = db.query(Well).filter(Well.id == wid).first()
     if not well:
@@ -5455,12 +5464,19 @@ def generate_petrophysical_report_pdf(wid: int, db: Session = Depends(get_db)):
     )
 
     styles = getSampleStyleSheet()
+    template_key = (template or "professional").strip().lower()
+    palette = {
+        "professional": {"title": "#1f2937", "head_bg": "#e5e7eb", "section_bg": "#f3f4f6"},
+        "executive": {"title": "#0f172a", "head_bg": "#dbeafe", "section_bg": "#eff6ff"},
+        "compact": {"title": "#111827", "head_bg": "#e5e7eb", "section_bg": "#f9fafb"},
+    }.get(template_key, {"title": "#1f2937", "head_bg": "#e5e7eb", "section_bg": "#f3f4f6"})
+
     section_style = ParagraphStyle(
         "SectionTitle",
         parent=styles["Heading3"],
         fontName="Helvetica-Bold",
         fontSize=11,
-        textColor=colors.HexColor("#1f2937"),
+        textColor=colors.HexColor(palette["title"]),
         spaceBefore=8,
         spaceAfter=4,
     )
@@ -5534,7 +5550,7 @@ def generate_petrophysical_report_pdf(wid: int, db: Session = Depends(get_db)):
     lrt = Table(log_data, colWidths=[16 * mm, 36 * mm, 106 * mm, 17 * mm])
     lrt.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e5e7eb")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(palette["head_bg"])),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -5553,7 +5569,7 @@ def generate_petrophysical_report_pdf(wid: int, db: Session = Depends(get_db)):
     tt = Table(tops_data, colWidths=[72 * mm, 25 * mm, 78 * mm])
     tt.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e5e7eb")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(palette["head_bg"])),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 8.5),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -5579,12 +5595,37 @@ def generate_petrophysical_report_pdf(wid: int, db: Session = Depends(get_db)):
     zst = Table(zs_data, colWidths=[54 * mm, 18 * mm, 18 * mm, 16 * mm, 22 * mm, 22 * mm, 22 * mm])
     zst.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e5e7eb")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(palette["head_bg"])),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
     ]))
     elements.extend([zst, Spacer(1, 6)])
+
+    # 5b) Embedded Plot (Net Pay by Zone)
+    if zones:
+        elements.append(Paragraph("5b. Net Pay Plot", section_style))
+        labels = [str(z.get("name", f"Z{i+1}"))[:10] for i, z in enumerate(zones[:12])]
+        vals = [float(z.get("net_pay_ft") or 0.0) for z in zones[:12]]
+        draw = Drawing(165 * mm, 48 * mm)
+        chart = VerticalBarChart()
+        chart.x = 10
+        chart.y = 12
+        chart.height = 34 * mm
+        chart.width = 145 * mm
+        chart.data = [vals]
+        chart.valueAxis.valueMin = 0
+        chart.valueAxis.valueMax = max(vals) * 1.15 if max(vals) > 0 else 1
+        chart.valueAxis.valueStep = max(chart.valueAxis.valueMax / 5.0, 0.2)
+        chart.categoryAxis.categoryNames = labels
+        chart.categoryAxis.labels.boxAnchor = 'ne'
+        chart.categoryAxis.labels.angle = 25
+        chart.categoryAxis.labels.fontSize = 7
+        chart.bars[0].fillColor = colors.HexColor("#4f46e5")
+        chart.bars[0].strokeColor = colors.HexColor("#312e81")
+        draw.add(chart)
+        elements.append(draw)
+        elements.append(Spacer(1, 6))
 
     # 6) Parameters used
     elements.append(Paragraph("6. Parameters Used", section_style))
@@ -5607,8 +5648,55 @@ def generate_petrophysical_report_pdf(wid: int, db: Session = Depends(get_db)):
         ("FONTSIZE", (0, 0), (-1, -1), 8.5),
     ]))
     elements.append(pt)
+    elements.append(Spacer(1, 6))
 
-    # 7) Footer
+    # 7) Curve Summary (optional)
+    if include_curve_summary and runs:
+        elements.append(Paragraph("7. Curve Statistical Summary", section_style))
+        run = runs[-1]
+        cds = db.query(CurveData).filter(CurveData.log_run_id == run.id).all()
+        cs_data = [["Curve", "Min", "Max", "Mean"]]
+        for cd in cds[:18]:
+            arr = np.frombuffer(cd.data_binary, dtype=np.float64)
+            v = arr[np.isfinite(arr)]
+            if len(v) == 0:
+                cs_data.append([cd.mnemonic, "-", "-", "-"])
+            else:
+                cs_data.append([cd.mnemonic, _fmt(np.min(v), 3), _fmt(np.max(v), 3), _fmt(np.mean(v), 3)])
+        cst = Table(cs_data, colWidths=[36 * mm, 44 * mm, 44 * mm, 44 * mm])
+        cst.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(palette["head_bg"])),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ]))
+        elements.extend([cst, Spacer(1, 6)])
+
+    # 8) QC Snapshot (optional)
+    if include_qc:
+        elements.append(Paragraph("8. QC Snapshot", section_style))
+        qc_rows = [["Metric", "Value"]]
+        try:
+            qc = run_qc_autofix(wid, db)
+            qc_rows.extend([
+                ["QC Score", str(qc.get("score", "-"))],
+                ["Grade", str(qc.get("grade", "-"))],
+                ["Critical Issues", str(qc.get("critical", 0))],
+                ["Warnings", str(qc.get("warnings", 0))],
+                ["Total Curves", str(qc.get("total_curves", 0))],
+            ])
+        except Exception:
+            qc_rows.append(["Status", "QC data unavailable"])
+        qct = Table(qc_rows, colWidths=[56 * mm, 112 * mm])
+        qct.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(palette["head_bg"])),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ]))
+        elements.extend([qct, Spacer(1, 6)])
+
+    # 9) Footer
     def _draw_footer(canvas, _doc):
         canvas.saveState()
         canvas.setFont("Helvetica", 8)

@@ -8617,7 +8617,15 @@ class GeoLogApp {
     async downloadReportPDF() {
         if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
         try {
-            const resp = await fetch(`/api/wells/${this.currentWell.id}/report-pdf`);
+            const template = document.getElementById('pdfTemplate')?.value || 'professional';
+            const includeCurves = !!document.getElementById('pdfIncludeCurves')?.checked;
+            const includeQc = !!document.getElementById('pdfIncludeQc')?.checked;
+            const qs = new URLSearchParams({
+                template,
+                include_curve_summary: includeCurves ? 'true' : 'false',
+                include_qc: includeQc ? 'true' : 'false',
+            });
+            const resp = await fetch(`/api/wells/${this.currentWell.id}/report-pdf?${qs.toString()}`);
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             const blob = await resp.blob();
             const url = URL.createObjectURL(blob);
@@ -8628,6 +8636,8 @@ class GeoLogApp {
             GeoToast.success('PDF downloaded');
         } catch(e) { GeoToast.error('PDF failed: ' + e.message); }
     }
+
+    async downloadReportPdf() { return this.downloadReportPDF(); }
 
     // ═══ Professional Features Sprint 31 ═══
     

@@ -714,10 +714,21 @@
                 <!-- Print Report -->
                 <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:16px">
                     <h4><i data-lucide="printer"></i> Print Report</h4>
-                    <p style="color:#8b949e;font-size:12px">Generate formatted HTML report for printing</p>
+                    <p style="color:#8b949e;font-size:12px">Generate formatted HTML/PDF report with selectable template and sections</p>
+                    <div class="form-row"><label>PDF Template</label>
+                        <select id="pdfTemplate" class="depth-select">
+                            <option value="professional" selected>Professional</option>
+                            <option value="executive">Executive</option>
+                            <option value="compact">Compact</option>
+                        </select>
+                    </div>
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+                        <label style="font-size:12px;color:#c9d1d9"><input type="checkbox" id="pdfIncludeCurves" checked> Include curve summary</label>
+                        <label style="font-size:12px;color:#c9d1d9"><input type="checkbox" id="pdfIncludeQc" checked> Include QC snapshot</label>
+                    </div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap">
                         <button class="btn-primary" onclick="app.generatePrintReport()"><i data-lucide="file-text"></i> Generate Report</button>
-                        <button class="btn-sm" onclick="app.downloadReportPdf()"><i data-lucide="file-badge"></i> Report PDF</button>
+                        <button class="btn-sm" onclick="app.downloadReportPDF()"><i data-lucide="file-badge"></i> Report PDF</button>
                         <button class="btn-sm" onclick="app.exportLasFromApi()"><i data-lucide="file-down"></i> Export LAS</button>
                     </div>
                 </div>
