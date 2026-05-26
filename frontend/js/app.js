@@ -3794,6 +3794,7 @@ class GeoLogApp {
             });
             await this.loadPetroParams();
             await this._renderPetrophysics();
+            await this.loadTemplateLockStatus();
             GeoToast.success(`Applied: ${result?.applied_template || templateName}`);
         } catch (e) {
             GeoToast.error('Template apply failed: ' + (e.message || e));
@@ -3810,16 +3811,71 @@ class GeoLogApp {
         if (!this.currentWell) return GeoToast.warn('No well selected');
         const getVal = (id) => parseFloat(document.getElementById(id)?.value || '0');
         const model = document.getElementById('satModel')?.value || 'archie';
-        await this._api(`/wells/${this.currentWell.id}/petro-params`, {
-            method: 'POST',
-            body: JSON.stringify({
-                saturation_model: model,
-                a: getVal('archA'), m: getVal('archM'), n: getVal('archN'), rw: getVal('archRw'),
-                vsh_cutoff: getVal('cutVsh'), phie_cutoff: getVal('cutPhie'), sw_cutoff: getVal('cutSw'),
-                template: 'custom',
-            }),
-        });
-        GeoToast.success('Petro params saved');
+        try {
+            const resp = await this._api(`/wells/${this.currentWell.id}/petro-params`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    saturation_model: model,
+                    a: getVal('archA'), m: getVal('archM'), n: getVal('archN'), rw: getVal('archRw'),
+                    vsh_cutoff: getVal('cutVsh'), phie_cutoff: getVal('cutPhie'), sw_cutoff: getVal('cutSw'),
+                    template: 'custom',
+                }),
+            });
+            GeoToast.success(`Petro params saved (sig ${String(resp?.signature || '').slice(0, 12)})`);
+            await this.loadTemplateLockStatus();
+        } catch (e) {
+            GeoToast.error('Save params failed: ' + (e.message || e));
+        }
+    }
+
+    async loadTemplateLockStatus() {
+        const el = document.getElementById('templateLockStatus');
+        if (!el || !this.currentWell) return;
+        try {
+            const st = await this._api(`/wells/${this.currentWell.id}/template-lock-status`);
+            this.templateLockStatus = st || null;
+            if (st?.locked) {
+                const ok = st.signature_matches === true ? 'match' : (st.signature_matches === false ? 'MISMATCH' : 'n/a');
+                el.innerHTML = `Template lock: <strong style="color:#f85149">LOCKED</strong> by ${st.locked_by || 'n/a'} | template=${st.signed_template || 'custom'} | sig=${String(st.signature || '').slice(0,12)} | state=${ok}`;
+            } else {
+                el.innerHTML = `Template lock: <strong style="color:#3fb950">UNLOCKED</strong> | current sig=${String(st?.current_signature || '').slice(0,12)}`;
+            }
+        } catch (e) {
+            el.innerHTML = 'Template lock: unavailable';
+        }
+    }
+
+    async lockTemplateSignature() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        const actor = window.prompt('Lock actor (name/initial)?', 'interpreter') || 'interpreter';
+        const reason = window.prompt('Lock reason?', 'QA approved template') || 'QA approved template';
+        try {
+            const out = await this._api(`/wells/${this.currentWell.id}/template-lock`, {
+                method: 'POST',
+                headers: { 'X-User-Role': 'admin' },
+                body: JSON.stringify({ actor, reason }),
+            });
+            GeoToast.success(`Template locked: ${String(out?.signature || '').slice(0,12)}`);
+            await this.loadTemplateLockStatus();
+        } catch (e) {
+            GeoToast.error('Lock failed: ' + (e.message || e));
+        }
+    }
+
+    async unlockTemplateSignature() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        const actor = window.prompt('Unlock actor?', 'admin') || 'admin';
+        try {
+            await this._api(`/wells/${this.currentWell.id}/template-unlock`, {
+                method: 'POST',
+                headers: { 'X-User-Role': 'admin' },
+                body: JSON.stringify({ actor }),
+            });
+            GeoToast.success('Template unlocked');
+            await this.loadTemplateLockStatus();
+        } catch (e) {
+            GeoToast.error('Unlock failed: ' + (e.message || e));
+        }
     }
 
     async loadPetroParams() {
@@ -3832,6 +3888,7 @@ class GeoLogApp {
             set('cutVsh', p.vsh_cutoff); set('cutPhie', p.phie_cutoff); set('cutSw', p.sw_cutoff);
             set('satModel', p.saturation_model);
             this._onSatModelChange();
+            await this.loadTemplateLockStatus();
         } catch (e) { /* ignore if not saved yet */ }
     }
 

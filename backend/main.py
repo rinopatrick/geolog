@@ -1632,13 +1632,81 @@ def _get_well_lock(wid: int) -> dict:
 
 def _set_well_lock(wid: int, locked: bool, actor: str = "system", snapshot_id: str = None):
     locks = _load_locks()
-    locks[str(wid)] = {
+    current = locks.get(str(wid), {}) if isinstance(locks.get(str(wid), {}), dict) else {}
+    current.update({
         "locked": bool(locked),
         "actor": actor,
         "snapshot_id": snapshot_id,
         "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
-    }
+    })
+    locks[str(wid)] = current
     _save_locks(locks)
+
+
+def _default_template_lock() -> dict:
+    return {
+        "locked": False,
+        "locked_by": None,
+        "locked_at": None,
+        "reason": None,
+        "signature": None,
+        "signed_template": None,
+        "signed_params": None,
+    }
+
+
+def _get_template_lock(wid: int) -> dict:
+    locks = _load_locks()
+    entry = locks.get(str(wid), {}) if isinstance(locks.get(str(wid), {}), dict) else {}
+    tpl = entry.get("template_lock") if isinstance(entry.get("template_lock"), dict) else {}
+    out = _default_template_lock()
+    out.update(tpl)
+    return out
+
+
+def _set_template_lock(wid: int, lock_payload: dict):
+    locks = _load_locks()
+    entry = locks.get(str(wid), {}) if isinstance(locks.get(str(wid), {}), dict) else {}
+    entry["template_lock"] = lock_payload
+    locks[str(wid)] = entry
+    _save_locks(locks)
+
+
+def _compute_template_signature(params: dict) -> str:
+    canonical = json.dumps(params, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _current_petro_params_payload(db: Session, wid: int) -> dict:
+    pp = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
+    if not pp:
+        return {
+            "saturation_model": "archie",
+            "a": 1.0,
+            "m": 2.0,
+            "n": 2.0,
+            "rw": 0.1,
+            "vsh_cutoff": 0.35,
+            "phie_cutoff": 0.10,
+            "sw_cutoff": 0.60,
+            "template": "custom",
+        }
+    return {
+        "saturation_model": pp.saturation_model,
+        "a": float(pp.a),
+        "m": float(pp.m),
+        "n": float(pp.n),
+        "rw": float(pp.rw),
+        "vsh_cutoff": float(pp.vsh_cutoff),
+        "phie_cutoff": float(pp.phie_cutoff),
+        "sw_cutoff": float(pp.sw_cutoff),
+        "template": pp.template,
+    }
+
+
+def _snapshot_template_signature(db: Session, wid: int):
+    payload = _current_petro_params_payload(db, wid)
+    return payload, _compute_template_signature(payload)
 
 
 def _snapshot_path(wid: int) -> str:
@@ -1708,6 +1776,57 @@ def list_snapshots(wid: int):
 @app.get("/api/wells/{wid}/lock-status")
 def lock_status(wid: int):
     return _get_well_lock(wid)
+
+
+@app.get("/api/wells/{wid}/template-lock-status")
+def template_lock_status(wid: int, db: Session = Depends(get_db)):
+    payload, signature = _snapshot_template_signature(db, wid)
+    lock = _get_template_lock(wid)
+    return {
+        **lock,
+        "well_id": wid,
+        "current_signature": signature,
+        "signature_matches": (lock.get("signature") == signature) if lock.get("locked") else None,
+        "current_template": payload.get("template", "custom"),
+    }
+
+
+@app.post("/api/wells/{wid}/template-lock")
+def lock_template(wid: int, data: dict = None, db: Session = Depends(get_db), x_user_role: str = Header(default="viewer")):
+    role = (x_user_role or "viewer").lower()
+    if role not in {"admin", "interpreter"}:
+        raise HTTPException(403, "interpreter/admin role required")
+
+    actor = (data or {}).get("actor", role)
+    reason = (data or {}).get("reason", "Template QA signed")
+    payload, signature = _snapshot_template_signature(db, wid)
+
+    lock = {
+        "locked": True,
+        "locked_by": actor,
+        "locked_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "reason": reason,
+        "signature": signature,
+        "signed_template": payload.get("template", "custom"),
+        "signed_params": payload,
+    }
+    _set_template_lock(wid, lock)
+    _log_audit(db, "template_lock", "well", entity_id=wid, well_id=wid,
+               details=f"locked_by={actor};template={payload.get('template','custom')};sig={signature[:12]}")
+    return {**lock, "well_id": wid}
+
+
+@app.post("/api/wells/{wid}/template-unlock")
+def unlock_template(wid: int, data: dict = None, db: Session = Depends(get_db), x_user_role: str = Header(default="viewer")):
+    role = (x_user_role or "viewer").lower()
+    if role != "admin":
+        raise HTTPException(403, "admin role required")
+
+    actor = (data or {}).get("actor", "admin")
+    cleared = _default_template_lock()
+    _set_template_lock(wid, cleared)
+    _log_audit(db, "template_unlock", "well", entity_id=wid, well_id=wid, details=f"unlocked_by={actor}")
+    return {**cleared, "well_id": wid, "unlocked_by": actor}
 
 
 @app.post("/api/wells/{wid}/unlock")
@@ -1839,6 +1958,10 @@ def apply_template_to_well(wid: int, data: dict, db: Session = Depends(get_db)):
     if not well:
         raise HTTPException(404, "Well not found")
 
+    tlock = _get_template_lock(wid)
+    if tlock.get("locked"):
+        raise HTTPException(423, "Template is locked; unlock required before edits")
+
     template_name = data.get("template_name") or data.get("name") or data.get("template")
     template = _find_template(template_name) if template_name else None
 
@@ -1876,6 +1999,10 @@ def apply_template_to_well(wid: int, data: dict, db: Session = Depends(get_db)):
         db.add(PetroParams(well_id=wid, **fields))
     db.commit()
 
+    _, signature_after = _snapshot_template_signature(db, wid)
+    _log_audit(db, "apply_template", "well", entity_id=wid, well_id=wid,
+               details=f"template={fields['template']};sig={signature_after[:12]}")
+
     summary = _build_petro_summary(wid, {
         **fields,
         "gr_min": cutoffs.get("gr_min"),
@@ -1894,14 +2021,23 @@ def apply_template_to_well(wid: int, data: dict, db: Session = Depends(get_db)):
 @app.get("/api/wells/{wid}/petro-params")
 def get_petro_params(wid: int, db: Session = Depends(get_db)):
     pp = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
+    lock = _get_template_lock(wid)
     if not pp:
-        return {"well_id": wid, "saturation_model": "archie", "a": 1.0, "m": 2.0, "n": 2.0, "rw": 0.1,
+        base = {"well_id": wid, "saturation_model": "archie", "a": 1.0, "m": 2.0, "n": 2.0, "rw": 0.1,
                 "vsh_cutoff": 0.35, "phie_cutoff": 0.10, "sw_cutoff": 0.60, "template": "custom"}
-    return {c.name: getattr(pp, c.name) for c in PetroParams.__table__.columns}
+        base["template_lock"] = lock
+        return base
+    out = {c.name: getattr(pp, c.name) for c in PetroParams.__table__.columns}
+    out["template_lock"] = lock
+    return out
 
 
 @app.post("/api/wells/{wid}/petro-params")
 def save_petro_params(wid: int, data: dict, db: Session = Depends(get_db)):
+    tlock = _get_template_lock(wid)
+    if tlock.get("locked"):
+        raise HTTPException(423, "Template is locked; unlock required before edits")
+
     existing = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
     fields = ["saturation_model", "a", "m", "n", "rw", "vsh_cutoff", "phie_cutoff", "sw_cutoff", "template"]
     if existing:
@@ -1921,7 +2057,10 @@ def save_petro_params(wid: int, data: dict, db: Session = Depends(get_db)):
                 kwargs[f] = val
         db.add(PetroParams(**kwargs))
     db.commit()
-    return {"status": "ok"}
+    _, signature_after = _snapshot_template_signature(db, wid)
+    _log_audit(db, "save_petro_params", "well", entity_id=wid, well_id=wid,
+               details=f"template={data.get('template','custom')};sig={signature_after[:12]}")
+    return {"status": "ok", "signature": signature_after}
 
 
 @app.post("/api/wells/{wid}/rw-estimation")

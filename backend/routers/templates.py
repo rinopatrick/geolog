@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import math
 import json
+import os
 
 try:
     from database import get_db
@@ -12,6 +13,20 @@ except ImportError:
     from backend.models import Well, LogRun, PetroParams
 
 router = APIRouter(prefix="/api", tags=["templates"])
+LOCK_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "artifacts", "locks.json")
+
+
+def _template_locked(wid: int) -> bool:
+    if not os.path.exists(LOCK_FILE):
+        return False
+    try:
+        with open(LOCK_FILE, "r", encoding="utf-8") as f:
+            locks = json.load(f)
+        row = locks.get(str(wid), {}) if isinstance(locks, dict) else {}
+        tlock = row.get("template_lock") if isinstance(row, dict) else None
+        return bool(isinstance(tlock, dict) and tlock.get("locked"))
+    except Exception:
+        return False
 
 # ── Template Database ─────────────────────────────────────────
 TEMPLATE_DB = [
@@ -101,6 +116,8 @@ def apply_template(wid: int, data: dict, db: Session = Depends(get_db)):
     well = db.query(Well).filter(Well.id == wid).first()
     if not well:
         raise HTTPException(404, "Well not found")
+    if _template_locked(wid):
+        raise HTTPException(423, "Template is locked; unlock required before edits")
 
     template_name = data.get("template_name") or data.get("name") or ""
     template = None
