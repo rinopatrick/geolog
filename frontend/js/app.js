@@ -115,6 +115,9 @@ class GeoLogApp {
         this.completionData = [];
         this.showCompletionTrack = true;
         this.workflowTemplates = [];
+        this.depthSync = { enabled: true, activeDepth: null, source: null };
+        this._seismicSyncCtx = null;
+        this._imageSyncCtx = null;
 
         this.overlayState = {
             enabled: false,
@@ -7961,6 +7964,70 @@ class GeoLogApp {
         container.style.padding = '0';
     }
 
+    _publishDepthSync(depth, source) {
+        if (!this.depthSync?.enabled) return;
+        if (!Number.isFinite(depth) || depth <= 0) return;
+        this.depthSync.activeDepth = depth;
+        this.depthSync.source = source || 'unknown';
+        if (source !== 'seismic') this._drawSeismicDepthMarker(depth);
+        if (source !== 'imagelog') this._drawImageDepthMarker(depth);
+        if (source !== 'viewer') this._drawViewerDepthMarker(depth);
+    }
+
+    _drawViewerDepthMarker(depth) {
+        if (!this.renderer || !Number.isFinite(depth)) return;
+        this.renderer.hoverDepth = depth;
+        this.renderer.requestRender();
+    }
+
+    _drawSeismicDepthMarker(depth) {
+        const s = this._seismicSyncCtx;
+        if (!s || !s.ctx) return;
+        const { ctx, W, H, pad, ph, dMin, dMax, baseImage } = s;
+        if (baseImage) ctx.putImageData(baseImage, 0, 0);
+        const y = pad.top + ((depth - dMin) / ((dMax - dMin) || 1)) * ph;
+        if (y < pad.top || y > pad.top + ph) return;
+        ctx.save();
+        ctx.strokeStyle = '#ff4d4f';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(W - pad.right, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#ff4d4f';
+        ctx.font = '11px JetBrains Mono';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${depth.toFixed(1)} ft`, pad.left + 6, y - 6);
+        ctx.restore();
+    }
+
+    _drawImageDepthMarker(depth) {
+        const s = this._imageSyncCtx;
+        if (!s || !s.ctx) return;
+        const { ctx, startX, drawTop, cellH, nDepths, depthArr, totalW, baseImage } = s;
+        if (baseImage) ctx.putImageData(baseImage, 0, 0);
+        if (!depthArr?.length || nDepths <= 1) return;
+        const dMin = depthArr[0], dMax = depthArr[depthArr.length - 1];
+        const y = drawTop + ((depth - dMin) / ((dMax - dMin) || 1)) * (nDepths * cellH);
+        if (y < drawTop || y > drawTop + nDepths * cellH) return;
+        ctx.save();
+        ctx.strokeStyle = '#ff4d4f';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(startX, y);
+        ctx.lineTo(totalW - 10, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#ff4d4f';
+        ctx.font = '11px JetBrains Mono';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${depth.toFixed(1)} ft`, startX + 6, y - 6);
+        ctx.restore();
+    }
+
     // ─── Sprint 28: Synthetic Seismogram ────────────────────────
     async runSeismic() {
         if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
@@ -8160,6 +8227,17 @@ class GeoLogApp {
                 ctx.fillText(`${(Math.min(...wltT) * 1000).toFixed(1)} ms`, wltX0, wltTop + wltH + 14);
                 ctx.fillText(`${(Math.max(...wltT) * 1000).toFixed(1)} ms`, wltX0 + wltW - 46, wltTop + wltH + 14);
             }
+
+            const baseImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            this._seismicSyncCtx = { ctx, W, H, pad, ph, dMin, dMax, baseImage };
+            if (Number.isFinite(this.depthSync?.activeDepth)) this._drawSeismicDepthMarker(this.depthSync.activeDepth);
+
+            canvas.onmousemove = (ev) => {
+                const rect = canvas.getBoundingClientRect();
+                const y = ev.clientY - rect.top;
+                const depth = dMin + ((y - pad.top) / (ph || 1)) * (dMax - dMin);
+                this._publishDepthSync(depth, 'seismic');
+            };
         }, 100);
     }
 
@@ -8242,6 +8320,18 @@ class GeoLogApp {
         ctx.fillText(`${data.params.v_min} Ωm`, legendX + 18, 20 + legendH);
         ctx.fillText('High', legendX + 18, 20 + legendH / 2 - 10);
         ctx.fillText('Low', legendX + 18, 20 + legendH / 2 + 15);
+
+        const baseImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        this._imageSyncCtx = { ctx, startX, drawTop: 20, cellH, nDepths, depthArr: data.depth, totalW: W, baseImage };
+        if (Number.isFinite(this.depthSync?.activeDepth)) this._drawImageDepthMarker(this.depthSync.activeDepth);
+
+        canvas.onmousemove = (ev) => {
+            const rect = canvas.getBoundingClientRect();
+            const y = ev.clientY - rect.top;
+            const dMin = data.depth[0], dMax = data.depth[data.depth.length - 1];
+            const depth = dMin + ((y - 20) / ((nDepths * cellH) || 1)) * (dMax - dMin);
+            this._publishDepthSync(depth, 'imagelog');
+        };
     }
 
     // ─── Sprint 28: Offset-Well Analogs ─────────────────────────
@@ -9210,6 +9300,9 @@ class GeoLogApp {
         };
         this.renderer.onCurveMoved = (mnemonic, from, to) => {
             GeoToast.info(`Moved ${mnemonic} → Track ${to + 1}`);
+        };
+        this.renderer.onDepthHover = (depth) => {
+            this._publishDepthSync(depth, 'viewer');
         };
     }
 }

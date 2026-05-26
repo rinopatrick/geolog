@@ -190,6 +190,9 @@ class LogRenderer {
         this.mouseX = e.clientX - rect.left;
         this.mouseY = e.clientY - rect.top;
         this.hoverDepth = this._yToDepth(this.mouseY);
+        if (typeof this.onDepthHover === 'function' && this.hoverDepth > 0) {
+            this.onDepthHover(this.hoverDepth);
+        }
 
         // Feature 16: Zone boundary drag
         if (this._zoneEditState) {
