@@ -397,8 +397,11 @@ class GeoLogApp {
             if (id) this.selectLogRun(id);
         });
 
-        // Correlation canvas pick handler
+        // Correlation canvas pick/drag handler
         document.getElementById('correlationCanvas')?.addEventListener('click', (ev) => this._onCorrelationCanvasClick(ev));
+        document.getElementById('correlationCanvas')?.addEventListener('mousedown', (ev) => this._onCorrelationCanvasMouseDown(ev));
+        document.getElementById('correlationCanvas')?.addEventListener('mousemove', (ev) => this._onCorrelationCanvasMouseMove(ev));
+        window.addEventListener('mouseup', (ev) => this._onCorrelationCanvasMouseUp(ev));
         document.getElementById('logCanvas')?.addEventListener('click', (e) => {
             if (this.curveEditState.enabled) {
                 this.onCurveEditCanvasClick(e);
@@ -1666,24 +1669,44 @@ class GeoLogApp {
         // Save render context for marker picking
         this.corrLastRender = { m, w, h, xMin, xMax, yMin, yMax, shift, stretch, midB, waName: wa.name, wbName: wb.name, topHitZones };
 
-        // Draw marker ties
+        // Draw marker ties (interactive handles)
+        const markerHitZones = [];
         this.corrMarkers.forEach((mk, idx) => {
             const xA = sx(mk.aDepth);
             const xB = sx(((mk.bDepth - midB) * stretch + midB + shift));
             const yTop = m.top + 10 + (idx % 6) * 16;
-            ctx.strokeStyle = '#f2cc60';
+            const draggingA = this._corrDragState && this._corrDragState.markerIdx === idx && this._corrDragState.endpoint === 'a';
+            const draggingB = this._corrDragState && this._corrDragState.markerIdx === idx && this._corrDragState.endpoint === 'b';
+
+            ctx.strokeStyle = draggingA ? '#ffd33d' : '#f2cc60';
             ctx.setLineDash([4,3]);
             ctx.beginPath(); ctx.moveTo(xA, m.top); ctx.lineTo(xA, m.top+h); ctx.stroke();
-            ctx.strokeStyle = '#ff7b72';
+            ctx.strokeStyle = draggingB ? '#ff6b6b' : '#ff7b72';
             ctx.beginPath(); ctx.moveTo(xB, m.top); ctx.lineTo(xB, m.top+h); ctx.stroke();
             ctx.setLineDash([]);
+
+            // Endpoints (draggable handles)
+            const handleY = m.top + h - 10;
+            ctx.beginPath();
+            ctx.arc(xA, handleY, 5, 0, Math.PI * 2);
+            ctx.fillStyle = draggingA ? '#ffd33d' : '#f2cc60';
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(xB, handleY, 5, 0, Math.PI * 2);
+            ctx.fillStyle = draggingB ? '#ff6b6b' : '#ff7b72';
+            ctx.fill();
+
             ctx.strokeStyle = '#8b949e';
             ctx.beginPath(); ctx.moveTo(xA, yTop); ctx.lineTo(xB, yTop); ctx.stroke();
             ctx.fillStyle = '#c9d1d9';
             ctx.font = '10px IBM Plex Mono';
             ctx.fillText(`M${idx+1} Δ=${(mk.aDepth - mk.bDepth).toFixed(1)}ft`, Math.min(xA,xB)+4, yTop-2);
+
+            markerHitZones.push({ markerIdx: idx, endpoint: 'a', x: xA, y: handleY, r: 8 });
+            markerHitZones.push({ markerIdx: idx, endpoint: 'b', x: xB, y: handleY, r: 8 });
         });
 
+        this.corrLastRender.markerHitZones = markerHitZones;
         this._renderCorrelationMarkerTable();
     }
 
@@ -1985,6 +2008,10 @@ class GeoLogApp {
     }
 
     _onCorrelationCanvasClick(ev) {
+        if (this._corrDragMoved) {
+            this._corrDragMoved = false;
+            return;
+        }
         if (!this.corrLastRender) return;
         const cv = document.getElementById('correlationCanvas');
         if (!cv) return;
@@ -2026,6 +2053,89 @@ class GeoLogApp {
             this._saveCorrelationMarkers().catch(() => {});
             this.renderCorrelation();
         }
+    }
+
+    _nearestCorrTopDepth(wellKey, depth) {
+        const arr = (wellKey === 'a' ? this._corrTopOverlay?.a : this._corrTopOverlay?.b) || [];
+        if (!arr.length || !Number.isFinite(depth)) return depth;
+        let best = depth;
+        let minD = Infinity;
+        for (const t of arr) {
+            const d = Number(t.depth);
+            if (!Number.isFinite(d)) continue;
+            const delta = Math.abs(d - depth);
+            if (delta < minD) { minD = delta; best = d; }
+        }
+        // snap threshold 6 ft
+        return minD <= 6 ? best : depth;
+    }
+
+    _onCorrelationCanvasMouseDown(ev) {
+        if (!this.corrLastRender || !this.corrLastRender.markerHitZones?.length) return;
+        const cv = document.getElementById('correlationCanvas');
+        if (!cv) return;
+        const rect = cv.getBoundingClientRect();
+        const x = ev.clientX - rect.left;
+        const y = ev.clientY - rect.top;
+        for (const z of this.corrLastRender.markerHitZones) {
+            const dx = x - z.x;
+            const dy = y - z.y;
+            if ((dx * dx + dy * dy) <= (z.r * z.r)) {
+                this._corrDragState = { markerIdx: z.markerIdx, endpoint: z.endpoint, startX: x };
+                this._corrDragMoved = false;
+                cv.style.cursor = 'ew-resize';
+                ev.preventDefault();
+                return;
+            }
+        }
+    }
+
+    _onCorrelationCanvasMouseMove(ev) {
+        const cv = document.getElementById('correlationCanvas');
+        if (!cv || !this.corrLastRender) return;
+        const rect = cv.getBoundingClientRect();
+        const x = ev.clientX - rect.left;
+        const y = ev.clientY - rect.top;
+
+        // hover cursor
+        if (!this._corrDragState && this.corrLastRender.markerHitZones?.length) {
+            let hit = false;
+            for (const z of this.corrLastRender.markerHitZones) {
+                const dx = x - z.x;
+                const dy = y - z.y;
+                if ((dx * dx + dy * dy) <= (z.r * z.r)) { hit = true; break; }
+            }
+            cv.style.cursor = hit ? 'ew-resize' : 'default';
+        }
+
+        if (!this._corrDragState) return;
+        this._corrDragMoved = true;
+        const { m, w, xMin, xMax, shift, stretch, midB } = this.corrLastRender;
+        const clampedX = Math.max(m.left, Math.min(m.left + w, x));
+        const depthView = xMin + ((clampedX - m.left) / w) * (xMax - xMin);
+        const mk = this.corrMarkers[this._corrDragState.markerIdx];
+        if (!mk) return;
+
+        if (this._corrDragState.endpoint === 'a') {
+            let d = depthView;
+            if (document.getElementById('corrSnapTops')?.checked) d = this._nearestCorrTopDepth('a', d);
+            mk.aDepth = d;
+        } else {
+            let bDepth = ((depthView - shift - midB) / (stretch || 1)) + midB;
+            if (document.getElementById('corrSnapTops')?.checked) bDepth = this._nearestCorrTopDepth('b', bDepth);
+            mk.bDepth = bDepth;
+        }
+        this.renderCorrelation();
+    }
+
+    _onCorrelationCanvasMouseUp(ev) {
+        const cv = document.getElementById('correlationCanvas');
+        if (cv) cv.style.cursor = 'default';
+        if (!this._corrDragState) return;
+        this._corrDragState = null;
+        this._saveCorrelationMarkers().catch(() => {});
+        const info = document.getElementById('corrInfo');
+        if (info) info.textContent = 'Marker moved and saved';
     }
 
     _renderWellHeader(well) {

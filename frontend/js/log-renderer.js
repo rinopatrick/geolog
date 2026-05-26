@@ -277,8 +277,9 @@ class LogRenderer {
             return;
         }
 
-        // Feature 16: Zone boundary editing — check if near zone line
-        const zoneBound = this._getZoneBoundaryAt(y);\        if (zoneBound && x > this.margin.left + this.depthTrackWidth) {
+        // Feature 16: Zone boundary editing - check if near zone line
+        const zoneBound = this._getZoneBoundaryAt(y);
+        if (zoneBound && x > this.margin.left + this.depthTrackWidth) {
             this._zoneEditState = { ...zoneBound, startY: e.clientY };
             e.preventDefault();
             return;
