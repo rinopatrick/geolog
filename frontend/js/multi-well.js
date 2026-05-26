@@ -37,7 +37,7 @@
         GeoToast.warn('Select at least 2 wells');
         return;
       }
-      var data = await app._api('/wells/compare?ids=' + ids.join(','));
+      var data = await app._api('/well-compare?ids=' + ids.join(','));
       this.render(data, curve);
     },
 

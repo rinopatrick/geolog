@@ -7157,7 +7157,7 @@ def image_log(wid: int, data: dict, db: Session = Depends(get_db)):
 
 
 # ─── Advanced Visualization: Multi-Well / Seismic Tie / Image Log / Formation Tester ───
-@app.get("/api/wells/compare")
+@app.get("/api/well-compare")
 def wells_compare(ids: str, db: Session = Depends(get_db)):
     well_ids = []
     for token in str(ids or "").split(","):
