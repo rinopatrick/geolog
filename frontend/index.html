@@ -453,8 +453,8 @@
                         <button class="btn-sm" onclick="app.autoZoneFromTops()"><i data-lucide="layers"></i> Auto Zone from Tops</button>
                         <button class="btn-sm" onclick="app.downloadZonationReport()"><i data-lucide="file-down"></i> Full Report</button>
                         <button class="btn-sm" onclick="app.savePetroParams()"><i data-lucide="save"></i> Save Params</button>
-                        <button class="btn-sm" onclick="app.lockTemplateSignature()"><i data-lucide="shield-check"></i> Lock Template Signature</button>
-                        <button class="btn-sm" onclick="app.unlockTemplateSignature()"><i data-lucide="shield-off"></i> Unlock Template Signature</button>
+                        <button class="btn-sm" onclick="app.lockTemplateSignature()" title="Requires interpreter/admin role"><i data-lucide="shield-check"></i> Lock Template Signature</button>
+                        <button class="btn-sm" onclick="app.unlockTemplateSignature()" title="Requires admin/interpreter role"><i data-lucide="shield-off"></i> Unlock Template Signature</button>
                         <button class="btn-sm" onclick="app.exportZonationReport()"><i data-lucide="file-text"></i> Zonation CSV</button>
                     </div>
                 </div>
@@ -489,7 +489,7 @@
                 <button class="btn-sm" onclick="app.applyMarkerShift('median')"><i data-lucide="move-horizontal"></i> Apply Median Shift</button>
                 <button class="btn-sm" onclick="app.applyMarkerShift('mean')"><i data-lucide="equal"></i> Apply Mean Shift</button>
                 <button class="btn-sm" onclick="app.clearMarkers()"><i data-lucide="eraser"></i> Clear Markers</button>
-                <button class="btn-sm" onclick="app.saveCorrelationSettings()"><i data-lucide="save"></i> Save Profile</button>
+                <button class="btn-sm" onclick="app.saveCorrelationSettings()" title="Requires interpreter/admin role"><i data-lucide="save"></i> Save Profile</button>
                 <button class="btn-sm" onclick="app.renderCorrelation()"><i data-lucide="refresh-cw"></i> Render</button>
                 <span id="corrInfo" class="toolbar-hint"></span>
             </div>
@@ -520,7 +520,7 @@
                     <div class="form-row"><label>Vsh cutoff variation ±%</label><input type="number" id="sensVshCutPct" value="15" step="5" min="0" max="95"></div>
                     <div class="form-row"><label>PHIE cutoff variation ±%</label><input type="number" id="sensPhieCutPct" value="15" step="5" min="0" max="95"></div>
                     <div class="form-row"><label>Sw cutoff variation ±%</label><input type="number" id="sensSwCutPct" value="15" step="5" min="0" max="95"></div>
-                    <button class="btn-primary" onclick="app.runSensitivity()"><i data-lucide="play"></i> Run Sensitivity</button>
+                    <button class="btn-primary" onclick="app.runSensitivity()" title="Requires interpreter role"><i data-lucide="play"></i> Run Sensitivity</button>
                 </div>
                 <div id="sensResults" class="petro-results">
                     <p style="color:#8b949e">Set parameters in Petrophysics tab, then run sensitivity analysis.</p>

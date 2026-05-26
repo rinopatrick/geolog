@@ -53,6 +53,30 @@ const GeoToast = {
         container.appendChild(toast);
         setTimeout(() => { toast.classList.add('fade-out'); setTimeout(() => toast.remove(), 300); }, duration);
     },
+    showAction(message, actionLabel, onAction, type = 'info', duration = 7000) {
+        const container = document.getElementById('toastContainer');
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        const icons = { success: '✓', error: '✕', info: 'ℹ', warn: '⚠' };
+        const icon = document.createElement('span');
+        icon.textContent = icons[type] || '';
+        const text = document.createElement('span');
+        text.textContent = message;
+        const btn = document.createElement('button');
+        btn.className = 'btn-sm';
+        btn.style.marginLeft = '8px';
+        btn.textContent = actionLabel;
+        btn.onclick = () => {
+            try { onAction?.(); } catch {}
+            toast.classList.add('fade-out');
+            setTimeout(() => toast.remove(), 300);
+        };
+        toast.appendChild(icon);
+        toast.appendChild(text);
+        toast.appendChild(btn);
+        container.appendChild(toast);
+        setTimeout(() => { toast.classList.add('fade-out'); setTimeout(() => toast.remove(), 300); }, duration);
+    },
     success(msg) { this.show(msg, 'success'); },
     error(msg) { this.show(msg, 'error', 5000); },
     info(msg) { this.show(msg, 'info'); },
@@ -3730,7 +3754,7 @@ class GeoLogApp {
             a.href = URL.createObjectURL(blob);
             a.download = `${this.currentWell.name || 'well'}_export_package.json`;
             a.click();
-            GeoToast.success('Export package downloaded');
+            this._showOpenDownloadsCTA('Export package downloaded');
         } catch (e) {
             GeoToast.error('Export failed: ' + e.message);
         }
@@ -8614,6 +8638,15 @@ class GeoLogApp {
         } catch(e) { GeoToast.error('Strat normalize failed: ' + e.message); }
     }
 
+    _showOpenDownloadsCTA(message = 'Download complete') {
+        GeoToast.showAction(message, 'Open Downloads', () => {
+            const tab = window.open('chrome://downloads/', '_blank');
+            if (!tab) {
+                GeoToast.info('Open your browser Downloads (Ctrl+J)');
+            }
+        }, 'success', 8000);
+    }
+
     async downloadReportPDF() {
         if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
         try {
@@ -8633,7 +8666,7 @@ class GeoLogApp {
             a.href = url; a.download = (this.currentWell.name || 'well') + '_report.pdf';
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            GeoToast.success('PDF downloaded');
+            this._showOpenDownloadsCTA('PDF downloaded');
         } catch(e) { GeoToast.error('PDF failed: ' + e.message); }
     }
 
@@ -8837,7 +8870,7 @@ class GeoLogApp {
                     }
                 } catch(e) {}
             }
-            GeoToast.success('Batch export complete: ' + wells.length + ' wells');
+            this._showOpenDownloadsCTA('Batch export complete: ' + wells.length + ' wells');
         } catch(e) {
             GeoToast.error('Batch export failed: ' + e.message);
         }
