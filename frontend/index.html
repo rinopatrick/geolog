@@ -113,10 +113,10 @@
                 <i data-lucide="image"></i>
             </button>
             <button class="btn-sm" onclick="app.toggleTheme()" title="Toggle Dark/Light Theme">🌓</button>
-            <button class="btn-sm" onclick="app.saveSession()" title="Save Session">💾</button>
-            <button class="btn-sm" onclick="app.loadSession()" title="Load Session">📂</button>
-            <button class="btn-sm" onclick="app.batchExportAll()" title="Batch Export All Wells">📦</button>
-            <button class="btn-sm" onclick="app._exportSVG()" title="Export as SVG">📊</button>
+            <button class="btn-sm" onclick="app.saveSession()" title="Save Session (Template lock & settings snapshot)" aria-label="Save Session">💾</button>
+            <button class="btn-sm" onclick="app.loadSession()" title="Load Session (Correlation/settings preset)" aria-label="Load Session">📂</button>
+            <button class="btn-sm" onclick="app.batchExportAll()" title="Package Export (Batch export all wells)" aria-label="Package Export">📦</button>
+            <button class="btn-sm" onclick="app._exportSVG()" title="Report/Plot Export (SVG)" aria-label="Report/Plot Export">📊</button>
             <button class="btn-action" id="btnExportLAS" title="Export LAS">
                 <i data-lucide="download"></i>
             </button>
@@ -202,6 +202,7 @@
                         <div class="btn-group-menu">
                             <button onclick="app._exportLAS()"><i data-lucide="download"></i> LAS File</button>
                             <button onclick="app.exportInterpretationSummary()"><i data-lucide="file-spreadsheet"></i> Summary CSV</button>
+                            <button onclick="app.downloadReportPDF()"><i data-lucide="file-badge"></i> Report PDF (Pro)</button>
                             <button onclick="app.exportBulkPackage()"><i data-lucide="package"></i> Full Package</button>
                         </div>
                     </div>
