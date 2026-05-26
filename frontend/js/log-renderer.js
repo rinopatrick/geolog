@@ -118,6 +118,13 @@ class LogRenderer {
         this.curveData = curveData;
         this.formationTops = formationTops || [];
         this.curveConfig = curveConfig || {};
+        // Restore track widths from localStorage
+        try {
+            const saved = JSON.parse(localStorage.getItem('geolog_track_widths') || 'null');
+            if (Array.isArray(saved) && saved.length === this.tracks.length) {
+                this.tracks.forEach((t, i) => { t.width = saved[i]; });
+            }
+        } catch {}
         this._autoFitView();
         this.render();
     }
@@ -183,6 +190,37 @@ class LogRenderer {
         this.mouseX = e.clientX - rect.left;
         this.mouseY = e.clientY - rect.top;
         this.hoverDepth = this._yToDepth(this.mouseY);
+
+        // Feature 3: Track resize dragging
+        if (this._resizeState) {
+            const dx = e.clientX - this._resizeState.startX;
+            const newWidth = Math.max(40, this._resizeState.origWidth + dx);
+            this.tracks[this._resizeState.trackIdx].width = newWidth;
+            this.render();
+            return;
+        }
+
+        // Feature 4: Curve drag ghost
+        if (this._dragCurve) {
+            this.render();
+            const ctx = this.ctx;
+            ctx.fillStyle = 'rgba(88,166,255,0.6)';
+            ctx.font = 'bold 11px IBM Plex Mono';
+            ctx.textAlign = 'center';
+            ctx.fillText(this._dragCurve.mnemonic, this.mouseX, this.mouseY);
+            return;
+        }
+
+        // Update cursor style
+        const borderIdx = this._getTrackBorderX(this.mouseX);
+        if (borderIdx >= 0 && this.mouseY < this.margin.top - 15) {
+            this.canvas.style.cursor = 'col-resize';
+        } else if (this._getCurveLabelAtPos(this.mouseX, this.mouseY)) {
+            this.canvas.style.cursor = 'grab';
+        } else {
+            this.canvas.style.cursor = 'default';
+        }
+
         this.requestRender();
         this._showTooltip(e);
     }
@@ -212,10 +250,66 @@ class LogRenderer {
 
     _dragStart = null;
     _onMouseDown(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        // Feature 3: Track resize — check if near track border
+        const borderIdx = this._getTrackBorderX(x);
+        if (borderIdx >= 0 && y < this.margin.top - 15) {
+            this._resizeState = { trackIdx: borderIdx, startX: e.clientX, origWidth: this.tracks[borderIdx].width };
+            e.preventDefault();
+            return;
+        }
+
+        // Feature 4: Curve drag-drop — check if on curve label
+        const curveLabel = this._getCurveLabelAtPos(x, y);
+        if (curveLabel) {
+            this._dragCurve = { mnemonic: curveLabel.mnemonic, fromTrack: curveLabel.trackIdx, startX: e.clientX, startY: e.clientY };
+            e.preventDefault();
+            return;
+        }
+
         this._dragStart = { y: e.clientY, viewStart: this.viewStart, viewStop: this.viewStop };
     }
 
     _onMouseUp(e) {
+        // Feature 3: Track resize end
+        if (this._resizeState) {
+            this._resizeState = null;
+            this.canvas.style.cursor = 'default';
+            // Save to localStorage
+            const widths = this.tracks.map(t => t.width);
+            localStorage.setItem('geolog_track_widths', JSON.stringify(widths));
+            if (typeof this.onTrackResize === 'function') this.onTrackResize(widths);
+            return;
+        }
+
+        // Feature 4: Curve drag-drop end
+        if (this._dragCurve) {
+            const rect = this.canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const targetTrack = this._getTrackAtX(x);
+            const drag = this._dragCurve;
+            this._dragCurve = null;
+            this.canvas.style.cursor = 'default';
+            if (targetTrack >= 0 && targetTrack !== drag.fromTrack) {
+                // Remove from old track
+                const oldTrack = this.tracks[drag.fromTrack];
+                const idx = oldTrack.curves.indexOf(drag.mnemonic);
+                if (idx >= 0) oldTrack.curves.splice(idx, 1);
+                // Add to new track
+                this.tracks[targetTrack].curves.push(drag.mnemonic);
+                // Update curveConfig
+                if (this.curveConfig[drag.mnemonic]) {
+                    this.curveConfig[drag.mnemonic].track = targetTrack + 1;
+                }
+                this.render();
+                if (typeof this.onCurveMoved === 'function') this.onCurveMoved(drag.mnemonic, drag.fromTrack, targetTrack);
+            }
+            return;
+        }
+
         if (this._dragStart) {
             const dy = e.clientY - this._dragStart.y;
             const feetPerPixel = (this._dragStart.viewStop - this._dragStart.viewStart) / (this.height - this.margin.top - this.margin.bottom);
@@ -240,11 +334,218 @@ class LogRenderer {
         const y = e.clientY - rect.top;
         const depth = this._yToDepth(y);
         if (depth < 0) return;
+        // Check if click is in the track header area (scale editor)
+        if (y < this.margin.top - 15) {
+            const curveLabel = this._getCurveAtHeaderPos(x, y);
+            if (curveLabel && typeof this.onCurveScaleEdit === 'function') {
+                this.onCurveScaleEdit(curveLabel.mnemonic, curveLabel.trackIdx);
+                return;
+            }
+        }
         // Check if click is in the track area
         const lithTrackWidth = (this._showLithology && this.lithologyData?.lith_code?.length) ? 46 : 0;
         const startX = this.margin.left + this.depthTrackWidth + lithTrackWidth;
         if (x >= startX && typeof this.onDoubleClick === 'function') {
             this.onDoubleClick(depth, x, y);
+        }
+    }
+
+    _getCurveAtHeaderPos(x, y) {
+        const lithTrackWidth = (this._showLithology && this.lithologyData?.lith_code?.length) ? 46 : 0;
+        let trackX = this.margin.left + this.depthTrackWidth + lithTrackWidth;
+        for (let t = 0; t < this.tracks.length; t++) {
+            const track = this.tracks[t];
+            if (x >= trackX && x <= trackX + track.width) {
+                const activeCurves = track.curves.filter(m => this.curveData[m] && this.curveData[m].length > 0);
+                let cy = 33;
+                for (const mnemonic of activeCurves) {
+                    if (y >= cy - 8 && y <= cy + 4) {
+                        return { mnemonic, trackIdx: t, trackX, trackWidth: track.width };
+                    }
+                    cy += 14;
+                }
+                return null;
+            }
+            trackX += track.width;
+        }
+        return null;
+    }
+
+    // ─── Track Resize (Feature 3) ─────────────────────────
+    _resizeState = null;
+
+    _getTrackBorderX(x) {
+        const lithTrackWidth = (this._showLithology && this.lithologyData?.lith_code?.length) ? 46 : 0;
+        let trackX = this.margin.left + this.depthTrackWidth + lithTrackWidth;
+        for (let t = 0; t < this.tracks.length; t++) {
+            trackX += this.tracks[t].width;
+            if (Math.abs(x - trackX) < 6) return t;
+        }
+        return -1;
+    }
+
+    // ─── Curve Drag-and-Drop (Feature 4) ──────────────────
+    _dragCurve = null;
+    _dragGhost = null;
+
+    _getCurveLabelAtPos(x, y) {
+        if (y > this.margin.top - 15) return null;
+        return this._getCurveAtHeaderPos(x, y);
+    }
+
+    _getTrackAtX(x) {
+        const lithTrackWidth = (this._showLithology && this.lithologyData?.lith_code?.length) ? 46 : 0;
+        let trackX = this.margin.left + this.depthTrackWidth + lithTrackWidth;
+        for (let t = 0; t < this.tracks.length; t++) {
+            if (x >= trackX && x <= trackX + this.tracks[t].width) return t;
+            trackX += this.tracks[t].width;
+        }
+        return -1;
+    }
+
+    // ─── Zone Shading (Feature 5) ─────────────────────────
+    _drawZoneShading(ctx, startX, totalWidth, plotTop, plotBottom) {
+        if (!this.zones || this.zones.length === 0) return;
+        for (const zone of this.zones) {
+            const y1 = Math.max(plotTop, this._depthToY(zone.top));
+            const y2 = Math.min(plotBottom, this._depthToY(zone.bottom));
+            if (y2 < plotTop || y1 > plotBottom) continue;
+            const sw = zone.sw_avg != null ? zone.sw_avg : 0.5;
+            const isNetPay = sw < 0.6;
+            ctx.fillStyle = isNetPay ? 'rgba(34,197,94,0.12)' : 'rgba(59,130,246,0.12)';
+            ctx.fillRect(startX, y1, totalWidth, y2 - y1);
+        }
+    }
+
+    // ─── Lithology Track (Feature 6) ──────────────────────
+    _showLithologyAuto = false;
+
+    _drawLithAutoTrack(ctx, x, width, plotTop, plotBottom) {
+        const vshData = this.curveData['VSH'];
+        if (!vshData) return;
+        const h = plotBottom - plotTop;
+        ctx.fillStyle = '#11161d';
+        ctx.fillRect(x, plotTop, width, h);
+        ctx.strokeStyle = this.colors.trackBorder;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, plotTop, width, h);
+        // Label
+        ctx.fillStyle = this.colors.headerText;
+        ctx.font = '8px IBM Plex Mono';
+        ctx.textAlign = 'center';
+        ctx.fillText('LITH', x + width / 2, plotTop - 2);
+
+        const stride = this._computeRenderStride(this.depthData.length);
+        for (let i = 0; i < this.depthData.length; i += stride) {
+            const depth = this.depthData[i];
+            if (depth < this.viewStart || depth > this.viewStop) continue;
+            const vsh = vshData[i];
+            if (vsh == null || isNaN(vsh)) continue;
+            const y = this._depthToY(depth);
+            const y2 = this._depthToY(depth + (this.depthData[Math.min(i + stride, this.depthData.length - 1)] - depth));
+            const bandH = Math.max(1, y2 - y);
+
+            if (vsh < 0.1) {
+                // Sandstone: dots
+                ctx.fillStyle = '#f59e0b';
+                ctx.fillRect(x + 2, y, width - 4, bandH);
+                ctx.fillStyle = '#92400e';
+                for (let d = 0; d < 3; d++) {
+                    const dx = x + 8 + d * 12;
+                    const dy = y + bandH / 2;
+                    ctx.beginPath(); ctx.arc(dx, dy, 1.5, 0, Math.PI * 2); ctx.fill();
+                }
+            } else if (vsh < 0.35) {
+                // Shaly sand: horizontal lines
+                ctx.fillStyle = '#a3e635';
+                ctx.fillRect(x + 2, y, width - 4, bandH);
+                ctx.strokeStyle = '#4d7c0f';
+                ctx.lineWidth = 0.5;
+                ctx.beginPath(); ctx.moveTo(x + 4, y + bandH / 2); ctx.lineTo(x + width - 4, y + bandH / 2); ctx.stroke();
+            } else {
+                // Shale: cross-hatch
+                ctx.fillStyle = '#6b7280';
+                ctx.fillRect(x + 2, y, width - 4, bandH);
+                ctx.strokeStyle = '#374151';
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(x + 4, y); ctx.lineTo(x + width - 4, y + bandH);
+                ctx.moveTo(x + width - 4, y); ctx.lineTo(x + 4, y + bandH);
+                ctx.stroke();
+            }
+        }
+    }
+
+    // ─── Core Data Overlay (Feature 7) ────────────────────
+    _showCoreOverlay = false;
+    _coreData = null;
+
+    setCoreData(data) {
+        this._coreData = data || null;
+        this.requestRender();
+    }
+
+    _drawCoreOverlay(ctx, startX, plotTop, plotBottom) {
+        if (!this._showCoreOverlay || !this._coreData || this._coreData.length === 0) return;
+        const porData = this._coreData.filter(c => c.porosity != null);
+        const permData = this._coreData.filter(c => c.permeability != null);
+
+        // Find track positions
+        let porTrackX = -1, porTrackW = 0, permTrackX = -1, permTrackW = 0;
+        let trackX = startX;
+        for (const track of this.tracks) {
+            if (track.curves.includes('NPHI') || track.curves.includes('RHOB') || track.curves.includes('DT')) {
+                porTrackX = trackX; porTrackW = track.width;
+            }
+            if (track.curves.includes('PERM') || track.curves.includes('SW') || track.curves.includes('PHIE')) {
+                permTrackX = trackX; permTrackW = track.width;
+            }
+            trackX += track.width;
+        }
+
+        // Draw porosity core as blue dots on porosity track
+        if (porTrackX >= 0) {
+            const cfg = this.curveConfig['NPHI'] || this.curveConfig['RHOB'] || { scale: [0, 0.4] };
+            for (const c of porData) {
+                if (c.depth < this.viewStart || c.depth > this.viewStop) continue;
+                const y = this._depthToY(c.depth);
+                const val = c.porosity;
+                const normalized = (val - cfg.scale[0]) / (cfg.scale[1] - cfg.scale[0]);
+                const x = porTrackX + normalized * porTrackW;
+                ctx.beginPath();
+                ctx.arc(Math.max(porTrackX, Math.min(porTrackX + porTrackW, x)), y, 3, 0, Math.PI * 2);
+                ctx.fillStyle = '#3b82f6';
+                ctx.fill();
+                ctx.strokeStyle = '#1d4ed8';
+                ctx.lineWidth = 0.5;
+                ctx.stroke();
+            }
+        }
+
+        // Draw permeability core as red dots on saturation track
+        if (permTrackX >= 0) {
+            const cfg = this.curveConfig['PERM'] || { scale: [0.01, 1000], log: true };
+            for (const c of permData) {
+                if (c.depth < this.viewStart || c.depth > this.viewStop) continue;
+                const y = this._depthToY(c.depth);
+                const val = c.permeability;
+                let normalized;
+                if (cfg.log) {
+                    const logMin = Math.log10(Math.max(cfg.scale[0], 0.001));
+                    const logMax = Math.log10(Math.max(cfg.scale[1], 0.001));
+                    normalized = (Math.log10(Math.max(val, 0.001)) - logMin) / (logMax - logMin);
+                } else {
+                    normalized = (val - cfg.scale[0]) / (cfg.scale[1] - cfg.scale[0]);
+                }
+                const x = permTrackX + normalized * permTrackW;
+                ctx.beginPath();
+                ctx.arc(Math.max(permTrackX, Math.min(permTrackX + permTrackW, x)), y, 3, 0, Math.PI * 2);
+                ctx.fillStyle = '#ef4444';
+                ctx.fill();
+                ctx.strokeStyle = '#b91c1c';
+                ctx.lineWidth = 0.5;
+                ctx.stroke();
+            }
         }
     }
 
@@ -370,12 +671,21 @@ class LogRenderer {
         // Draw zones (background)
         this._drawZones(ctx, startX, totalPlotWidth, plotTop, plotBottom);
 
+        // Feature 5: Zone shading (net pay / water leg)
+        this._drawZoneShading(ctx, startX, totalPlotWidth, plotTop, plotBottom);
+
         // Draw bad-hole intervals (LQC overlay)
         this._drawBadHoleIntervals(ctx, startX, totalPlotWidth, plotTop, plotBottom);
 
         // Draw lithology track (if enabled)
         if (lithTrackWidth > 0) {
             this._drawLithTrack(ctx, startX - lithTrackWidth, lithTrackWidth, plotTop, plotBottom);
+        }
+
+        // Feature 6: Auto lithology track (from VSH cutoff)
+        if (this._showLithologyAuto && this.curveData['VSH']) {
+            const autoLithWidth = 40;
+            this._drawLithAutoTrack(ctx, startX - lithTrackWidth - autoLithWidth, autoLithWidth, plotTop, plotBottom);
         }
 
         // Draw depth ruler
@@ -395,6 +705,9 @@ class LogRenderer {
         if (completionTrackWidth > 0) {
             this._drawCompletionTrack(ctx, trackX, plotTop, plotBottom, completionTrackWidth);
         }
+
+        // Feature 7: Core data overlay
+        this._drawCoreOverlay(ctx, startX, plotTop, plotBottom);
 
         // Manual edit overlay
         this._drawEditOverlay(ctx);

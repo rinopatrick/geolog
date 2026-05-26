@@ -82,6 +82,8 @@
                     <button class="nav-btn" data-view="audit" title="Audit trail — track all project activity"><i data-lucide="file-text"></i><span>Audit</span></button>
                     <button class="nav-btn" data-view="seismic" title="Synthetic seismogram from DT and RHOB"><i data-lucide="activity"></i><span>Seismic</span></button>
                     <button class="nav-btn" data-view="imagelog" title="Resistivity image log display (FMI/OBI lite)"><i data-lucide="image"></i><span>Image Log</span></button>
+                    <button class="nav-btn" data-view="multiwell" title="Multi-well overlay comparison"><i data-lucide="layers"></i><span>Multi-Well</span></button>
+                    <button class="nav-btn" data-view="formationtester" title="Formation tester pressure gradient"><i data-lucide="gauge"></i><span>Pressure</span></button>
                     <button class="nav-btn" data-view="analogs" title="Offset-well analog recommendation"><i data-lucide="git-branch"></i><span>Analogs</span></button>
                     <button class="nav-btn" data-view="users" title="Manage users and roles"><i data-lucide="users"></i><span>Users</span></button>
                     <button class="nav-btn" data-view="jobmonitor" title="Background job queue monitor"><i data-lucide="activity"></i><span>Jobs</span></button>
@@ -94,6 +96,10 @@
                 <option value="interpreter">interpreter</option>
                 <option value="admin">admin</option>
             </select>
+            <div id="collabStatus" style="display:flex;align-items:center;gap:6px;margin-right:8px" title="Collaboration status">
+                <span id="collabStatusDot" style="width:8px;height:8px;border-radius:50%;background:#f85149"></span>
+                <span id="collabPeerList" style="font-size:11px;color:#8b949e"></span>
+            </div>
             <button class="btn-action" onclick="app.runSmokeRegression()" title="Run one-click smoke regression">
                 <i data-lucide="shield"></i> Smoke
             </button>
@@ -1148,6 +1154,44 @@
             </div>
         </div>
 
+        <!-- Multi-Well Overlay Panel -->
+        <div id="multiwellPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group">
+                    <label>Multi-Well Overlay</label>
+                    <span class="toolbar-hint">Compare curves across wells</span>
+                </div>
+                <div class="toolbar-group">
+                    <label>Curve</label>
+                    <select id="multiWellCurve" class="depth-select"><option>GR</option><option>RT</option><option>NPHI</option><option>RHOB</option><option>DT</option></select>
+                </div>
+                <div class="toolbar-group">
+                    <label>Wells</label>
+                    <select id="multiWellSelector" class="depth-select" multiple style="min-width:200px;height:60px"></select>
+                </div>
+                <button class="btn-primary" onclick="MultiWellView.run()"><i data-lucide="refresh-cw"></i> Compare</button>
+            </div>
+            <div style="padding:20px">
+                <div id="multiWellLegend" style="color:#8b949e;font-size:12px;margin-bottom:10px"></div>
+                <canvas id="multiWellCanvas" style="width:100%;height:560px;background:var(--bg-primary);border-radius:8px"></canvas>
+            </div>
+        </div>
+
+        <!-- Formation Tester Panel -->
+        <div id="formationtesterPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group">
+                    <label>Formation Tester Pressure</label>
+                    <span class="toolbar-hint">Pressure gradient plot with fluid contact detection</span>
+                </div>
+                <button class="btn-primary" onclick="FormationTesterView.run()"><i data-lucide="refresh-cw"></i> Load</button>
+            </div>
+            <div style="padding:20px">
+                <div id="formationTesterMeta" style="color:#8b949e;font-size:12px;margin-bottom:10px"></div>
+                <canvas id="formationTesterCanvas" style="width:100%;height:560px;background:var(--bg-primary);border-radius:8px"></canvas>
+            </div>
+        </div>
+
         <!-- Offset-Well Analogs Panel -->
         <div id="analogsPanel" class="panel" style="display:none">
             <div class="panel-toolbar">
@@ -1356,6 +1400,11 @@
     <script src="/static/js/zonation.js"></script>
     <script src="/static/js/units.js"></script>
     <script src="/static/js/templates.js"></script>
+    <script src="/static/js/multi-well.js"></script>
+    <script src="/static/js/seismic-tie.js"></script>
+    <script src="/static/js/image-log.js"></script>
+    <script src="/static/js/formation-tester.js"></script>
+    <script src="/static/js/collaboration.js"></script>
     <script src="/static/js/app.js"></script>
 <script>
 function toggleSidebar() {

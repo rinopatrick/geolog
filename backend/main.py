@@ -7156,6 +7156,280 @@ def image_log(wid: int, data: dict, db: Session = Depends(get_db)):
     }
 
 
+# ─── Advanced Visualization: Multi-Well / Seismic Tie / Image Log / Formation Tester ───
+@app.get("/api/wells/compare")
+def wells_compare(ids: str, db: Session = Depends(get_db)):
+    well_ids = []
+    for token in str(ids or "").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            well_ids.append(int(token))
+        except Exception:
+            continue
+    well_ids = list(dict.fromkeys(well_ids))
+    if len(well_ids) < 2:
+        raise HTTPException(400, "Provide at least two well ids, e.g. ids=1,2")
+
+    curve_pref = ["GR", "RT", "NPHI", "RHOB", "DT"]
+    out = []
+    for wid in well_ids:
+        well = db.query(Well).filter(Well.id == wid).first()
+        if not well:
+            continue
+        lr = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+        if not lr:
+            continue
+        cds = db.query(CurveData).filter(CurveData.log_run_id == lr.id).all()
+        cmap = {c.mnemonic: c for c in cds}
+        dept_cd = cmap.get("DEPT") or cmap.get("DEPTH")
+        if dept_cd:
+            depth = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy()
+        else:
+            depth = np.linspace(float(lr.start_depth or 0.0), float(lr.stop_depth or 0.0), int(lr.num_points or 0))
+        step = max(1, int(len(depth) / 1000))
+        depth_s = depth[::step]
+        curves = {}
+        available = []
+        for name in curve_pref:
+            cd = cmap.get(name)
+            if not cd:
+                continue
+            arr = np.frombuffer(cd.data_binary, dtype=np.float64).copy()
+            n = min(len(arr), len(depth))
+            if n <= 2:
+                continue
+            curves[name] = np.where(np.isnan(arr[:n:step]), None, arr[:n:step]).tolist()
+            available.append(name)
+        out.append({
+            "well_id": wid,
+            "well_name": well.name,
+            "depth": np.where(np.isnan(depth_s), None, depth_s).tolist(),
+            "curves": curves,
+            "available_curves": available,
+            "n_points": len(depth_s),
+        })
+    if len(out) < 2:
+        raise HTTPException(404, "Could not prepare at least two wells with log data")
+    return {"wells": out}
+
+
+@app.post("/api/wells/{wid}/seismic-tie")
+def seismic_tie(wid: int, payload: dict, db: Session = Depends(get_db)):
+    lr = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+    cds = db.query(CurveData).filter(CurveData.log_run_id == lr.id).all()
+    cmap = {c.mnemonic: c for c in cds}
+    rhob_cd = cmap.get("RHOB")
+    dt_cd = cmap.get("DT")
+    dept_cd = cmap.get("DEPT") or cmap.get("DEPTH")
+    if not rhob_cd or not dt_cd:
+        raise HTTPException(400, "RHOB and DT curves are required")
+
+    rhob = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy()
+    dt = np.frombuffer(dt_cd.data_binary, dtype=np.float64).copy()
+    n = int(min(len(rhob), len(dt)))
+    if dept_cd:
+        depth = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy()[:n]
+    else:
+        depth = np.linspace(float(lr.start_depth or 0.0), float(lr.stop_depth or 0.0), n)
+    rhob, dt = rhob[:n], dt[:n]
+
+    vel = np.where(dt > 0, 1e6 / dt, np.nan)
+    ai = rhob * vel
+    ai = np.where(np.isfinite(ai), ai, np.nan)
+
+    rc = np.zeros(n)
+    for i in range(1, n):
+        a0, a1 = ai[i - 1], ai[i]
+        if np.isfinite(a0) and np.isfinite(a1) and abs(a1 + a0) > 1e-12:
+            rc[i] = (a1 - a0) / (a1 + a0)
+        else:
+            rc[i] = 0.0
+
+    freq = float(payload.get("frequency_hz", 30.0) or 30.0)
+    freq = max(20.0, min(60.0, freq))
+    dt_s = 0.001
+    t = np.arange(-0.064, 0.064 + dt_s, dt_s)
+    pf = np.pi * freq * t
+    wavelet = (1.0 - 2.0 * (pf ** 2)) * np.exp(-(pf ** 2))
+    synthetic = np.convolve(rc, wavelet, mode="same")
+
+    step = max(1, int(n / 1200))
+    return {
+        "depth": np.where(np.isnan(depth[::step]), None, depth[::step]).tolist(),
+        "ai": np.where(np.isnan(ai[::step]), None, ai[::step]).tolist(),
+        "rc": rc[::step].tolist(),
+        "synthetic": synthetic[::step].tolist(),
+        "frequency_hz": freq,
+        "wavelet": {
+            "time": t.tolist(),
+            "amplitude": wavelet.tolist(),
+        },
+    }
+
+
+@app.get("/api/wells/{wid}/image-log")
+def image_log_get(wid: int, db: Session = Depends(get_db)):
+    lr = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+    cds = db.query(CurveData).filter(CurveData.log_run_id == lr.id).all()
+    cmap = {c.mnemonic: c for c in cds}
+    dept_cd = cmap.get("DEPT") or cmap.get("DEPTH")
+    amp_cd = cmap.get("FMI") or cmap.get("OBI") or cmap.get("RT") or cmap.get("RESD") or cmap.get("GR")
+    if not amp_cd:
+        raise HTTPException(400, "No usable curve for image generation")
+
+    amp = np.frombuffer(amp_cd.data_binary, dtype=np.float64).copy()
+    depth = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(amp), dtype=float)
+    n = min(len(amp), len(depth))
+    amp, depth = amp[:n], depth[:n]
+
+    if amp_cd.mnemonic == "GR":
+        valid_gr = amp[np.isfinite(amp)]
+        med = float(np.nanmedian(valid_gr)) if len(valid_gr) else 80.0
+        amp = np.where(np.isfinite(amp), amp, med)
+        amp = (amp - np.nanmin(amp)) / max(np.nanmax(amp) - np.nanmin(amp), 1e-9)
+        amp = 1.0 - amp
+
+    valid = amp[np.isfinite(amp)]
+    if len(valid) == 0:
+        raise HTTPException(400, "No valid samples for image log")
+    lo, hi = np.percentile(valid, [5, 95])
+    norm = np.clip((amp - lo) / max(hi - lo, 1e-9), 0.0, 1.0)
+
+    n_bins = 72
+    step = max(1, int(n / 1200))
+    image = []
+    depths = []
+    for i in range(0, n, step):
+        if not np.isfinite(norm[i]):
+            continue
+        base = float(norm[i])
+        row = []
+        for b in range(n_bins):
+            ang = (2.0 * np.pi * b) / n_bins
+            val = np.clip(base + 0.14 * np.sin(ang + i * 0.02) + 0.05 * np.cos(2 * ang), 0.0, 1.0)
+            row.append(val)
+        image.append(row)
+        depths.append(float(depth[i]))
+
+    return {
+        "depth": depths,
+        "image": image,
+        "n_bins": n_bins,
+        "curve_used": amp_cd.mnemonic,
+        "synthetic": amp_cd.mnemonic == "GR",
+    }
+
+
+@app.get("/api/wells/{wid}/formation-tester")
+def formation_tester(wid: int, db: Session = Depends(get_db)):
+    base = rft_pressure_gradient(wid, db)
+    points = base.get("classified_points") or base.get("points") or []
+    contacts = []
+    for c in (base.get("fluid_contacts") or []):
+        f, t = c.get("from_fluid", ""), c.get("to_fluid", "")
+        label = "contact"
+        if {f, t} == {"oil", "water"}:
+            label = "OWC"
+        elif {f, t} == {"gas", "oil"}:
+            label = "GOC"
+        contacts.append({
+            "depth": c.get("depth"),
+            "label": label,
+            "type": c.get("type"),
+            "from_fluid": f,
+            "to_fluid": t,
+        })
+    return {
+        "count": base.get("count", 0),
+        "overall": base.get("overall"),
+        "points": points,
+        "fluid_segments": base.get("fluid_segments") or [],
+        "contacts": contacts,
+    }
+
+
+
+# ─── Real-Time Collaboration WebSocket ──────────────────────
+import asyncio
+import json as _json
+
+class CollabRoom:
+    """Manages WebSocket connections per well."""
+    def __init__(self):
+        self.connections: dict[str, list] = {}  # well_id -> [(ws, user_id, name, role)]
+
+    async def connect(self, well_id: str, ws, user_id: str, name: str, role: str = "viewer"):
+        await ws.accept()
+        key = str(well_id)
+        if key not in self.connections:
+            self.connections[key] = []
+        self.connections[key].append((ws, user_id, name, role))
+        await self._broadcast_peers(key)
+
+    async def disconnect(self, well_id: str, ws):
+        key = str(well_id)
+        if key in self.connections:
+            self.connections[key] = [(w, uid, n, r) for w, uid, n, r in self.connections[key] if w is not ws]
+            await self._broadcast_peers(key)
+
+    async def broadcast(self, well_id: str, message: dict, exclude_ws=None):
+        key = str(well_id)
+        if key not in self.connections:
+            return
+        dead = []
+        for ws, uid, name, role in self.connections[key]:
+            if ws is exclude_ws:
+                continue
+            try:
+                await ws.send_text(_json.dumps(message))
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.connections[key] = [(w, uid, n, r) for w, uid, n, r in self.connections[key] if w is not ws]
+
+    async def _broadcast_peers(self, key: str):
+        if key not in self.connections:
+            return
+        users = [{"user_id": uid, "name": name, "role": role} for _, uid, name, role in self.connections[key]]
+        msg = _json.dumps({"type": "peers", "users": users})
+        dead = []
+        for ws, _, _, _ in self.connections[key]:
+            try:
+                await ws.send_text(msg)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.connections[key] = [(w, uid, n, r) for w, uid, n, r in self.connections[key] if w is not ws]
+
+collab_rooms = CollabRoom()
+
+@app.websocket("/ws/collab/{well_id}")
+async def websocket_collab(websocket: WebSocket, well_id: int):
+    user_id = websocket.query_params.get("user", f"anon_{id(websocket)}")
+    user_name = websocket.query_params.get("name", user_id)
+    role = websocket.query_params.get("role", "viewer")
+    await collab_rooms.connect(well_id, websocket, user_id, user_name, role)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            msg = _json.loads(data)
+            msg["user_id"] = user_id
+            msg["name"] = user_name
+            await collab_rooms.broadcast(well_id, msg, exclude_ws=websocket)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        await collab_rooms.disconnect(well_id, websocket)
+
+
 # ─── Frontend Serving ─────────────────────────────────────────
 frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend")
 if os.path.isdir(frontend_dir):

@@ -299,6 +299,7 @@ class GeoLogApp {
         this._initFavorites();
         this._initThumbnailPreview();
         this._initDoubleClickTop();
+        this._wireRendererCallbacks();
     }
 
     _bindUI() {
@@ -522,6 +523,8 @@ class GeoLogApp {
         document.getElementById('qcautofixPanel').style.display = view === 'qcautofix' ? 'block' : 'none';
         document.getElementById('seismicPanel').style.display = view === 'seismic' ? 'block' : 'none';
         document.getElementById('imagelogPanel').style.display = view === 'imagelog' ? 'block' : 'none';
+        document.getElementById('multiwellPanel').style.display = view === 'multiwell' ? 'block' : 'none';
+        document.getElementById('formationtesterPanel').style.display = view === 'formationtester' ? 'block' : 'none';
         document.getElementById('analogsPanel').style.display = view === 'analogs' ? 'block' : 'none';
         document.getElementById('usersPanel').style.display = view === 'users' ? 'block' : 'none';
         document.getElementById('jobmonitorPanel').style.display = view === 'jobmonitor' ? 'block' : 'none';
@@ -569,6 +572,8 @@ class GeoLogApp {
         if (view === 'zonation' && this.currentWell) this._initZonation();
         if (view === 'units' && this.currentWell) this._initUnits();
         if (view === 'templates' && this.currentWell) this._initTemplates();
+        if (view === 'multiwell') { if (typeof MultiWellView !== 'undefined') MultiWellView.load(); }
+        if (view === 'formationtester') { if (typeof FormationTesterView !== 'undefined') FormationTesterView.run(); }
         localStorage.setItem('geolog_last_view', view);
     }
 
@@ -860,6 +865,20 @@ class GeoLogApp {
             this._renderWellHeader(well);
             localStorage.setItem('geolog_last_well', wellId);
             this._updateWorkflowStrip();
+
+            // Connect collaboration WebSocket
+            if (typeof CollabManager !== 'undefined') {
+                CollabManager.connect(wellId, null, 'User');
+                // Send cursor position on view change
+                if (this.renderer) {
+                    const origOnViewChanged = this.renderer.onViewChanged;
+                    this.renderer.onViewChanged = (start, stop) => {
+                        if (origOnViewChanged) origOnViewChanged(start, stop);
+                        const mid = (start + stop) / 2;
+                        CollabManager.sendCursorMove(mid);
+                    };
+                }
+            }
         } catch (e) { console.error('Failed to select well:', e); }
             finally { GeoLoading.hide(); }
     }
@@ -8635,6 +8654,167 @@ class GeoLogApp {
             el.innerHTML = '<div style="padding:20px;color:#8b949e">Template workflow module not loaded.</div>';
         }
     }
+
+    // ─── Feature 1: Curve Scale Editor ────────────────────
+    _initCurveScaleEditor() {
+        if (!this.renderer) return;
+        this.renderer.onCurveScaleEdit = (mnemonic, trackIdx) => {
+            const cfg = this.curveConfig[mnemonic] || {};
+            const scale = cfg.scale || [0, 100];
+            const isLog = !!cfg.log;
+            const isReverse = scale[0] > scale[1];
+
+            const html = `
+                <div style="padding:16px;min-width:280px">
+                    <h3 style="margin:0 0 12px;color:#58a6ff;font-size:14px">Edit Scale: ${mnemonic}</h3>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+                        <label style="color:#8b949e;font-size:11px">Min
+                            <input type="number" id="scaleMinInput" value="${isReverse ? scale[1] : scale[0]}" step="any" style="width:100%;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:6px;margin-top:2px">
+                        </label>
+                        <label style="color:#8b949e;font-size:11px">Max
+                            <input type="number" id="scaleMaxInput" value="${isReverse ? scale[0] : scale[1]}" step="any" style="width:100%;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:6px;margin-top:2px">
+                        </label>
+                    </div>
+                    <div style="display:flex;gap:12px;margin-bottom:12px">
+                        <label style="color:#8b949e;font-size:11px;display:flex;align-items:center;gap:4px">
+                            <input type="checkbox" id="scaleLogCheck" ${isLog ? 'checked' : ''}> Log scale
+                        </label>
+                        <label style="color:#8b949e;font-size:11px;display:flex;align-items:center;gap:4px">
+                            <input type="checkbox" id="scaleReverseCheck" ${isReverse ? 'checked' : ''}> Reversed
+                        </label>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end">
+                        <button onclick="GeoModal.close()" style="background:#30363d;color:#c9d1d9;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px">Cancel</button>
+                        <button id="scaleApplyBtn" style="background:#238636;color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px">Apply</button>
+                    </div>
+                </div>`;
+
+            GeoModal.show(html);
+            document.getElementById('scaleApplyBtn')?.addEventListener('click', () => {
+                const minVal = parseFloat(document.getElementById('scaleMinInput').value);
+                const maxVal = parseFloat(document.getElementById('scaleMaxInput').value);
+                const logCheck = document.getElementById('scaleLogCheck').checked;
+                const reverseCheck = document.getElementById('scaleReverseCheck').checked;
+                if (!isFinite(minVal) || !isFinite(maxVal)) { GeoToast.warn('Invalid values'); return; }
+                if (!this.curveConfig[mnemonic]) this.curveConfig[mnemonic] = {};
+                this.curveConfig[mnemonic].scale = reverseCheck ? [maxVal, minVal] : [minVal, maxVal];
+                this.curveConfig[mnemonic].log = logCheck;
+                this.renderer.curveConfig = this.curveConfig;
+                this.renderer.render();
+                GeoModal.close();
+                GeoToast.info(`Scale updated: ${mnemonic}`);
+            });
+        };
+    }
+
+    // ─── Feature 2: Auto-Scale ────────────────────────────
+    _autoScale() {
+        if (!this.renderer || !this.renderer.curveData) return;
+        const data = this.renderer.curveData;
+        let updated = 0;
+        for (const [mnemonic, values] of Object.entries(data)) {
+            if (!values || values.length === 0) continue;
+            const valid = values.filter(v => v != null && !isNaN(v) && isFinite(v));
+            if (valid.length < 10) continue;
+            valid.sort((a, b) => a - b);
+            const p1 = valid[Math.floor(valid.length * 0.01)];
+            const p99 = valid[Math.floor(valid.length * 0.99)];
+            const range = p99 - p1;
+            if (range <= 0) continue;
+            if (!this.curveConfig[mnemonic]) this.curveConfig[mnemonic] = {};
+            this.curveConfig[mnemonic].scale = [p1 - range * 0.05, p99 + range * 0.05];
+            updated++;
+        }
+        this.renderer.curveConfig = this.curveConfig;
+        this.renderer.render();
+        GeoToast.info(`Auto-scaled ${updated} curves`);
+    }
+
+    // ─── Feature 6: Auto Lithology Toggle ─────────────────
+    _toggleAutoLithology() {
+        if (!this.renderer) return;
+        this.renderer._showLithologyAuto = !this.renderer._showLithologyAuto;
+        this.renderer.render();
+        GeoToast.info(`Auto lithology: ${this.renderer._showLithologyAuto ? 'ON' : 'OFF'}`);
+    }
+
+    // ─── Feature 7: Core Data Overlay Toggle ──────────────
+    _showCoreOverlay = false;
+
+    async _toggleCoreOverlay() {
+        if (!this.renderer || !this.currentWell) return;
+        this._showCoreOverlay = !this._showCoreOverlay;
+        this.renderer._showCoreOverlay = this._showCoreOverlay;
+        if (this._showCoreOverlay && !this._coreDataLoaded) {
+            try {
+                const data = await this._api(`/wells/${this.currentWell.id}/core-data`);
+                this.renderer.setCoreData(data?.points || data || []);
+                this._coreDataLoaded = true;
+            } catch {
+                this.renderer.setCoreData([]);
+                this._coreDataLoaded = true;
+            }
+        }
+        this.renderer.render();
+        GeoToast.info(`Core overlay: ${this._showCoreOverlay ? 'ON' : 'OFF'}`);
+    }
+
+    // ─── Feature 14: Depth Ruler Click-to-Pick ────────────
+    _depthPickMode = false;
+
+    _toggleDepthRulerPick() {
+        this._depthPickMode = !this._depthPickMode;
+        if (this.renderer) {
+            this.renderer.canvas.style.cursor = this._depthPickMode ? 'crosshair' : 'default';
+        }
+        GeoToast.info(`Top pick mode: ${this._depthPickMode ? 'ON (click on ruler)' : 'OFF'}`);
+        if (this._depthPickMode && this.renderer) {
+            this._depthPickHandler = (e) => {
+                if (!this._depthPickMode) return;
+                const rect = this.renderer.canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                // Only respond to clicks in the depth ruler area
+                if (x > this.renderer.margin.left + this.renderer.depthTrackWidth) return;
+                const depth = this.renderer._yToDepth(y);
+                if (depth < 0) return;
+                const name = prompt(`Add formation top at ${depth.toFixed(1)} ft:`);
+                if (!name) return;
+                this._addFormationTop(depth, name);
+            };
+            this.renderer.canvas.addEventListener('click', this._depthPickHandler);
+        } else if (!this._depthPickMode && this.renderer && this._depthPickHandler) {
+            this.renderer.canvas.removeEventListener('click', this._depthPickHandler);
+            this._depthPickHandler = null;
+        }
+    }
+
+    async _addFormationTop(depth, name) {
+        if (!this.currentWell) return;
+        try {
+            await this._api(`/wells/${this.currentWell.id}/tops`, {
+                method: 'POST',
+                body: JSON.stringify({ depth, name, formation_name: name }),
+            });
+            GeoToast.info(`Top added: ${name} at ${depth.toFixed(1)} ft`);
+            if (typeof this._loadTops === 'function') await this._loadTops();
+            if (this.renderer) this.renderer.render();
+        } catch (e) {
+            GeoToast.error('Failed to add top: ' + (e.message || e));
+        }
+    }
+
+    // ─── Wire up renderer callbacks ───────────────────────
+    _wireRendererCallbacks() {
+        if (!this.renderer) return;
+        this._initCurveScaleEditor();
+        this.renderer.onTrackResize = (widths) => {
+            GeoToast.info('Track widths saved');
+        };
+        this.renderer.onCurveMoved = (mnemonic, from, to) => {
+            GeoToast.info(`Moved ${mnemonic} → Track ${to + 1}`);
+        };
+    }
 }
 // Initialize
 const app = new GeoLogApp();
@@ -8775,7 +8955,25 @@ document.addEventListener('keydown', (e) => {
         case 'A':
             if (isTyping || e.ctrlKey || e.metaKey || e.altKey) return;
             e.preventDefault();
-            app._toggleAdvancedControls();
+            app._autoScale();
+            break;
+        case 'v':
+        case 'V':
+            if (isTyping || e.ctrlKey || e.metaKey || e.altKey) return;
+            e.preventDefault();
+            app._toggleAutoLithology();
+            break;
+        case 'c':
+        case 'C':
+            if (isTyping || e.ctrlKey || e.metaKey || e.altKey) return;
+            e.preventDefault();
+            app._toggleCoreOverlay();
+            break;
+        case 't':
+        case 'T':
+            if (isTyping || e.ctrlKey || e.metaKey || e.altKey) return;
+            e.preventDefault();
+            app._toggleDepthRulerPick();
             break;
         case 'r':
             if (isTyping) return;
