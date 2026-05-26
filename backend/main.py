@@ -2092,8 +2092,7 @@ def estimate_rw(wid: int, data: dict, db: Session = Depends(get_db)):
 # ─── Sensitivity Analysis (Monte Carlo) ───────────────────────
 @app.post("/api/wells/{wid}/sensitivity")
 def sensitivity_analysis(wid: int, data: dict, db: Session = Depends(get_db)):
-    """Run sensitivity: vary params to get P10/P50/P90 for net_pay."""
-    import random
+    """Monte Carlo uncertainty for net pay with P10/P50/P90 + driver ranking."""
     well = db.query(Well).filter(Well.id == wid).first()
     if not well:
         raise HTTPException(404, "Well not found")
@@ -2112,30 +2111,39 @@ def sensitivity_analysis(wid: int, data: dict, db: Session = Depends(get_db)):
     nphi = np.frombuffer(nphi_cd.data_binary, dtype=np.float64).copy()
     gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy() if gr_cd else np.zeros_like(rt)
 
-    base_a = float(data.get("a", 1.0))
-    base_m = float(data.get("m", 2.0))
-    base_n = float(data.get("n", 2.0))
-    base_rw = float(data.get("rw", 0.1))
-    vsh_cut = float(data.get("vsh_cutoff", 0.35))
-    phie_cut = float(data.get("phie_cutoff", 0.10))
-    sw_cut = float(data.get("sw_cutoff", 0.60))
-    n_iter = min(int(data.get("iterations", 500)), 2000)
-    pct = float(data.get("variation_pct", 30)) / 100.0
+    base_a = max(float(data.get("a", 1.0)), 1e-6)
+    base_m = max(float(data.get("m", 2.0)), 1e-6)
+    base_n = max(float(data.get("n", 2.0)), 1e-6)
+    base_rw = max(float(data.get("rw", 0.1)), 1e-6)
+    base_vsh_cut = float(data.get("vsh_cutoff", 0.35))
+    base_phie_cut = float(data.get("phie_cutoff", 0.10))
+    base_sw_cut = float(data.get("sw_cutoff", 0.60))
+
+    n_iter = max(50, min(int(data.get("iterations", 500)), 5000))
+    pct_common = max(0.0, min(float(data.get("variation_pct", 30)) / 100.0, 0.95))
+
+    rw_pct = max(0.0, min(float(data.get("rw_variation_pct", pct_common * 100.0)) / 100.0, 0.95))
+    m_pct = max(0.0, min(float(data.get("m_variation_pct", pct_common * 100.0)) / 100.0, 0.95))
+    n_pct = max(0.0, min(float(data.get("n_variation_pct", pct_common * 100.0)) / 100.0, 0.95))
+    vsh_cut_pct = max(0.0, min(float(data.get("vsh_cutoff_variation_pct", pct_common * 100.0)) / 100.0, 0.95))
+    phie_cut_pct = max(0.0, min(float(data.get("phie_cutoff_variation_pct", pct_common * 100.0)) / 100.0, 0.95))
+    sw_cut_pct = max(0.0, min(float(data.get("sw_cutoff_variation_pct", pct_common * 100.0)) / 100.0, 0.95))
+
     model = data.get("saturation_model", "archie")
+    seed = data.get("seed")
     start_depth = data.get("start_depth")
     stop_depth = data.get("stop_depth")
 
     gr_valid = gr[~np.isnan(gr) & (gr > 0)]
-    gr_min = float(np.min(gr_valid)) if len(gr_valid) else 0
-    gr_max = float(np.max(gr_valid)) if len(gr_valid) else 150
+    gr_min = float(np.min(gr_valid)) if len(gr_valid) else 0.0
+    gr_max = float(np.max(gr_valid)) if len(gr_valid) else 150.0
     if gr_max == gr_min:
-        gr_max = gr_min + 1
+        gr_max = gr_min + 1.0
 
-    step = float(lr.step) if lr.step else abs(float(rt[1] - rt[0])) if len(rt) > 1 else 0.5
+    step = float(lr.step) if lr.step else 0.5
     if step == 0:
         step = 0.5
 
-    # Apply depth filter if provided
     depth_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
     depth_arr = np.frombuffer(depth_cd.data_binary, dtype=np.float64).copy() if depth_cd else None
     depth_mask = np.ones(len(rt), dtype=bool)
@@ -2145,51 +2153,100 @@ def sensitivity_analysis(wid: int, data: dict, db: Session = Depends(get_db)):
         if stop_depth is not None:
             depth_mask &= (depth_arr <= float(stop_depth))
 
-    net_pays = []
-    for _ in range(n_iter):
-        a_v = base_a * (1 + random.uniform(-pct, pct))
-        m_v = base_m * (1 + random.uniform(-pct, pct))
-        n_v = base_n * (1 + random.uniform(-pct, pct))
-        rw_v = base_rw * (1 + random.uniform(-pct, pct))
-        pay = 0
-        for i in range(len(rt)):
-            if not depth_mask[i]:
-                continue
-            if np.isnan(rt[i]) or np.isnan(nphi[i]) or rt[i] <= 0 or nphi[i] <= -1:
-                continue
-            igr = (gr[i] - gr_min) / (gr_max - gr_min) if not np.isnan(gr[i]) else 0
-            vsh_v = max(0, min(1, igr))
-            phi = max(0, nphi[i] * (1 - vsh_v))
-            if phi < 0.01:
-                continue
-            if model == "simandoux":
-                inner = (a_v * rw_v) / (phi ** m_v * rt[i]) - vsh_v * rw_v / (0.4 * phi)
-                sw_v = np.sqrt(max(0, inner))
-            elif model == "indonesian":
-                denom = np.sqrt(phi ** m_v / (a_v * rw_v)) + np.sqrt(vsh_v) / np.sqrt(max(rt[i], 0.01))
-                sw_v = 1.0 / (np.sqrt(max(rt[i], 0.01)) * denom) if denom > 0 else 1.0
-            else:
-                sw_v = (a_v / (phi ** m_v * rt[i] / rw_v)) ** (1.0 / n_v)
-            sw_v = max(0, min(1, sw_v))
-            if vsh_v < vsh_cut and phi > phie_cut and sw_v < sw_cut:
-                pay += 1
-        net_pays.append(pay * step)
+    vsh = np.clip((gr - gr_min) / (gr_max - gr_min), 0.0, 1.0)
+    phi_base = np.maximum(0.0, nphi * (1.0 - vsh))
+    valid = depth_mask & np.isfinite(rt) & np.isfinite(phi_base) & (rt > 0) & (phi_base >= 0.01)
 
-    net_pays.sort()
-    p10 = net_pays[int(len(net_pays) * 0.1)] if net_pays else 0
-    p50 = net_pays[int(len(net_pays) * 0.5)] if net_pays else 0
-    p90 = net_pays[int(len(net_pays) * 0.9)] if net_pays else 0
+    rng = np.random.default_rng(seed if seed is not None else None)
+
+    def _sample(base: float, pct: float, lo: float, hi: float) -> float:
+        if pct <= 0:
+            return float(np.clip(base, lo, hi))
+        return float(np.clip(base * (1.0 + rng.uniform(-pct, pct)), lo, hi))
+
+    param_track = {
+        "rw": np.zeros(n_iter, dtype=np.float64),
+        "m": np.zeros(n_iter, dtype=np.float64),
+        "n": np.zeros(n_iter, dtype=np.float64),
+        "vsh_cutoff": np.zeros(n_iter, dtype=np.float64),
+        "phie_cutoff": np.zeros(n_iter, dtype=np.float64),
+        "sw_cutoff": np.zeros(n_iter, dtype=np.float64),
+    }
+    net_pays = np.zeros(n_iter, dtype=np.float64)
+
+    for i in range(n_iter):
+        a_v = base_a
+        m_v = _sample(base_m, m_pct, 0.2, 8.0)
+        n_v = _sample(base_n, n_pct, 0.2, 8.0)
+        rw_v = _sample(base_rw, rw_pct, 1e-6, 5.0)
+        vsh_cut = _sample(base_vsh_cut, vsh_cut_pct, 0.0, 1.0)
+        phie_cut = _sample(base_phie_cut, phie_cut_pct, 0.0, 0.6)
+        sw_cut = _sample(base_sw_cut, sw_cut_pct, 0.0, 1.0)
+
+        phi = phi_base
+        rt_safe = np.maximum(rt, 1e-6)
+
+        if model == "simandoux":
+            inner = (a_v * rw_v) / (np.power(phi, m_v) * rt_safe + 1e-10) - vsh * rw_v / (0.4 * np.maximum(phi, 1e-6))
+            sw = np.sqrt(np.maximum(0.0, inner))
+        elif model == "indonesian":
+            denom = np.sqrt(np.power(phi, m_v) / (a_v * rw_v + 1e-10)) + np.sqrt(np.maximum(0.0, vsh)) / np.sqrt(rt_safe)
+            sw = np.where(denom > 0, 1.0 / (np.sqrt(rt_safe) * denom), 1.0)
+        else:
+            sw = np.power(np.maximum((a_v * rw_v) / (np.power(phi, m_v) * rt_safe + 1e-10), 0.0), 1.0 / n_v)
+        sw = np.clip(sw, 0.0, 1.0)
+
+        pay_mask = valid & (vsh < vsh_cut) & (phi > phie_cut) & (sw < sw_cut)
+        net_pays[i] = float(np.sum(pay_mask) * step)
+
+        param_track["rw"][i] = rw_v
+        param_track["m"][i] = m_v
+        param_track["n"][i] = n_v
+        param_track["vsh_cutoff"][i] = vsh_cut
+        param_track["phie_cutoff"][i] = phie_cut
+        param_track["sw_cutoff"][i] = sw_cut
+
+    p90 = float(np.percentile(net_pays, 10)) if len(net_pays) else 0.0  # conservative (low)
+    p50 = float(np.percentile(net_pays, 50)) if len(net_pays) else 0.0
+    p10 = float(np.percentile(net_pays, 90)) if len(net_pays) else 0.0  # optimistic (high)
+
+    drivers = []
+    for key, vals in param_track.items():
+        if np.std(vals) <= 1e-12 or np.std(net_pays) <= 1e-12:
+            corr = 0.0
+        else:
+            corr = float(np.corrcoef(vals, net_pays)[0, 1])
+            if not np.isfinite(corr):
+                corr = 0.0
+        drivers.append({
+            "parameter": key,
+            "correlation": round(corr, 4),
+            "impact": round(abs(corr), 4),
+        })
+    drivers.sort(key=lambda x: x["impact"], reverse=True)
+
+    bin_edges = np.histogram_bin_edges(net_pays, bins=20)
+    hist_counts = np.histogram(net_pays, bins=bin_edges)[0]
 
     return {
         "iterations": n_iter,
-        "variation_pct": round(pct * 100, 1),
-        "p10_net_pay": round(float(p10), 2),
-        "p50_net_pay": round(float(p50), 2),
-        "p90_net_pay": round(float(p90), 2),
-        "mean_net_pay": round(float(np.mean(net_pays)), 2) if net_pays else 0,
-        "std_net_pay": round(float(np.std(net_pays)), 2) if net_pays else 0,
-        "histogram_bins": [round(float(x), 1) for x in np.histogram_bin_edges(net_pays, bins=20).tolist()],
-        "histogram_counts": np.histogram(net_pays, bins=20)[0].tolist(),
+        "variation_pct": round(pct_common * 100, 1),
+        "variation_profile": {
+            "rw": round(rw_pct * 100, 1),
+            "m": round(m_pct * 100, 1),
+            "n": round(n_pct * 100, 1),
+            "vsh_cutoff": round(vsh_cut_pct * 100, 1),
+            "phie_cutoff": round(phie_cut_pct * 100, 1),
+            "sw_cutoff": round(sw_cut_pct * 100, 1),
+        },
+        "p10_net_pay": round(p10, 2),
+        "p50_net_pay": round(p50, 2),
+        "p90_net_pay": round(p90, 2),
+        "mean_net_pay": round(float(np.mean(net_pays)), 2) if len(net_pays) else 0,
+        "std_net_pay": round(float(np.std(net_pays)), 2) if len(net_pays) else 0,
+        "histogram_bins": [round(float(x), 2) for x in bin_edges.tolist()],
+        "histogram_counts": hist_counts.tolist(),
+        "drivers": drivers,
     }
 
 

@@ -4005,8 +4005,14 @@ class GeoLogApp {
     // ─── Sensitivity Analysis ────────────────────────────────
     async runSensitivity() {
         if (!this.currentWell) return GeoToast.warn('No well selected');
-        const iterations = parseInt(document.getElementById('sensIter')?.value || '500');
-        const pct = parseInt(document.getElementById('sensPct')?.value || '30');
+        const iterations = parseInt(document.getElementById('sensIter')?.value || '1000', 10);
+        const pct = parseFloat(document.getElementById('sensPct')?.value || '25');
+        const rwPct = parseFloat(document.getElementById('sensRwPct')?.value || String(pct));
+        const mPct = parseFloat(document.getElementById('sensMPct')?.value || String(pct));
+        const nPct = parseFloat(document.getElementById('sensNPct')?.value || String(pct));
+        const vshCutPct = parseFloat(document.getElementById('sensVshCutPct')?.value || String(pct));
+        const phieCutPct = parseFloat(document.getElementById('sensPhieCutPct')?.value || String(pct));
+        const swCutPct = parseFloat(document.getElementById('sensSwCutPct')?.value || String(pct));
         const model = document.getElementById('satModel')?.value || 'archie';
         const getVal = (id) => parseFloat(document.getElementById(id)?.value || '0');
 
@@ -4017,34 +4023,52 @@ class GeoLogApp {
                 body: JSON.stringify({
                     a: getVal('archA'), m: getVal('archM'), n: getVal('archN'), rw: getVal('archRw'),
                     vsh_cutoff: getVal('cutVsh'), phie_cutoff: getVal('cutPhie'), sw_cutoff: getVal('cutSw'),
-                    saturation_model: model, iterations, variation_pct: pct,
+                    saturation_model: model,
+                    iterations,
+                    variation_pct: pct,
+                    rw_variation_pct: rwPct,
+                    m_variation_pct: mPct,
+                    n_variation_pct: nPct,
+                    vsh_cutoff_variation_pct: vshCutPct,
+                    phie_cutoff_variation_pct: phieCutPct,
+                    sw_cutoff_variation_pct: swCutPct,
                 }),
             });
+
+            const profile = result.variation_profile || {};
+            const driverRows = (result.drivers || []).map((d) => {
+                const sign = d.correlation >= 0 ? '+' : '−';
+                return `<div class="petro-stat"><span>${d.parameter}</span><strong>${sign}${Math.abs(d.correlation).toFixed(3)} corr</strong></div>`;
+            }).join('') || '<div class="petro-stat"><span>Drivers</span><strong>N/A</strong></div>';
 
             const panel = document.getElementById('sensResults');
             if (!panel) return;
 
             panel.innerHTML = `
                 <div class="petro-summary">
-                    <h4>Monte Carlo Sensitivity Results</h4>
+                    <h4>Monte Carlo Uncertainty</h4>
                     <div class="petro-stat"><span>Iterations:</span> <strong>${result.iterations}</strong></div>
-                    <div class="petro-stat"><span>Param variation:</span> <strong>±${result.variation_pct}%</strong></div>
                     <div class="petro-stat"><span>Saturation model:</span> <strong>${model}</strong></div>
-                    <hr>
-                    <h4>Net Pay Uncertainty</h4>
-                    <div class="petro-stat"><span>P90 (conservative):</span> <strong style="color:#f85149">${result.p90_net_pay} ft</strong></div>
-                    <div class="petro-stat"><span>P50 (most likely):</span> <strong style="color:#d29922">${result.p50_net_pay} ft</strong></div>
-                    <div class="petro-stat"><span>P10 (optimistic):</span> <strong style="color:#3fb950">${result.p10_net_pay} ft</strong></div>
                     <div class="petro-stat"><span>Mean ± Std:</span> <strong>${result.mean_net_pay} ± ${result.std_net_pay} ft</strong></div>
                     <hr>
-                    <h4>Tornado Chart</h4>
+                    <h4>Net Pay Percentiles</h4>
+                    <div class="petro-stat"><span>P90 (conservative low):</span> <strong style="color:#f85149">${result.p90_net_pay} ft</strong></div>
+                    <div class="petro-stat"><span>P50 (median):</span> <strong style="color:#d29922">${result.p50_net_pay} ft</strong></div>
+                    <div class="petro-stat"><span>P10 (optimistic high):</span> <strong style="color:#3fb950">${result.p10_net_pay} ft</strong></div>
+                    <hr>
+                    <h4>Uncertainty Profile (±%)</h4>
+                    <div class="petro-stat"><span>Rw/m/n:</span> <strong>${profile.rw ?? 0}/${profile.m ?? 0}/${profile.n ?? 0}</strong></div>
+                    <div class="petro-stat"><span>Vsh/PHIE/Sw cut:</span> <strong>${profile.vsh_cutoff ?? 0}/${profile.phie_cutoff ?? 0}/${profile.sw_cutoff ?? 0}</strong></div>
+                    <hr>
+                    <h4>Top Drivers (Correlation)</h4>
+                    ${driverRows}
+                    <h4 style="margin-top:12px">Tornado (P90↔P10 spread)</h4>
                     <canvas id="tornadoCanvas" width="500" height="250"></canvas>
                     <h4 style="margin-top:12px">Distribution</h4>
                     <canvas id="sensHistogram" width="500" height="160"></canvas>
                 </div>
             `;
 
-            // Draw tornado chart (P90-P10 spread visualization)
             this._drawTornado(result);
             this._drawSensHistogram(result);
         } catch (e) {

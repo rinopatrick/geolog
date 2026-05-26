@@ -508,8 +508,14 @@
             <div class="petro-panel">
                 <div class="petro-form">
                     <h3>Run Parameters</h3>
-                    <div class="form-row"><label>Iterations</label><input type="number" id="sensIter" value="500" step="100" min="50" max="2000"></div>
-                    <div class="form-row"><label>Variation ±%</label><input type="number" id="sensPct" value="30" step="5" min="5" max="80"></div>
+                    <div class="form-row"><label>Iterations</label><input type="number" id="sensIter" value="1000" step="100" min="50" max="5000"></div>
+                    <div class="form-row"><label>Default variation ±%</label><input type="number" id="sensPct" value="25" step="5" min="0" max="95"></div>
+                    <div class="form-row"><label>Rw variation ±%</label><input type="number" id="sensRwPct" value="25" step="5" min="0" max="95"></div>
+                    <div class="form-row"><label>m variation ±%</label><input type="number" id="sensMPct" value="20" step="5" min="0" max="95"></div>
+                    <div class="form-row"><label>n variation ±%</label><input type="number" id="sensNPct" value="20" step="5" min="0" max="95"></div>
+                    <div class="form-row"><label>Vsh cutoff variation ±%</label><input type="number" id="sensVshCutPct" value="15" step="5" min="0" max="95"></div>
+                    <div class="form-row"><label>PHIE cutoff variation ±%</label><input type="number" id="sensPhieCutPct" value="15" step="5" min="0" max="95"></div>
+                    <div class="form-row"><label>Sw cutoff variation ±%</label><input type="number" id="sensSwCutPct" value="15" step="5" min="0" max="95"></div>
                     <button class="btn-primary" onclick="app.runSensitivity()"><i data-lucide="play"></i> Run Sensitivity</button>
                 </div>
                 <div id="sensResults" class="petro-results">
