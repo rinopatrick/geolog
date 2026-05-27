@@ -1509,6 +1509,16 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert retention_fail.get("retention_reason_code") == "RETENTION_TOO_SHORT"
             assert "retention" in (retention_fail.get("failed_checks") or [])
 
+            rk_attest_only = client.post(
+                "/api/ops/security-evidence/gate/check?max_age_seconds=86400&min_retention_days=31&required_checks=attest",
+                headers=_h("interpreter"),
+            )
+            assert rk_attest_only.status_code == 200
+            attest_only = rk_attest_only.json()
+            assert attest_only.get("ok") is True
+            assert attest_only.get("evaluated_checks") == ["attest"]
+            assert attest_only.get("failed_checks") == []
+
             rka = client.post(
                 "/api/ops/security-evidence/gate/assert?max_age_seconds=86400&min_retention_days=31",
                 headers=_h("interpreter"),
@@ -1776,10 +1786,10 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/security-evidence/gate/enforce" in endpoints
     assert "/api/ops/security-evidence/gate/assert" in endpoints
     assert "/api/ops/security-evidence/gate/check" in endpoints
-    assert endpoints.get("/api/ops/security-evidence/gate") == "1.1"
-    assert endpoints.get("/api/ops/security-evidence/gate/enforce") == "1.1"
-    assert endpoints.get("/api/ops/security-evidence/gate/assert") == "1.1"
-    assert endpoints.get("/api/ops/security-evidence/gate/check") == "1.1"
+    assert endpoints.get("/api/ops/security-evidence/gate") == "1.2"
+    assert endpoints.get("/api/ops/security-evidence/gate/enforce") == "1.2"
+    assert endpoints.get("/api/ops/security-evidence/gate/assert") == "1.2"
+    assert endpoints.get("/api/ops/security-evidence/gate/check") == "1.2"
     assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
@@ -1975,6 +1985,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsSecurityEvidenceGateErrorDetail" in schemas
     assert "OpsSecurityEvidenceGateErrorResponse" in schemas
     gate_error_detail_props = schemas.get("OpsSecurityEvidenceGateErrorDetail", {}).get("properties", {})
+    assert "evaluated_checks" in gate_error_detail_props
     assert "failed_checks" in gate_error_detail_props
     gate_schema = schemas.get("OpsSecurityEvidenceGateResponse", {})
     gate_props = gate_schema.get("properties", {})
@@ -1982,6 +1993,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "retention_reason_code" in gate_props
     assert "retention_days" in gate_props
     assert "min_retention_days" in gate_props
+    assert "evaluated_checks" in gate_props
     assert "failed_checks" in gate_props
     assert "OpsContractsResponse" in schemas
     assert "OpsRunbookResponse" in schemas

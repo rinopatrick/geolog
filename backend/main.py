@@ -8116,6 +8116,7 @@ class OpsSecurityEvidenceGateResponse(BaseModel):
     attest_ok: bool
     freshness_ok: bool
     retention_ok: bool
+    evaluated_checks: list[Literal["attest", "freshness", "retention"]]
     failed_checks: list[Literal["attest", "freshness", "retention"]]
     attest_reason_code: Literal["ATTEST_VALID", "ATTEST_INVALID", "ATTEST_ERROR"]
     freshness_reason_code: Literal["FRESH", "STALE", "EVIDENCE_MISSING"]
@@ -8130,6 +8131,7 @@ class OpsSecurityEvidenceGateResponse(BaseModel):
 
 class OpsSecurityEvidenceGateErrorDetail(BaseModel):
     error: str
+    evaluated_checks: list[Literal["attest", "freshness", "retention"]]
     failed_checks: list[Literal["attest", "freshness", "retention"]]
     attest_reason_code: str | None = None
     freshness_reason_code: Literal["FRESH", "STALE", "EVIDENCE_MISSING"]
@@ -8362,10 +8364,10 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/security-evidence/attest": "1.0",
         "/api/ops/security-evidence/attest/latest": "1.0",
         "/api/ops/security-evidence/freshness": "1.0",
-        "/api/ops/security-evidence/gate": "1.1",
-        "/api/ops/security-evidence/gate/enforce": "1.1",
-        "/api/ops/security-evidence/gate/assert": "1.1",
-        "/api/ops/security-evidence/gate/check": "1.1",
+        "/api/ops/security-evidence/gate": "1.2",
+        "/api/ops/security-evidence/gate/enforce": "1.2",
+        "/api/ops/security-evidence/gate/assert": "1.2",
+        "/api/ops/security-evidence/gate/check": "1.2",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -8408,10 +8410,10 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/security-evidence/attest": "1.0",
                             "/api/ops/security-evidence/attest/latest": "1.0",
                             "/api/ops/security-evidence/freshness": "1.0",
-                            "/api/ops/security-evidence/gate": "1.1",
-                            "/api/ops/security-evidence/gate/enforce": "1.1",
-                            "/api/ops/security-evidence/gate/assert": "1.1",
-                            "/api/ops/security-evidence/gate/check": "1.1",
+                            "/api/ops/security-evidence/gate": "1.2",
+                            "/api/ops/security-evidence/gate/enforce": "1.2",
+                            "/api/ops/security-evidence/gate/assert": "1.2",
+                            "/api/ops/security-evidence/gate/check": "1.2",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
@@ -8601,10 +8603,18 @@ def ops_security_evidence_freshness(max_age_seconds: int = 86400, _role: str = D
 def ops_security_evidence_gate(
     max_age_seconds: int = 86400,
     min_retention_days: int = 30,
+    required_checks: str = "attest,freshness,retention",
     _role: str = Depends(require_viewer),
 ):
     max_age_seconds = max(60, int(max_age_seconds))
     min_retention_days = max(1, int(min_retention_days))
+
+    allowed_checks = {"attest", "freshness", "retention"}
+    parsed_checks = [c.strip().lower() for c in str(required_checks).split(",") if c.strip()]
+    evaluated_checks = [c for c in parsed_checks if c in allowed_checks]
+    if not evaluated_checks:
+        evaluated_checks = ["attest", "freshness", "retention"]
+
     attest = ops_security_evidence_attest_latest(_role=_role)
     freshness = ops_security_evidence_freshness(max_age_seconds=max_age_seconds, _role=_role)
 
@@ -8616,19 +8626,19 @@ def ops_security_evidence_gate(
         "RETENTION_OK" if retention_ok else "RETENTION_TOO_SHORT" if isinstance(retention_days, int) else "RETENTION_UNKNOWN"
     )
 
-    failed_checks: list[str] = []
-    if not attest_ok:
-        failed_checks.append("attest")
-    if not freshness_ok:
-        failed_checks.append("freshness")
-    if not retention_ok:
-        failed_checks.append("retention")
+    check_status = {
+        "attest": attest_ok,
+        "freshness": freshness_ok,
+        "retention": retention_ok,
+    }
+    failed_checks: list[str] = [c for c in evaluated_checks if not bool(check_status.get(c, False))]
 
     return {
         "ok": len(failed_checks) == 0,
         "attest_ok": attest_ok,
         "freshness_ok": freshness_ok,
         "retention_ok": retention_ok,
+        "evaluated_checks": evaluated_checks,
         "failed_checks": failed_checks,
         "attest_reason_code": attest.get("reason_code"),
         "freshness_reason_code": freshness.get("reason_code", "EVIDENCE_MISSING"),
@@ -8645,6 +8655,7 @@ def ops_security_evidence_gate(
 def _security_evidence_gate_failure_detail(gate: dict[str, Any]) -> dict[str, Any]:
     return {
         "error": "security evidence gate failed",
+        "evaluated_checks": gate.get("evaluated_checks", []),
         "failed_checks": gate.get("failed_checks", []),
         "attest_reason_code": gate.get("attest_reason_code"),
         "freshness_reason_code": gate.get("freshness_reason_code"),
@@ -8665,11 +8676,13 @@ def _security_evidence_gate_failure_detail(gate: dict[str, Any]) -> dict[str, An
 def ops_security_evidence_gate_enforce(
     max_age_seconds: int = 86400,
     min_retention_days: int = 30,
+    required_checks: str = "attest,freshness,retention",
     _role: str = Depends(require_viewer),
 ):
     gate = ops_security_evidence_gate(
         max_age_seconds=max_age_seconds,
         min_retention_days=min_retention_days,
+        required_checks=required_checks,
         _role=_role,
     )
     if bool(gate.get("ok", False)):
@@ -8685,11 +8698,13 @@ def ops_security_evidence_gate_enforce(
 def ops_security_evidence_gate_assert(
     max_age_seconds: int = 86400,
     min_retention_days: int = 30,
+    required_checks: str = "attest,freshness,retention",
     _role: str = Depends(require_interpreter),
 ):
     gate = ops_security_evidence_gate(
         max_age_seconds=max_age_seconds,
         min_retention_days=min_retention_days,
+        required_checks=required_checks,
         _role="viewer",
     )
     if bool(gate.get("ok", False)):
@@ -8704,11 +8719,13 @@ def ops_security_evidence_gate_assert(
 def ops_security_evidence_gate_check(
     max_age_seconds: int = 86400,
     min_retention_days: int = 30,
+    required_checks: str = "attest,freshness,retention",
     _role: str = Depends(require_interpreter),
 ):
     return ops_security_evidence_gate(
         max_age_seconds=max_age_seconds,
         min_retention_days=min_retention_days,
+        required_checks=required_checks,
         _role="viewer",
     )
 
