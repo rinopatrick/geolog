@@ -1037,6 +1037,42 @@ def test_ops_observability_status_shape_and_request_id_signal():
     assert "timestamp" in data
 
 
+def test_ops_otel_status_shape_and_env_signals():
+    import os
+
+    old_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+    old_service = os.environ.get("OTEL_SERVICE_NAME")
+    old_attrs = os.environ.get("OTEL_RESOURCE_ATTRIBUTES")
+
+    os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://otel-collector:4318"
+    os.environ["OTEL_SERVICE_NAME"] = "geolog-api"
+    os.environ["OTEL_RESOURCE_ATTRIBUTES"] = "service.namespace=geolog,deployment.environment=dev"
+
+    try:
+        r = client.get("/api/ops/otel-status", headers=_h("viewer"))
+        assert r.status_code == 200
+        data = r.json()
+        assert data.get("ok") is True
+        assert data.get("enabled") is True
+        assert data.get("exporter_otlp_endpoint_set") is True
+        assert data.get("service_name") == "geolog-api"
+        assert data.get("resource_attributes_set") is True
+        assert "timestamp" in data
+    finally:
+        if old_endpoint is None:
+            os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
+        else:
+            os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = old_endpoint
+        if old_service is None:
+            os.environ.pop("OTEL_SERVICE_NAME", None)
+        else:
+            os.environ["OTEL_SERVICE_NAME"] = old_service
+        if old_attrs is None:
+            os.environ.pop("OTEL_RESOURCE_ATTRIBUTES", None)
+        else:
+            os.environ["OTEL_RESOURCE_ATTRIBUTES"] = old_attrs
+
+
 def test_ops_health_unknown_role_allowed_as_viewer_floor():
     r = client.get("/api/ops/health", headers=_h("unknown"))
     assert r.status_code == 200
@@ -1102,6 +1138,7 @@ def test_ops_contracts_shape_and_access():
     assert isinstance(endpoints, dict)
     assert "/api/ops/summary" in endpoints
     assert "/api/ops/observability-status" in endpoints
+    assert "/api/ops/otel-status" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
     assert "/api/audit-log/immutability-status" in endpoints
@@ -1216,6 +1253,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     alerts_get = paths.get("/api/ops/alerts", {}).get("get", {})
     health_get = paths.get("/api/ops/health", {}).get("get", {})
     obs_status_get = paths.get("/api/ops/observability-status", {}).get("get", {})
+    otel_status_get = paths.get("/api/ops/otel-status", {}).get("get", {})
     contracts_get = paths.get("/api/ops/contracts", {}).get("get", {})
     contracts_verify_path = paths.get("/api/ops/contracts/verify-signature", {})
     contracts_verify_get = contracts_verify_path.get("get", {})
@@ -1228,6 +1266,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert alerts_get.get("operationId")
     assert health_get.get("operationId")
     assert obs_status_get.get("operationId")
+    assert otel_status_get.get("operationId")
     assert contracts_get.get("operationId")
     assert contracts_verify_get.get("operationId")
     assert contracts_verify_post.get("operationId")
@@ -1244,6 +1283,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsAlertsResponse" in schemas
     assert "OpsHealthResponse" in schemas
     assert "OpsObservabilityStatusResponse" in schemas
+    assert "OpsOtelStatusResponse" in schemas
     assert "OpsContractsResponse" in schemas
     assert "OpsRunbookResponse" in schemas
 
@@ -1251,6 +1291,12 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     obs_props = obs_schema.get("properties", {})
     assert "trace_context_propagation" in obs_props
     assert "recent_events_include_trace_id" in obs_props
+
+    otel_schema = schemas.get("OpsOtelStatusResponse", {})
+    otel_props = otel_schema.get("properties", {})
+    assert "enabled" in otel_props
+    assert "exporter_otlp_endpoint_set" in otel_props
+    assert "service_name" in otel_props
 
     contracts_schema = schemas.get("OpsContractsResponse", {})
     contracts_props = contracts_schema.get("properties", {})

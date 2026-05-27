@@ -7500,6 +7500,15 @@ class OpsObservabilityStatusResponse(BaseModel):
     timestamp: str
 
 
+class OpsOtelStatusResponse(BaseModel):
+    ok: bool
+    enabled: bool
+    exporter_otlp_endpoint_set: bool
+    service_name: str
+    resource_attributes_set: bool
+    timestamp: str
+
+
 @app.get(
     "/api/ops/health",
     response_model=OpsHealthResponse,
@@ -7558,6 +7567,22 @@ def ops_observability_status(_role: str = Depends(require_viewer)):
         "recent_events_include_request_id": has_request_id,
         "recent_events_include_trace_id": has_trace_id,
         "otel_enabled": otel_enabled,
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
+@app.get("/api/ops/otel-status", response_model=OpsOtelStatusResponse)
+def ops_otel_status(_role: str = Depends(require_viewer)):
+    endpoint = (os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or "").strip()
+    service_name = (os.getenv("OTEL_SERVICE_NAME") or "geolog-app").strip() or "geolog-app"
+    resource_attrs = (os.getenv("OTEL_RESOURCE_ATTRIBUTES") or "").strip()
+    enabled = bool(endpoint)
+    return {
+        "ok": True,
+        "enabled": enabled,
+        "exporter_otlp_endpoint_set": bool(endpoint),
+        "service_name": service_name,
+        "resource_attributes_set": bool(resource_attrs),
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
 
@@ -7706,6 +7731,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/alerts": "1.2",
         "/api/ops/health": "1.0",
         "/api/ops/observability-status": "1.1",
+        "/api/ops/otel-status": "1.0",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -7738,6 +7764,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/alerts": "1.2",
                             "/api/ops/health": "1.0",
                             "/api/ops/observability-status": "1.1",
+                            "/api/ops/otel-status": "1.0",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
