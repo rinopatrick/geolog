@@ -7091,7 +7091,8 @@ def ops_metrics_recent(
 @app.get("/api/ops/slo-status")
 def ops_slo_status(_role: str = Depends(require_viewer)):
     """Basic SLO evaluation snapshot from in-process counters."""
-    target_latency_ms = float(os.getenv("OPS_SLO_P95_MS", "500") or 500)
+    target_latency_avg_ms = float(os.getenv("OPS_SLO_AVG_MS", "500") or 500)
+    target_latency_p95_ms = float(os.getenv("OPS_SLO_P95_MS", "800") or 800)
     target_error_rate = float(os.getenv("OPS_SLO_ERROR_RATE", "0.01") or 0.01)
 
     with OBS_METRICS_LOCK:
@@ -7114,7 +7115,6 @@ def ops_slo_status(_role: str = Depends(require_viewer)):
             continue
 
     error_rate = (float(error_count) / total) if total > 0 else 0.0
-    latency_ok = avg <= target_latency_ms
     error_ok = error_rate <= target_error_rate
 
     # lightweight p95 from recent ring buffer latency values
@@ -7126,10 +7126,15 @@ def ops_slo_status(_role: str = Depends(require_viewer)):
         except Exception:
             latency_p95 = 0.0
 
+    latency_avg_ok = avg <= target_latency_avg_ms
+    latency_p95_ok = latency_p95 <= target_latency_p95_ms
+    latency_ok = bool(latency_avg_ok and latency_p95_ok)
+
     return {
         "ok": bool(latency_ok and error_ok),
         "targets": {
-            "latency_ms_avg_max": target_latency_ms,
+            "latency_ms_avg_max": target_latency_avg_ms,
+            "latency_ms_p95_max": target_latency_p95_ms,
             "error_rate_max": target_error_rate,
         },
         "current": {
@@ -7141,6 +7146,8 @@ def ops_slo_status(_role: str = Depends(require_viewer)):
         },
         "checks": {
             "latency_ok": latency_ok,
+            "latency_avg_ok": latency_avg_ok,
+            "latency_p95_ok": latency_p95_ok,
             "error_rate_ok": error_ok,
         },
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",

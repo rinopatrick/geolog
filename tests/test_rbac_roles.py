@@ -865,6 +865,7 @@ def test_ops_slo_status_shape_and_access():
     assert "checks" in data
 
     assert "latency_ms_avg_max" in data["targets"]
+    assert "latency_ms_p95_max" in data["targets"]
     assert "error_rate_max" in data["targets"]
     assert "latency_ms_avg" in data["current"]
     assert "latency_ms_p95" in data["current"]
@@ -872,6 +873,8 @@ def test_ops_slo_status_shape_and_access():
     assert "requests_total" in data["current"]
     assert "errors_5xx" in data["current"]
     assert "latency_ok" in data["checks"]
+    assert "latency_avg_ok" in data["checks"]
+    assert "latency_p95_ok" in data["checks"]
     assert "error_rate_ok" in data["checks"]
 
 
