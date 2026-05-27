@@ -780,3 +780,27 @@ def test_audit_verify_signature_post_interpreter_ok_and_mismatch():
             os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
         else:
             os.environ["AUDIT_EXPORT_HMAC_KEY"] = old
+
+
+def test_ops_metrics_viewer_access_and_shape():
+    # trigger one request so counters move
+    _ = client.get("/api/wells", headers=_h("viewer"))
+
+    r = client.get("/api/ops/metrics", headers=_h("viewer"))
+    assert r.status_code == 200
+    data = r.json()
+
+    assert "requests_total" in data
+    assert "requests_by_method" in data
+    assert "requests_by_status" in data
+    assert "latency_ms_avg" in data
+    assert "latency_samples" in data
+    assert data["requests_total"] >= 1
+    assert isinstance(data["requests_by_method"], dict)
+    assert isinstance(data["requests_by_status"], dict)
+
+
+def test_ops_metrics_requires_viewer_role_floor():
+    # unknown role normalized to viewer by auth layer; should still pass read access
+    r = client.get("/api/ops/metrics", headers=_h("unknown"))
+    assert r.status_code == 200

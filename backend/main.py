@@ -59,6 +59,7 @@ import datetime
 import csv
 import io
 import zipfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -98,6 +99,16 @@ logger = logging.getLogger("geolog")
 # In-memory original-value snapshots for curve point edits.
 # Keyed by "<log_run_id>:<mnemonic>" -> {"index": original_value}
 CURVE_EDIT_ORIGINALS = {}
+
+# Lightweight observability counters (Phase 2 baseline).
+OBS_METRICS_LOCK = Lock()
+OBS_METRICS = {
+    "requests_total": 0,
+    "requests_by_method": {},
+    "requests_by_status": {},
+    "latency_ms_sum": 0.0,
+    "latency_ms_count": 0,
+}
 
 Base.metadata.create_all(bind=engine)
 
@@ -562,6 +573,33 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class RequestMetricsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start = time.perf_counter()
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        method = request.method.upper()
+        status = str(getattr(response, "status_code", 0))
+
+        with OBS_METRICS_LOCK:
+            OBS_METRICS["requests_total"] += 1
+            OBS_METRICS["latency_ms_sum"] += elapsed_ms
+            OBS_METRICS["latency_ms_count"] += 1
+            by_method = OBS_METRICS["requests_by_method"]
+            by_status = OBS_METRICS["requests_by_status"]
+            by_method[method] = int(by_method.get(method, 0)) + 1
+            by_status[status] = int(by_status.get(status, 0)) + 1
+
+        logger.info(json.dumps({
+            "event": "http_request",
+            "method": method,
+            "path": request.url.path,
+            "status": int(status),
+            "latency_ms": round(elapsed_ms, 2),
+        }, ensure_ascii=False))
+        return response
+
+
 class RBACWriteGuardMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         method = request.method.upper()
@@ -718,6 +756,7 @@ app.add_middleware(RBACWriteGuardMiddleware)
 app.add_middleware(ErrorLoggingMiddleware)
 app.add_middleware(ImmutableAuditTrailMiddleware)
 app.add_middleware(AuthContextMiddleware)
+app.add_middleware(RequestMetricsMiddleware)
 
 
 # ─── Auto-seed demo data on first startup ───────────────────
@@ -6974,6 +7013,23 @@ def list_jobs(_role: str = Depends(require_viewer)):
     """List all background jobs (newest first)."""
     jobs = sorted(_list_jobs(), key=lambda j: j.get("created_at", ""), reverse=True)
     return {"jobs": jobs, "total": len(jobs)}
+
+
+@app.get("/api/ops/metrics")
+def ops_metrics(_role: str = Depends(require_viewer)):
+    """Lightweight in-process metrics snapshot (Phase 2 baseline)."""
+    with OBS_METRICS_LOCK:
+        total = int(OBS_METRICS.get("requests_total", 0))
+        count = int(OBS_METRICS.get("latency_ms_count", 0))
+        avg = (float(OBS_METRICS.get("latency_ms_sum", 0.0)) / count) if count > 0 else 0.0
+        return {
+            "requests_total": total,
+            "requests_by_method": dict(OBS_METRICS.get("requests_by_method", {})),
+            "requests_by_status": dict(OBS_METRICS.get("requests_by_status", {})),
+            "latency_ms_avg": round(avg, 2),
+            "latency_samples": count,
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        }
 
 
 @app.post("/api/wells/{wid}/electrofacies-async", status_code=202)
