@@ -1537,6 +1537,7 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert isinstance(with_invalid.get("gate_passed_count"), int)
             assert isinstance(with_invalid.get("gate_total_count"), int)
             assert isinstance(with_invalid.get("gate_pass_ratio"), float)
+            assert isinstance(with_invalid.get("gate_fail_ratio"), float)
             assert with_invalid.get("gate_failed_count") + with_invalid.get("gate_passed_count") == len(with_invalid.get("evaluated_checks") or [])
             assert with_invalid.get("gate_total_count") == len(with_invalid.get("evaluated_checks") or [])
 
@@ -1553,6 +1554,7 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert isinstance(defaulted.get("gate_passed_count"), int)
             assert isinstance(defaulted.get("gate_total_count"), int)
             assert isinstance(defaulted.get("gate_pass_ratio"), float)
+            assert isinstance(defaulted.get("gate_fail_ratio"), float)
             assert defaulted.get("gate_failed_count") + defaulted.get("gate_passed_count") == len(defaulted.get("evaluated_checks") or [])
             assert defaulted.get("gate_total_count") == len(defaulted.get("evaluated_checks") or [])
 
@@ -1578,6 +1580,7 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert isinstance(kdetail.get("gate_passed_count"), int)
             assert isinstance(kdetail.get("gate_total_count"), int)
             assert isinstance(kdetail.get("gate_pass_ratio"), float)
+            assert isinstance(kdetail.get("gate_fail_ratio"), float)
             assert kdetail.get("gate_total_count") == len(kdetail.get("evaluated_checks") or [])
 
             old_ts = time.time() - 7200
@@ -1838,10 +1841,10 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/security-evidence/gate/enforce" in endpoints
     assert "/api/ops/security-evidence/gate/assert" in endpoints
     assert "/api/ops/security-evidence/gate/check" in endpoints
-    assert endpoints.get("/api/ops/security-evidence/gate") == "1.11"
-    assert endpoints.get("/api/ops/security-evidence/gate/enforce") == "1.11"
-    assert endpoints.get("/api/ops/security-evidence/gate/assert") == "1.11"
-    assert endpoints.get("/api/ops/security-evidence/gate/check") == "1.11"
+    assert endpoints.get("/api/ops/security-evidence/gate") == "1.12"
+    assert endpoints.get("/api/ops/security-evidence/gate/enforce") == "1.12"
+    assert endpoints.get("/api/ops/security-evidence/gate/assert") == "1.12"
+    assert endpoints.get("/api/ops/security-evidence/gate/check") == "1.12"
     assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
@@ -2046,6 +2049,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "gate_passed_count" in gate_error_detail_props
     assert "gate_total_count" in gate_error_detail_props
     assert "gate_pass_ratio" in gate_error_detail_props
+    assert "gate_fail_ratio" in gate_error_detail_props
     assert "requested_checks" in gate_error_detail_props
     assert "ignored_checks" in gate_error_detail_props
     assert "duplicate_checks" in gate_error_detail_props
@@ -2064,6 +2068,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "gate_passed_count" in gate_props
     assert "gate_total_count" in gate_props
     assert "gate_pass_ratio" in gate_props
+    assert "gate_fail_ratio" in gate_props
     assert "requested_checks" in gate_props
     assert "ignored_checks" in gate_props
     assert "duplicate_checks" in gate_props
