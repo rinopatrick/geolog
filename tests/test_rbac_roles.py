@@ -817,6 +817,8 @@ def test_ops_metrics_recent_shape_and_limit():
     assert "events" in data
     assert "count" in data
     assert "limit" in data
+    assert "status_min" in data
+    assert "path_contains" in data
     assert data["limit"] == 5
     assert isinstance(data["events"], list)
     assert data["count"] <= 5
@@ -826,6 +828,21 @@ def test_ops_metrics_recent_shape_and_limit():
         assert "path" in e
         assert "status" in e
         assert "latency_ms" in e
+
+
+def test_ops_metrics_recent_filters():
+    _ = client.get("/api/does-not-exist", headers=_h("viewer"))
+    _ = client.get("/api/wells", headers=_h("viewer"))
+
+    r = client.get(
+        "/api/ops/metrics/recent?limit=20&status_min=400&path_contains=does-not-exist",
+        headers=_h("viewer"),
+    )
+    assert r.status_code == 200
+    data = r.json()
+    for e in data.get("events", []):
+        assert int(e.get("status", 0)) >= 400
+        assert "does-not-exist" in str(e.get("path", "")).lower()
 
 
 def test_ops_metrics_recent_unknown_role_allowed_as_viewer_floor():

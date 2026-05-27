@@ -7047,18 +7047,43 @@ def ops_metrics(_role: str = Depends(require_viewer)):
 
 
 @app.get("/api/ops/metrics/recent")
-def ops_metrics_recent(limit: int = 20, _role: str = Depends(require_viewer)):
+def ops_metrics_recent(
+    limit: int = 20,
+    status_min: int = 0,
+    path_contains: str | None = None,
+    _role: str = Depends(require_viewer),
+):
     """Return recent request events captured by in-process metrics middleware."""
     limit = max(1, min(int(limit or 20), 200))
+    status_min = max(0, int(status_min or 0))
+    needle = (path_contains or "").strip().lower()
+
     with OBS_METRICS_LOCK:
         recent = OBS_METRICS.get("recent_events")
         if not isinstance(recent, list):
             recent = []
-        out = recent[-limit:]
+
+        filtered = []
+        for e in recent:
+            try:
+                st = int(e.get("status", 0))
+            except Exception:
+                st = 0
+            p = str(e.get("path", ""))
+            if st < status_min:
+                continue
+            if needle and needle not in p.lower():
+                continue
+            filtered.append(e)
+
+        out = filtered[-limit:]
+
     return {
         "events": out,
         "count": len(out),
         "limit": limit,
+        "status_min": status_min,
+        "path_contains": path_contains,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
 
