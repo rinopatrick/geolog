@@ -1059,6 +1059,12 @@ def test_ops_contracts_sign_hmac_with_requested_kid(monkeypatch):
         assert len(sig) == 64
         assert data.get("signature_alg") == "hmac-sha256"
         assert data.get("signature_kid") == "k1"
+
+        rv = client.get(f"/api/ops/contracts/verify-signature?kid=k1&signature={sig}", headers=_h("viewer"))
+        assert rv.status_code == 200
+        out = rv.json()
+        assert out.get("ok") is True
+        assert out.get("reason_code") == "SIGNATURE_VALID"
     finally:
         if old_ring is None:
             os.environ.pop("AUDIT_EXPORT_HMAC_KEYS_JSON", None)
@@ -1110,6 +1116,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     alerts_get = paths.get("/api/ops/alerts", {}).get("get", {})
     health_get = paths.get("/api/ops/health", {}).get("get", {})
     contracts_get = paths.get("/api/ops/contracts", {}).get("get", {})
+    contracts_verify_get = paths.get("/api/ops/contracts/verify-signature", {}).get("get", {})
     runbook_get = paths.get("/api/ops/runbook", {}).get("get", {})
     assert metrics_get.get("operationId")
     assert metrics_recent_get.get("operationId")
@@ -1118,6 +1125,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert alerts_get.get("operationId")
     assert health_get.get("operationId")
     assert contracts_get.get("operationId")
+    assert contracts_verify_get.get("operationId")
     assert runbook_get.get("operationId")
 
     prom_200 = metrics_prom_get.get("responses", {}).get("200", {})

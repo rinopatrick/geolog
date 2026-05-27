@@ -7597,6 +7597,26 @@ def ops_summary(db: Session = Depends(get_db), _role: str = Depends(require_view
     }
 
 
+def _ops_contracts_payload() -> dict[str, Any]:
+    endpoints = {
+        "/api/audit-log/verify/export": "1.2",
+        "/api/audit-log/verify/signature": "1.1",
+        "/api/ops/metrics": "1.0",
+        "/api/ops/metrics/recent": "1.1",
+        "/api/ops/metrics/prometheus": "1.0",
+        "/api/ops/slo-status": "1.1",
+        "/api/ops/alerts": "1.2",
+        "/api/ops/health": "1.0",
+        "/api/ops/runbook": "1.0",
+        "/api/ops/summary": "1.1",
+    }
+    return {
+        "api_group": "ops-audit",
+        "contract_version": "2.0",
+        "endpoints": endpoints,
+    }
+
+
 @app.get(
     "/api/ops/contracts",
     response_model=OpsContractsResponse,
@@ -7637,30 +7657,14 @@ def ops_contracts(
     _role: str = Depends(require_viewer),
 ):
     """Machine-readable contract/version registry for ops and audit APIs."""
-    endpoints = {
-        "/api/audit-log/verify/export": "1.2",
-        "/api/audit-log/verify/signature": "1.1",
-        "/api/ops/metrics": "1.0",
-        "/api/ops/metrics/recent": "1.1",
-        "/api/ops/metrics/prometheus": "1.0",
-        "/api/ops/slo-status": "1.1",
-        "/api/ops/alerts": "1.2",
-        "/api/ops/health": "1.0",
-        "/api/ops/runbook": "1.0",
-        "/api/ops/summary": "1.1",
-    }
-    digest_payload = {
-        "api_group": "ops-audit",
-        "contract_version": "2.0",
-        "endpoints": endpoints,
-    }
+    digest_payload = _ops_contracts_payload()
     canonical = json.dumps(digest_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     out = {
-        "api_group": "ops-audit",
-        "contract_version": "2.0",
-        "endpoints": endpoints,
+        "api_group": digest_payload["api_group"],
+        "contract_version": digest_payload["contract_version"],
+        "endpoints": digest_payload["endpoints"],
         "digest_sha256": digest,
         "signature": None,
         "signature_alg": None,
@@ -7676,6 +7680,19 @@ def ops_contracts(
         out["signature_kid"] = resolved_kid
 
     return out
+
+
+@app.get(
+    "/api/ops/contracts/verify-signature",
+    response_model=AuditSignatureVerifyResponse,
+)
+def ops_contracts_verify_signature(
+    signature: str,
+    kid: str | None = None,
+    _role: str = Depends(require_viewer),
+):
+    """Verify detached signature for current ops contracts payload."""
+    return _verify_audit_export_signature_payload(_ops_contracts_payload(), signature, kid)
 
 
 @app.get(
