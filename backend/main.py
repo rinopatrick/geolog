@@ -7078,6 +7078,38 @@ def ops_slo_status(_role: str = Depends(require_viewer)):
     }
 
 
+@app.get("/api/ops/alerts")
+def ops_alerts(_role: str = Depends(require_viewer)):
+    """Simple alert evaluation based on SLO snapshot."""
+    slo = ops_slo_status(_role)
+    alerts = []
+
+    if not slo["checks"]["latency_ok"]:
+        alerts.append({
+            "code": "LATENCY_SLO_BREACH",
+            "severity": "warning",
+            "message": (
+                f"latency_ms_avg {slo['current']['latency_ms_avg']} > target {slo['targets']['latency_ms_avg_max']}"
+            ),
+        })
+
+    if not slo["checks"]["error_rate_ok"]:
+        alerts.append({
+            "code": "ERROR_RATE_SLO_BREACH",
+            "severity": "critical",
+            "message": (
+                f"error_rate {slo['current']['error_rate']} > target {slo['targets']['error_rate_max']}"
+            ),
+        })
+
+    return {
+        "ok": len(alerts) == 0,
+        "alerts": alerts,
+        "count": len(alerts),
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
 @app.post("/api/wells/{wid}/electrofacies-async", status_code=202)
 def electrofacies_async(wid: int, data: dict, _role: str = Depends(require_interpreter)):
     """Queue electrofacies clustering in background job."""

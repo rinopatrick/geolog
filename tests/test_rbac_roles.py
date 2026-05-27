@@ -833,3 +833,41 @@ def test_ops_slo_status_shape_and_access():
 def test_ops_slo_status_unknown_role_allowed_as_viewer_floor():
     r = client.get("/api/ops/slo-status", headers=_h("unknown"))
     assert r.status_code == 200
+
+
+def test_ops_alerts_shape_and_access():
+    r = client.get("/api/ops/alerts", headers=_h("viewer"))
+    assert r.status_code == 200
+    data = r.json()
+    assert "ok" in data
+    assert "alerts" in data
+    assert "count" in data
+    assert isinstance(data["alerts"], list)
+
+
+def test_ops_alerts_can_report_breach_with_strict_env_thresholds():
+    import os
+
+    old_lat = os.environ.get("OPS_SLO_P95_MS")
+    old_err = os.environ.get("OPS_SLO_ERROR_RATE")
+    os.environ["OPS_SLO_P95_MS"] = "0"
+    os.environ["OPS_SLO_ERROR_RATE"] = "0"
+
+    try:
+        _ = client.get("/api/wells", headers=_h("viewer"))
+        _ = client.get("/api/does-not-exist", headers=_h("viewer"))
+        r = client.get("/api/ops/alerts", headers=_h("viewer"))
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ok"] is False
+        codes = {a.get("code") for a in data.get("alerts", [])}
+        assert "LATENCY_SLO_BREACH" in codes or "ERROR_RATE_SLO_BREACH" in codes
+    finally:
+        if old_lat is None:
+            os.environ.pop("OPS_SLO_P95_MS", None)
+        else:
+            os.environ["OPS_SLO_P95_MS"] = old_lat
+        if old_err is None:
+            os.environ.pop("OPS_SLO_ERROR_RATE", None)
+        else:
+            os.environ["OPS_SLO_ERROR_RATE"] = old_err
