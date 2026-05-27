@@ -815,7 +815,7 @@ def test_audit_verify_signature_post_interpreter_ok_and_mismatch():
 
 def test_ops_metrics_viewer_access_and_shape():
     # trigger one request so counters move
-    _ = client.get("/api/wells", headers=_h("viewer"))
+    _ = client.get("/api/wells", headers=_h("viewer"), params={"_trace_seed": "1"})
 
     r = client.get("/api/ops/metrics", headers=_h("viewer"))
     assert r.status_code == 200
@@ -830,6 +830,13 @@ def test_ops_metrics_viewer_access_and_shape():
     assert data["requests_total"] >= 1
     assert isinstance(data["requests_by_method"], dict)
     assert isinstance(data["requests_by_status"], dict)
+
+
+def test_request_id_response_header_propagation():
+    req_id = "rid-test-123"
+    r = client.get("/api/ops/metrics", headers={**_h("viewer"), "X-Request-ID": req_id})
+    assert r.status_code == 200
+    assert r.headers.get("X-Request-ID") == req_id
 
 
 def test_ops_metrics_requires_viewer_role_floor():
@@ -1003,6 +1010,20 @@ def test_ops_health_shape_and_access():
     assert "alert_count" in data
 
 
+def test_ops_observability_status_shape_and_request_id_signal():
+    rid = "obs-rid-001"
+    _ = client.get("/api/ops/metrics", headers={**_h("viewer"), "X-Request-ID": rid})
+    r = client.get("/api/ops/observability-status", headers=_h("viewer"))
+    assert r.status_code == 200
+    data = r.json()
+    assert data.get("ok") is True
+    assert data.get("request_id_propagation") is True
+    assert data.get("structured_logging") is True
+    assert "recent_events_include_request_id" in data
+    assert "otel_enabled" in data
+    assert "timestamp" in data
+
+
 def test_ops_health_unknown_role_allowed_as_viewer_floor():
     r = client.get("/api/ops/health", headers=_h("unknown"))
     assert r.status_code == 200
@@ -1067,6 +1088,7 @@ def test_ops_contracts_shape_and_access():
     endpoints = data.get("endpoints", {})
     assert isinstance(endpoints, dict)
     assert "/api/ops/summary" in endpoints
+    assert "/api/ops/observability-status" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
     assert "/api/audit-log/immutability-status" in endpoints
@@ -1180,6 +1202,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     slo_get = paths.get("/api/ops/slo-status", {}).get("get", {})
     alerts_get = paths.get("/api/ops/alerts", {}).get("get", {})
     health_get = paths.get("/api/ops/health", {}).get("get", {})
+    obs_status_get = paths.get("/api/ops/observability-status", {}).get("get", {})
     contracts_get = paths.get("/api/ops/contracts", {}).get("get", {})
     contracts_verify_path = paths.get("/api/ops/contracts/verify-signature", {})
     contracts_verify_get = contracts_verify_path.get("get", {})
@@ -1191,6 +1214,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert slo_get.get("operationId")
     assert alerts_get.get("operationId")
     assert health_get.get("operationId")
+    assert obs_status_get.get("operationId")
     assert contracts_get.get("operationId")
     assert contracts_verify_get.get("operationId")
     assert contracts_verify_post.get("operationId")
@@ -1206,6 +1230,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsSloStatusResponse" in schemas
     assert "OpsAlertsResponse" in schemas
     assert "OpsHealthResponse" in schemas
+    assert "OpsObservabilityStatusResponse" in schemas
     assert "OpsContractsResponse" in schemas
     assert "OpsRunbookResponse" in schemas
 

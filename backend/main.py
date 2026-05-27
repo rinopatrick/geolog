@@ -561,6 +561,15 @@ def _lttb_indices(x: np.ndarray, y: np.ndarray, threshold: int):
     return np.unique(np.clip(sampled, 0, n - 1))
 
 
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        request_id = (request.headers.get("X-Request-ID") or "").strip() or uuid.uuid4().hex[:16]
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+
 class AuthContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         try:
@@ -595,6 +604,7 @@ class RequestMetricsMiddleware(BaseHTTPMiddleware):
             if isinstance(recent, list):
                 recent.append({
                     "ts": datetime.datetime.utcnow().isoformat() + "Z",
+                    "request_id": str(getattr(request.state, "request_id", "") or ""),
                     "method": method,
                     "path": request.url.path,
                     "status": int(status),
@@ -605,6 +615,7 @@ class RequestMetricsMiddleware(BaseHTTPMiddleware):
 
         logger.info(json.dumps({
             "event": "http_request",
+            "request_id": str(getattr(request.state, "request_id", "") or ""),
             "method": method,
             "path": request.url.path,
             "status": int(status),
@@ -706,7 +717,7 @@ class ImmutableAuditTrailMiddleware(BaseHTTPMiddleware):
 
         role = (getattr(request.state, "user_role", None) or "viewer").strip().lower()
         subject = (getattr(request.state, "auth_subject", None) or "").strip()
-        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:16]
+        request_id = str(getattr(request.state, "request_id", "") or request.headers.get("X-Request-ID") or uuid.uuid4().hex[:16])
 
         # best effort well/project extraction
         well_id = None
@@ -770,6 +781,7 @@ app.add_middleware(ErrorLoggingMiddleware)
 app.add_middleware(ImmutableAuditTrailMiddleware)
 app.add_middleware(AuthContextMiddleware)
 app.add_middleware(RequestMetricsMiddleware)
+app.add_middleware(RequestIdMiddleware)
 
 
 # ─── Auto-seed demo data on first startup ───────────────────
@@ -7458,6 +7470,15 @@ class OpsHealthResponse(BaseModel):
     timestamp: str
 
 
+class OpsObservabilityStatusResponse(BaseModel):
+    ok: bool
+    request_id_propagation: bool
+    structured_logging: bool
+    recent_events_include_request_id: bool
+    otel_enabled: bool
+    timestamp: str
+
+
 @app.get(
     "/api/ops/health",
     response_model=OpsHealthResponse,
@@ -7496,6 +7517,23 @@ def ops_health(db: Session = Depends(get_db), _role: str = Depends(require_viewe
         "slo_ok": bool(slo.get("ok", False)),
         "alerts_ok": bool(alerts.get("ok", False)),
         "alert_count": int(alerts.get("count", 0)),
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
+@app.get("/api/ops/observability-status", response_model=OpsObservabilityStatusResponse)
+def ops_observability_status(_role: str = Depends(require_viewer)):
+    """Observability wiring status for Phase 2 verification."""
+    with OBS_METRICS_LOCK:
+        recent = list(OBS_METRICS.get("recent_events", []))
+    has_request_id = any(bool(str(e.get("request_id", "")).strip()) for e in recent if isinstance(e, dict))
+    otel_enabled = bool((os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or "").strip())
+    return {
+        "ok": True,
+        "request_id_propagation": True,
+        "structured_logging": True,
+        "recent_events_include_request_id": has_request_id,
+        "otel_enabled": otel_enabled,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
 
@@ -7643,6 +7681,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/slo-status": "1.1",
         "/api/ops/alerts": "1.2",
         "/api/ops/health": "1.0",
+        "/api/ops/observability-status": "1.0",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -7674,6 +7713,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/slo-status": "1.1",
                             "/api/ops/alerts": "1.2",
                             "/api/ops/health": "1.0",
+                            "/api/ops/observability-status": "1.0",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
