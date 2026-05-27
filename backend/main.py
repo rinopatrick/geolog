@@ -7187,10 +7187,17 @@ def ops_alerts(_role: str = Depends(require_viewer)):
             ),
         })
 
+    severity_counts = {"warning": 0, "critical": 0}
+    for a in alerts:
+        sev = str(a.get("severity", "")).lower()
+        if sev in severity_counts:
+            severity_counts[sev] += 1
+
     return {
         "ok": len(alerts) == 0,
         "alerts": alerts,
         "count": len(alerts),
+        "severity_counts": severity_counts,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
 
