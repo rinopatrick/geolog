@@ -477,3 +477,44 @@ def test_audit_verify_export_contains_report_shape():
     assert "ok" in report
     assert "verified_entries" in report
     assert "issues" in report
+    assert data.get("signature") is None
+    assert data.get("signature_alg") is None
+    assert data.get("signature_detached") is True
+
+
+def test_audit_verify_export_hmac_signature():
+    import hashlib
+    import hmac
+    import json
+    import os
+
+    old = os.environ.get("AUDIT_EXPORT_HMAC_KEY")
+    os.environ["AUDIT_EXPORT_HMAC_KEY"] = "unit-test-key"
+    try:
+        r = client.get("/api/audit-log/verify/export?sign=true", headers=_h("viewer"))
+        assert r.status_code == 200
+        data = r.json()
+        payload = data["payload"]
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        expected = hmac.new(b"unit-test-key", canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+        assert data.get("signature_alg") == "hmac-sha256"
+        assert data.get("signature_detached") is True
+        assert data.get("signature") == expected
+    finally:
+        if old is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_KEY"] = old
+
+
+def test_audit_verify_export_hmac_missing_key_fails():
+    import os
+
+    old = os.environ.get("AUDIT_EXPORT_HMAC_KEY")
+    os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
+    try:
+        r = client.get("/api/audit-log/verify/export?sign=true", headers=_h("viewer"))
+        assert r.status_code == 500
+    finally:
+        if old is not None:
+            os.environ["AUDIT_EXPORT_HMAC_KEY"] = old

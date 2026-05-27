@@ -69,6 +69,7 @@ from reportlab.graphics import renderPDF
 from threading import Lock
 import uuid
 import hashlib
+import hmac
 from email.utils import format_datetime, parsedate_to_datetime
 
 try:
@@ -5387,8 +5388,8 @@ def verify_audit_log_chain(limit: int = 2000, db: Session = Depends(get_db)):
 
 
 @app.get("/api/audit-log/verify/export")
-def export_audit_log_verification(limit: int = 2000, db: Session = Depends(get_db)):
-    """Export verification report with SHA256 digest for compliance handoff."""
+def export_audit_log_verification(limit: int = 2000, sign: bool = False, db: Session = Depends(get_db)):
+    """Export verification report with SHA256 digest and optional detached HMAC signature."""
     report = _compute_audit_chain_report(limit, db)
     payload = {
         "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
@@ -5396,10 +5397,24 @@ def export_audit_log_verification(limit: int = 2000, db: Session = Depends(get_d
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    return {
+
+    out = {
         "digest_sha256": digest,
         "payload": payload,
+        "signature": None,
+        "signature_alg": None,
+        "signature_detached": True,
     }
+
+    if sign:
+        key = (os.getenv("AUDIT_EXPORT_HMAC_KEY") or "").encode("utf-8")
+        if not key:
+            raise HTTPException(status_code=500, detail="AUDIT_EXPORT_HMAC_KEY not configured")
+        sig = hmac.new(key, canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+        out["signature"] = sig
+        out["signature_alg"] = "hmac-sha256"
+
+    return out
 
 
 # ─── Cross-Plot Matrix (multi-well) ──────────────────────────
