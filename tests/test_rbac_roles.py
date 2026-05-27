@@ -385,6 +385,17 @@ def test_audit_verify_endpoint_reports_ok_for_clean_chain():
     assert isinstance(data["issues"], list)
 
 
+def test_audit_log_immutability_status_endpoint_reports_triggers_present():
+    r = client.get("/api/audit-log/immutability-status", headers=_h("viewer"))
+    assert r.status_code == 200
+    data = r.json()
+    assert data.get("ok") is True
+    assert data.get("append_only_enforced") is True
+    triggers = data.get("triggers", {})
+    assert triggers.get("trg_audit_log_no_update") is True
+    assert triggers.get("trg_audit_log_no_delete") is True
+
+
 def test_audit_verify_endpoint_detects_tamper_gap():
     db = SessionLocal()
     bad_id = None
@@ -1051,6 +1062,7 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/summary" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
+    assert "/api/audit-log/immutability-status" in endpoints
 
 
 def test_ops_contracts_sign_hmac_with_requested_kid(monkeypatch):

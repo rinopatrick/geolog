@@ -5441,6 +5441,29 @@ def verify_audit_log_chain(limit: int = 2000, db: Session = Depends(get_db)):
     return _compute_audit_chain_report(limit, db)
 
 
+@app.get("/api/audit-log/immutability-status")
+def audit_log_immutability_status(_role: str = Depends(require_viewer)):
+    """Report whether append-only audit triggers are installed."""
+    trigger_names = ["trg_audit_log_no_update", "trg_audit_log_no_delete"]
+    present: dict[str, bool] = {k: False for k in trigger_names}
+
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('trg_audit_log_no_update','trg_audit_log_no_delete')")
+        ).fetchall()
+
+    for row in rows:
+        n = str(row[0])
+        if n in present:
+            present[n] = True
+
+    return {
+        "ok": all(present.values()),
+        "append_only_enforced": all(present.values()),
+        "triggers": present,
+    }
+
+
 def _resolve_audit_export_signing_key(requested_kid: str | None = None):
     """Resolve signing key with optional key rotation.
 
@@ -7605,6 +7628,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
     endpoints = {
         "/api/audit-log/verify/export": "1.2",
         "/api/audit-log/verify/signature": "1.1",
+        "/api/audit-log/immutability-status": "1.0",
         "/api/ops/metrics": "1.0",
         "/api/ops/metrics/recent": "1.1",
         "/api/ops/metrics/prometheus": "1.0",
@@ -7631,10 +7655,11 @@ def _ops_contracts_payload() -> dict[str, Any]:
                 "application/json": {
                     "example": {
                         "api_group": "ops-audit",
-                        "contract_version": "2.0",
+                        "contract_version": "2.1",
                         "endpoints": {
                             "/api/audit-log/verify/export": "1.2",
                             "/api/audit-log/verify/signature": "1.1",
+                            "/api/audit-log/immutability-status": "1.0",
                             "/api/ops/metrics": "1.0",
                             "/api/ops/metrics/recent": "1.1",
                             "/api/ops/metrics/prometheus": "1.0",
