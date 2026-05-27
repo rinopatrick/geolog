@@ -7101,6 +7101,9 @@ def ops_slo_status(_role: str = Depends(require_viewer)):
         if count > 0:
             avg = float(OBS_METRICS.get("latency_ms_sum", 0.0)) / count
         by_status = dict(OBS_METRICS.get("requests_by_status", {}))
+        recent = OBS_METRICS.get("recent_events")
+        if not isinstance(recent, list):
+            recent = []
 
     error_count = 0
     for k, v in by_status.items():
@@ -7114,6 +7117,15 @@ def ops_slo_status(_role: str = Depends(require_viewer)):
     latency_ok = avg <= target_latency_ms
     error_ok = error_rate <= target_error_rate
 
+    # lightweight p95 from recent ring buffer latency values
+    latencies = [float(e.get("latency_ms", 0.0)) for e in recent if isinstance(e, dict)]
+    latency_p95 = 0.0
+    if latencies:
+        try:
+            latency_p95 = float(np.percentile(np.array(latencies, dtype=np.float64), 95))
+        except Exception:
+            latency_p95 = 0.0
+
     return {
         "ok": bool(latency_ok and error_ok),
         "targets": {
@@ -7122,6 +7134,7 @@ def ops_slo_status(_role: str = Depends(require_viewer)):
         },
         "current": {
             "latency_ms_avg": round(avg, 2),
+            "latency_ms_p95": round(latency_p95, 2),
             "error_rate": round(error_rate, 6),
             "requests_total": total,
             "errors_5xx": error_count,
