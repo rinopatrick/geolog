@@ -7285,6 +7285,7 @@ def ops_summary(db: Session = Depends(get_db), _role: str = Depends(require_view
 
     return {
         "ok": bool(health.get("ok", False)),
+        "contract_version": "1.1",
         "status": {
             "db_ok": bool(health.get("db_ok", False)),
             "slo_ok": bool(slo.get("ok", False)),
@@ -7300,6 +7301,7 @@ def ops_summary(db: Session = Depends(get_db), _role: str = Depends(require_view
             "requests_total": int(metrics.get("requests_total", 0)),
             "latency_ms_avg": float(metrics.get("latency_ms_avg", 0.0)),
             "error_rate": float(slo.get("current", {}).get("error_rate", 0.0)),
+            "recent_events_size": int(metrics.get("recent_events_size", 0)),
         },
         "slo": {
             "targets": dict(slo.get("targets", {})),

@@ -984,6 +984,7 @@ def test_ops_summary_shape_and_access():
     data = r.json()
 
     assert "ok" in data
+    assert "contract_version" in data
     assert "status" in data
     assert "alerts" in data
     assert "traffic" in data
@@ -1006,6 +1007,7 @@ def test_ops_summary_shape_and_access():
     assert "requests_total" in traffic
     assert "latency_ms_avg" in traffic
     assert "error_rate" in traffic
+    assert "recent_events_size" in traffic
 
     assert "targets" in slo
     assert "current" in slo
