@@ -7028,7 +7028,55 @@ def list_jobs(_role: str = Depends(require_viewer)):
     return {"jobs": jobs, "total": len(jobs)}
 
 
-@app.get("/api/ops/metrics")
+class OpsMetricsResponse(BaseModel):
+    requests_total: int
+    requests_by_method: dict[str, int]
+    requests_by_status: dict[str, int]
+    latency_ms_avg: float
+    latency_samples: int
+    recent_events_size: int
+    timestamp: str
+
+
+class OpsRecentEvent(BaseModel):
+    ts: str
+    method: str
+    path: str
+    status: int
+    latency_ms: float
+
+
+class OpsMetricsRecentResponse(BaseModel):
+    events: list[OpsRecentEvent]
+    count: int
+    limit: int
+    status_min: int
+    path_contains: str | None = None
+    timestamp: str
+
+
+@app.get(
+    "/api/ops/metrics",
+    response_model=OpsMetricsResponse,
+    responses={
+        200: {
+            "description": "In-process metrics snapshot",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "requests_total": 120,
+                        "requests_by_method": {"GET": 110, "POST": 10},
+                        "requests_by_status": {"200": 115, "404": 4, "500": 1},
+                        "latency_ms_avg": 35.7,
+                        "latency_samples": 120,
+                        "recent_events_size": 120,
+                        "timestamp": "2026-01-01T00:00:00Z",
+                    }
+                }
+            },
+        }
+    },
+)
 def ops_metrics(_role: str = Depends(require_viewer)):
     """Lightweight in-process metrics snapshot (Phase 2 baseline)."""
     with OBS_METRICS_LOCK:
@@ -7046,7 +7094,27 @@ def ops_metrics(_role: str = Depends(require_viewer)):
         }
 
 
-@app.get("/api/ops/metrics/recent")
+@app.get(
+    "/api/ops/metrics/recent",
+    response_model=OpsMetricsRecentResponse,
+    responses={
+        200: {
+            "description": "Recent request events with optional filters",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "events": [{"ts": "2026-01-01T00:00:00Z", "method": "GET", "path": "/api/wells", "status": 200, "latency_ms": 12.3}],
+                        "count": 1,
+                        "limit": 20,
+                        "status_min": 0,
+                        "path_contains": None,
+                        "timestamp": "2026-01-01T00:00:01Z",
+                    }
+                }
+            },
+        }
+    },
+)
 def ops_metrics_recent(
     limit: int = 20,
     status_min: int = 0,
