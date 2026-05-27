@@ -317,6 +317,7 @@ class GeoLogApp {
         }
         if (typeof lucide !== 'undefined') lucide.createIcons();
         this._restoreUIPreferences();
+        this._applyRoleGates();
         this._showFirstRunWelcome();
         this._bindContextMenu();
         this._updateUndoRedoButtons();
@@ -660,10 +661,33 @@ class GeoLogApp {
         if (lastView) this.switchView(lastView);
     }
 
+    _applyRoleGates() {
+        const role = String(this.currentRole || 'viewer').toLowerCase();
+        const rank = { viewer: 1, interpreter: 2, admin: 3 };
+        document.querySelectorAll('[data-role-required]').forEach((el) => {
+            const required = String(el.getAttribute('data-role-required') || '')
+                .split(',')
+                .map(s => s.trim().toLowerCase())
+                .filter(Boolean);
+            const allowed = required.length === 0 || required.some(r => (rank[role] || 0) >= (rank[r] || 99));
+            el.disabled = !allowed;
+            el.style.opacity = allowed ? '' : '0.55';
+            el.style.cursor = allowed ? '' : 'not-allowed';
+            const baseTitle = el.getAttribute('title') || '';
+            const cleanTitle = baseTitle.replace(/ \(current: .*\)$/,'');
+            if (!allowed && cleanTitle) {
+                el.setAttribute('title', `${cleanTitle} (current: ${role})`);
+            } else if (cleanTitle) {
+                el.setAttribute('title', cleanTitle);
+            }
+        });
+    }
+
     setActiveRole(role) {
         const r = String(role || 'viewer').toLowerCase();
         this.currentRole = r;
         localStorage.setItem('geolog_active_role', r);
+        this._applyRoleGates();
         GeoToast.info(`Active role: ${r}`);
     }
 
