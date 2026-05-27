@@ -68,12 +68,75 @@ def test_jwt_mode_rejects_missing_bearer_token(monkeypatch):
     from backend import main as main_mod
 
     old_mode = main_mod.AUTH_CONFIG.mode
+    old_secret = main_mod.AUTH_CONFIG.jwt_secret
+    old_algs = main_mod.AUTH_CONFIG.jwt_algorithms
     main_mod.AUTH_CONFIG.mode = "jwt"
+    main_mod.AUTH_CONFIG.jwt_secret = "test-secret"
+    main_mod.AUTH_CONFIG.jwt_algorithms = ("HS256",)
     try:
         r = client.get("/api/wells")
         assert r.status_code == 401
     finally:
         main_mod.AUTH_CONFIG.mode = old_mode
+        main_mod.AUTH_CONFIG.jwt_secret = old_secret
+        main_mod.AUTH_CONFIG.jwt_algorithms = old_algs
+
+
+def test_jwt_mode_accepts_valid_signed_token_for_viewer_read():
+    import jwt
+    from backend import main as main_mod
+
+    old_mode = main_mod.AUTH_CONFIG.mode
+    old_secret = main_mod.AUTH_CONFIG.jwt_secret
+    old_algs = main_mod.AUTH_CONFIG.jwt_algorithms
+    main_mod.AUTH_CONFIG.mode = "jwt"
+    main_mod.AUTH_CONFIG.jwt_secret = "test-secret"
+    main_mod.AUTH_CONFIG.jwt_algorithms = ("HS256",)
+
+    token = jwt.encode({"sub": "u1", "role": "viewer"}, "test-secret", algorithm="HS256")
+    try:
+        r = client.get("/api/wells", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+    finally:
+        main_mod.AUTH_CONFIG.mode = old_mode
+        main_mod.AUTH_CONFIG.jwt_secret = old_secret
+        main_mod.AUTH_CONFIG.jwt_algorithms = old_algs
+
+
+def test_jwt_mode_enforces_role_from_signed_token():
+    import jwt
+    from backend import main as main_mod
+
+    old_mode = main_mod.AUTH_CONFIG.mode
+    old_secret = main_mod.AUTH_CONFIG.jwt_secret
+    old_algs = main_mod.AUTH_CONFIG.jwt_algorithms
+    main_mod.AUTH_CONFIG.mode = "jwt"
+    main_mod.AUTH_CONFIG.jwt_secret = "test-secret"
+    main_mod.AUTH_CONFIG.jwt_algorithms = ("HS256",)
+
+    token = jwt.encode({"sub": "u2", "role": "viewer"}, "test-secret", algorithm="HS256")
+    payload = {
+        "a": 1.0,
+        "m": 2.0,
+        "n": 2.0,
+        "rw": 0.1,
+        "vsh_cutoff": 0.35,
+        "phie_cutoff": 0.1,
+        "sw_cutoff": 0.6,
+        "iterations": 100,
+        "variation_pct": 20,
+    }
+    try:
+        r = client.post(
+            "/api/wells/999999/sensitivity",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+        assert r.status_code == 403
+    finally:
+        main_mod.AUTH_CONFIG.mode = old_mode
+        main_mod.AUTH_CONFIG.jwt_secret = old_secret
+        main_mod.AUTH_CONFIG.jwt_algorithms = old_algs
 
 
 def test_report_pdf_endpoint_not_found():
