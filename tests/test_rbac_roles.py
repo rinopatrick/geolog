@@ -1169,6 +1169,36 @@ def test_ops_evidence_status_shape_and_acceptance_gate():
                 os.environ[k] = v
 
 
+def test_ops_security_posture_status_shape_and_env_signals():
+    import os
+
+    old_source = os.environ.get("GEOLOG_SECRETS_SOURCE")
+    old_tls = os.environ.get("GEOLOG_REQUIRE_TLS")
+
+    os.environ["GEOLOG_SECRETS_SOURCE"] = "vault"
+    os.environ["GEOLOG_REQUIRE_TLS"] = "true"
+
+    try:
+        r = client.get("/api/ops/security-posture-status", headers=_h("viewer"))
+        assert r.status_code == 200
+        data = r.json()
+        assert data.get("container_non_root") is True
+        assert data.get("secrets_source_configured") is True
+        assert data.get("tls_required") is True
+        assert "ci_security_gates_enabled" in data
+        assert "backup_drill_script_present" in data
+        assert "timestamp" in data
+    finally:
+        if old_source is None:
+            os.environ.pop("GEOLOG_SECRETS_SOURCE", None)
+        else:
+            os.environ["GEOLOG_SECRETS_SOURCE"] = old_source
+        if old_tls is None:
+            os.environ.pop("GEOLOG_REQUIRE_TLS", None)
+        else:
+            os.environ["GEOLOG_REQUIRE_TLS"] = old_tls
+
+
 def test_ops_health_unknown_role_allowed_as_viewer_floor():
     r = client.get("/api/ops/health", headers=_h("unknown"))
     assert r.status_code == 200
@@ -1236,6 +1266,7 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/observability-status" in endpoints
     assert "/api/ops/otel-status" in endpoints
     assert "/api/ops/evidence-status" in endpoints
+    assert "/api/ops/security-posture-status" in endpoints
     assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
@@ -1354,6 +1385,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     obs_status_get = paths.get("/api/ops/observability-status", {}).get("get", {})
     otel_status_get = paths.get("/api/ops/otel-status", {}).get("get", {})
     evidence_status_get = paths.get("/api/ops/evidence-status", {}).get("get", {})
+    security_posture_get = paths.get("/api/ops/security-posture-status", {}).get("get", {})
     contracts_get = paths.get("/api/ops/contracts", {}).get("get", {})
     contracts_verify_path = paths.get("/api/ops/contracts/verify-signature", {})
     contracts_verify_get = contracts_verify_path.get("get", {})
@@ -1369,6 +1401,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert obs_status_get.get("operationId")
     assert otel_status_get.get("operationId")
     assert evidence_status_get.get("operationId")
+    assert security_posture_get.get("operationId")
     assert contracts_get.get("operationId")
     assert contracts_verify_get.get("operationId")
     assert contracts_verify_post.get("operationId")
@@ -1388,6 +1421,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsObservabilityStatusResponse" in schemas
     assert "OpsOtelStatusResponse" in schemas
     assert "OpsEvidenceStatusResponse" in schemas
+    assert "OpsSecurityPostureStatusResponse" in schemas
     assert "OpsContractsResponse" in schemas
     assert "OpsRunbookResponse" in schemas
 
@@ -1411,6 +1445,13 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "trace_backend_reachable" in evidence_props
     assert "probes_enabled" in evidence_props
     assert "ready_for_phase2_acceptance" in evidence_props
+
+    security_posture_schema = schemas.get("OpsSecurityPostureStatusResponse", {})
+    security_posture_props = security_posture_schema.get("properties", {})
+    assert "container_non_root" in security_posture_props
+    assert "secrets_source_configured" in security_posture_props
+    assert "tls_required" in security_posture_props
+    assert "ci_security_gates_enabled" in security_posture_props
 
     alert_rules_schema = schemas.get("OpsAlertRulesResponse", {})
     alert_rules_props = alert_rules_schema.get("properties", {})

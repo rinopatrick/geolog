@@ -349,6 +349,22 @@ Phase 2 regression dataset evidence:
 - Validation test: `tests/test_phase2_regression_datasets.py`
 - Requirement: at least 3 realistic LAS datasets, parseable with expected minimum depth points and curves.
 
+### Phase 3a security + backup gates
+```bash
+cd /home/patrick/geolog-app
+bash scripts/backup_restore_drill.sh backend/data/geolog.db
+```
+
+Security CI workflow:
+- `.github/workflows/security-gates.yml`
+- Checks:
+  - `bandit -q -r backend -lll` (high severity gate)
+  - hardcoded secret token regex gate
+
+Ops status endpoints:
+- `/api/ops/security-posture-status`
+- `/api/ops/evidence-status?probe=true`
+
 Notes:
 - Parser tests run without server.
 - API tests in `test_parser.py` require GeoLog running at `http://localhost:8000`.

@@ -1,0 +1,64 @@
+name: Security Gates
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install bandit
+
+      - name: Bandit (high severity only)
+        run: |
+          bandit -q -r backend -lll
+
+      - name: Secret token grep gate
+        run: |
+          python - <<'PY'
+          import pathlib, re, sys
+          root = pathlib.Path('.')
+          deny = [
+              re.compile(r'AKIA[0-9A-Z]{16}'),
+              re.compile(r'-----BEGIN (RSA|EC|OPENSSH|DSA) PRIVATE KEY-----'),
+              re.compile(r'(?i)aws_secret_access_key\s*=\s*["\'][^"\']+["\']'),
+          ]
+          skip_dirs = {'.git', 'node_modules', '.venv', 'venv', '__pycache__'}
+          bad = []
+          for p in root.rglob('*'):
+              if not p.is_file():
+                  continue
+              if any(part in skip_dirs for part in p.parts):
+                  continue
+              if p.suffix.lower() in {'.png','.jpg','.jpeg','.gif','.webp','.ico','.pdf','.zip','.db','.sqlite','.woff','.woff2'}:
+                  continue
+              try:
+                  txt = p.read_text(encoding='utf-8', errors='ignore')
+              except Exception:
+                  continue
+              for rx in deny:
+                  if rx.search(txt):
+                      bad.append(str(p))
+                      break
+          if bad:
+              print('Potential hardcoded secrets found:')
+              for b in sorted(set(bad)):
+                  print('-', b)
+              sys.exit(1)
+          print('Secret token grep gate passed')
+          PY

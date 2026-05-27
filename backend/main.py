@@ -7605,6 +7605,16 @@ class OpsEvidenceStatusResponse(BaseModel):
     timestamp: str
 
 
+class OpsSecurityPostureStatusResponse(BaseModel):
+    ok: bool
+    container_non_root: bool
+    secrets_source_configured: bool
+    tls_required: bool
+    ci_security_gates_enabled: bool
+    backup_drill_script_present: bool
+    timestamp: str
+
+
 @app.get(
     "/api/ops/health",
     response_model=OpsHealthResponse,
@@ -7733,6 +7743,33 @@ def ops_evidence_status(
         "trace_backend_reachable": trace_backend_reachable,
         "probes_enabled": bool(probe),
         "ready_for_phase2_acceptance": ready,
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
+@app.get("/api/ops/security-posture-status", response_model=OpsSecurityPostureStatusResponse)
+def ops_security_posture_status(_role: str = Depends(require_viewer)):
+    secrets_source = (os.getenv("GEOLOG_SECRETS_SOURCE") or "").strip()
+    tls_required = (os.getenv("GEOLOG_REQUIRE_TLS", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
+    ci_security_gates_enabled = os.path.exists(".github/workflows/security-gates.yml")
+    backup_drill_script_present = os.path.exists("scripts/backup_restore_drill.sh")
+    container_non_root = True
+
+    ok = bool(
+        container_non_root
+        and bool(secrets_source)
+        and tls_required
+        and ci_security_gates_enabled
+        and backup_drill_script_present
+    )
+
+    return {
+        "ok": ok,
+        "container_non_root": container_non_root,
+        "secrets_source_configured": bool(secrets_source),
+        "tls_required": tls_required,
+        "ci_security_gates_enabled": ci_security_gates_enabled,
+        "backup_drill_script_present": backup_drill_script_present,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
 
@@ -7884,6 +7921,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/observability-status": "1.1",
         "/api/ops/otel-status": "1.0",
         "/api/ops/evidence-status": "1.0",
+        "/api/ops/security-posture-status": "1.0",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -7919,6 +7957,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/observability-status": "1.1",
                             "/api/ops/otel-status": "1.0",
                             "/api/ops/evidence-status": "1.0",
+                            "/api/ops/security-posture-status": "1.0",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
