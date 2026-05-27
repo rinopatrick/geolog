@@ -1451,6 +1451,7 @@ def test_ops_security_evidence_attest_latest_happy_path():
     import tempfile
     import hashlib
     import hmac
+    import time
 
     old_dir = os.environ.get("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR")
     old_key = os.environ.get("BACKUP_DRILL_SIGNING_KEY")
@@ -1489,6 +1490,23 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert data.get("ok") is True
             assert data.get("reason_code") == "ATTEST_VALID"
             assert data.get("report_sha256") == report_sha
+
+            rf = client.get("/api/ops/security-evidence/freshness?max_age_seconds=86400", headers=_h("viewer"))
+            assert rf.status_code == 200
+            fresh = rf.json()
+            assert fresh.get("ok") is True
+            assert fresh.get("stale") is False
+            assert fresh.get("reason_code") == "FRESH"
+
+            old_ts = time.time() - 7200
+            os.utime(report_path, (old_ts, old_ts))
+
+            rs = client.get("/api/ops/security-evidence/freshness?max_age_seconds=60", headers=_h("viewer"))
+            assert rs.status_code == 200
+            stale = rs.json()
+            assert stale.get("ok") is False
+            assert stale.get("stale") is True
+            assert stale.get("reason_code") == "STALE"
         finally:
             if old_dir is None:
                 os.environ.pop("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR", None)
@@ -1700,6 +1718,7 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/security-evidence/manifest/verify-signature" in endpoints
     assert "/api/ops/security-evidence/attest" in endpoints
     assert "/api/ops/security-evidence/attest/latest" in endpoints
+    assert "/api/ops/security-evidence/freshness" in endpoints
     assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
@@ -1826,6 +1845,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     security_evidence_manifest_verify_post = security_evidence_manifest_verify_path.get("post", {})
     security_evidence_attest_post = paths.get("/api/ops/security-evidence/attest", {}).get("post", {})
     security_evidence_attest_latest_get = paths.get("/api/ops/security-evidence/attest/latest", {}).get("get", {})
+    security_evidence_freshness_get = paths.get("/api/ops/security-evidence/freshness", {}).get("get", {})
     contracts_get = paths.get("/api/ops/contracts", {}).get("get", {})
     contracts_verify_path = paths.get("/api/ops/contracts/verify-signature", {})
     contracts_verify_get = contracts_verify_path.get("get", {})
@@ -1848,6 +1868,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert security_evidence_manifest_verify_post.get("operationId")
     assert security_evidence_attest_post.get("operationId")
     assert security_evidence_attest_latest_get.get("operationId")
+    assert security_evidence_freshness_get.get("operationId")
     assert contracts_get.get("operationId")
     assert contracts_verify_get.get("operationId")
     assert contracts_verify_post.get("operationId")
@@ -1873,6 +1894,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsSecurityEvidenceManifestVerifyRequest" in schemas
     assert "OpsSecurityEvidenceAttestRequest" in schemas
     assert "OpsSecurityEvidenceAttestResponse" in schemas
+    assert "OpsSecurityEvidenceFreshnessResponse" in schemas
     assert "OpsContractsResponse" in schemas
     assert "OpsRunbookResponse" in schemas
 

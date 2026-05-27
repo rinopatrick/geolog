@@ -8099,6 +8099,18 @@ class OpsSecurityEvidenceAttestResponse(BaseModel):
     timestamp: str
 
 
+class OpsSecurityEvidenceFreshnessResponse(BaseModel):
+    ok: bool
+    artifact_dir: str
+    report_path: str | None = None
+    signature_path: str | None = None
+    report_age_seconds: int | None = None
+    max_age_seconds: int
+    stale: bool
+    reason_code: Literal["FRESH", "STALE", "EVIDENCE_MISSING"]
+    timestamp: str
+
+
 def _attest_security_evidence_payload(report: dict[str, Any] | None, signature_obj: dict[str, Any] | None) -> dict[str, Any]:
     if not report:
         return {
@@ -8315,6 +8327,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/security-evidence/manifest/verify-signature": "1.0",
         "/api/ops/security-evidence/attest": "1.0",
         "/api/ops/security-evidence/attest/latest": "1.0",
+        "/api/ops/security-evidence/freshness": "1.0",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -8356,6 +8369,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/security-evidence/manifest/verify-signature": "1.0",
                             "/api/ops/security-evidence/attest": "1.0",
                             "/api/ops/security-evidence/attest/latest": "1.0",
+                            "/api/ops/security-evidence/freshness": "1.0",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
@@ -8479,6 +8493,63 @@ def ops_security_evidence_attest_latest(_role: str = Depends(require_viewer)):
         signature_obj = None
 
     return _attest_security_evidence_payload(report_obj, signature_obj)
+
+
+@app.get(
+    "/api/ops/security-evidence/freshness",
+    response_model=OpsSecurityEvidenceFreshnessResponse,
+)
+def ops_security_evidence_freshness(max_age_seconds: int = 86400, _role: str = Depends(require_viewer)):
+    max_age_seconds = max(60, int(max_age_seconds))
+    artifact_dir = (os.getenv("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
+    report_path = os.path.join(artifact_dir, "report.json")
+    sig_path = os.path.join(artifact_dir, "report.signature.json")
+
+    if not (os.path.exists(report_path) and os.path.exists(sig_path)):
+        try:
+            candidates = []
+            for name in os.listdir(artifact_dir):
+                sub = os.path.join(artifact_dir, name)
+                rp = os.path.join(sub, "report.json")
+                sp = os.path.join(sub, "report.signature.json")
+                if os.path.isdir(sub) and os.path.exists(rp) and os.path.exists(sp):
+                    candidates.append((os.path.getmtime(rp), rp, sp))
+            if candidates:
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                _, report_path, sig_path = candidates[0]
+        except Exception:
+            pass
+
+    if not (os.path.exists(report_path) and os.path.exists(sig_path)):
+        return {
+            "ok": False,
+            "artifact_dir": artifact_dir,
+            "report_path": None,
+            "signature_path": None,
+            "report_age_seconds": None,
+            "max_age_seconds": max_age_seconds,
+            "stale": True,
+            "reason_code": "EVIDENCE_MISSING",
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+
+    try:
+        report_age_seconds = int(max(0.0, time.time() - os.path.getmtime(report_path)))
+    except Exception:
+        report_age_seconds = None
+
+    stale = report_age_seconds is None or report_age_seconds > max_age_seconds
+    return {
+        "ok": not stale,
+        "artifact_dir": artifact_dir,
+        "report_path": report_path,
+        "signature_path": sig_path,
+        "report_age_seconds": report_age_seconds,
+        "max_age_seconds": max_age_seconds,
+        "stale": stale,
+        "reason_code": "STALE" if stale else "FRESH",
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
 
 
 @app.get(
