@@ -380,6 +380,7 @@ Ops status endpoints:
 - `/api/ops/security-evidence/freshness` (GET, viewer+)
 - `/api/ops/security-evidence/gate` (GET, viewer+)
 - `/api/ops/security-evidence/gate/enforce` (GET, viewer+, returns 503 when gate fails)
+- `/api/ops/security-evidence/gate/assert` (POST, interpreter+, returns 503 when gate fails)
 - `/api/ops/evidence-status?probe=true`
 
 Security governance docs:
