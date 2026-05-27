@@ -22,11 +22,30 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install bandit
+          pip install bandit pip-audit
 
       - name: Bandit (high severity only)
         run: |
           bandit -q -r backend -lll
+
+      - name: pip-audit (fail on known vulns)
+        run: |
+          pip-audit -r requirements.txt
+
+      - name: Backup/restore drill smoke
+        run: |
+          python - <<'PY'
+          import sqlite3, pathlib
+          p = pathlib.Path('backend/data/geolog.db')
+          p.parent.mkdir(parents=True, exist_ok=True)
+          conn = sqlite3.connect(p)
+          cur = conn.cursor()
+          cur.execute('CREATE TABLE IF NOT EXISTS drill_sample (id INTEGER PRIMARY KEY, v TEXT)')
+          cur.execute('INSERT INTO drill_sample(v) VALUES (?)', ('ok',))
+          conn.commit()
+          conn.close()
+          PY
+          bash scripts/backup_restore_drill.sh backend/data/geolog.db
 
       - name: Secret token grep gate
         run: |
