@@ -5344,9 +5344,7 @@ def get_audit_log(project_id: int = None, well_id: int = None, limit: int = 100,
     return result
 
 
-@app.get("/api/audit-log/verify")
-def verify_audit_log_chain(limit: int = 2000, db: Session = Depends(get_db)):
-    """Recompute immutable audit chain and report tamper gaps."""
+def _compute_audit_chain_report(limit: int, db: Session):
     rows = db.query(AuditLog).order_by(AuditLog.id.asc()).limit(min(max(limit, 1), 10000)).all()
     issues = []
     verified = 0
@@ -5379,6 +5377,28 @@ def verify_audit_log_chain(limit: int = 2000, db: Session = Depends(get_db)):
         "ok": len(issues) == 0,
         "verified_entries": verified,
         "issues": issues,
+    }
+
+
+@app.get("/api/audit-log/verify")
+def verify_audit_log_chain(limit: int = 2000, db: Session = Depends(get_db)):
+    """Recompute immutable audit chain and report tamper gaps."""
+    return _compute_audit_chain_report(limit, db)
+
+
+@app.get("/api/audit-log/verify/export")
+def export_audit_log_verification(limit: int = 2000, db: Session = Depends(get_db)):
+    """Export verification report with SHA256 digest for compliance handoff."""
+    report = _compute_audit_chain_report(limit, db)
+    payload = {
+        "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "report": report,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return {
+        "digest_sha256": digest,
+        "payload": payload,
     }
 
 

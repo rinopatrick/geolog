@@ -450,3 +450,30 @@ def test_audit_log_delete_is_blocked_by_trigger():
         assert blocked is True
     finally:
         db.close()
+
+
+def test_audit_verify_export_has_valid_digest():
+    import hashlib
+    import json
+
+    r = client.get("/api/audit-log/verify/export", headers=_h("viewer"))
+    assert r.status_code == 200
+    data = r.json()
+    assert "digest_sha256" in data and "payload" in data
+    assert isinstance(data["digest_sha256"], str) and len(data["digest_sha256"]) == 64
+
+    canonical = json.dumps(data["payload"], sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    recomputed = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    assert recomputed == data["digest_sha256"]
+
+
+def test_audit_verify_export_contains_report_shape():
+    r = client.get("/api/audit-log/verify/export", headers=_h("viewer"))
+    assert r.status_code == 200
+    data = r.json()
+    payload = data.get("payload", {})
+    report = payload.get("report", {})
+    assert "generated_at" in payload
+    assert "ok" in report
+    assert "verified_entries" in report
+    assert "issues" in report
