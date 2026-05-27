@@ -378,11 +378,12 @@ Ops status endpoints:
 - `/api/ops/security-evidence/attest` (POST, interpreter+)
 - `/api/ops/security-evidence/attest/latest` (GET, viewer+)
 - `/api/ops/security-evidence/freshness` (GET, viewer+)
-- `/api/ops/security-evidence/gate` (GET, viewer+, supports `max_age_seconds` + `min_retention_days`)
+- `/api/ops/security-evidence/gate` (GET, viewer+, supports `max_age_seconds` + `min_retention_days`; includes `failed_checks` for automation)
 - `/api/ops/security-evidence/gate/enforce` (GET, viewer+, returns 503 when gate fails, supports `max_age_seconds` + `min_retention_days`)
 - `/api/ops/security-evidence/gate/assert` (POST, interpreter+, returns 503 when gate fails, supports `max_age_seconds` + `min_retention_days`)
-- `503` gate failure response is now schema-based (`OpsSecurityEvidenceGateErrorResponse`)
+- `503` gate failure response is schema-based (`OpsSecurityEvidenceGateErrorResponse`) and includes `failed_checks`
 - `/api/ops/security-evidence/gate/check` (POST, interpreter+, always 200 with gate payload, supports `max_age_seconds` + `min_retention_days`)
+- Contracts registry version for gate family is now `1.1`
 - `/api/ops/evidence-status?probe=true`
 
 Security governance docs:

@@ -8116,7 +8116,8 @@ class OpsSecurityEvidenceGateResponse(BaseModel):
     attest_ok: bool
     freshness_ok: bool
     retention_ok: bool
-    attest_reason_code: str | None = None
+    failed_checks: list[Literal["attest", "freshness", "retention"]]
+    attest_reason_code: Literal["ATTEST_VALID", "ATTEST_INVALID", "ATTEST_ERROR"]
     freshness_reason_code: Literal["FRESH", "STALE", "EVIDENCE_MISSING"]
     retention_reason_code: Literal["RETENTION_OK", "RETENTION_TOO_SHORT", "RETENTION_UNKNOWN"]
     artifact_dir: str
@@ -8129,6 +8130,7 @@ class OpsSecurityEvidenceGateResponse(BaseModel):
 
 class OpsSecurityEvidenceGateErrorDetail(BaseModel):
     error: str
+    failed_checks: list[Literal["attest", "freshness", "retention"]]
     attest_reason_code: str | None = None
     freshness_reason_code: Literal["FRESH", "STALE", "EVIDENCE_MISSING"]
     retention_reason_code: Literal["RETENTION_OK", "RETENTION_TOO_SHORT", "RETENTION_UNKNOWN"]
@@ -8360,10 +8362,10 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/security-evidence/attest": "1.0",
         "/api/ops/security-evidence/attest/latest": "1.0",
         "/api/ops/security-evidence/freshness": "1.0",
-        "/api/ops/security-evidence/gate": "1.0",
-        "/api/ops/security-evidence/gate/enforce": "1.0",
-        "/api/ops/security-evidence/gate/assert": "1.0",
-        "/api/ops/security-evidence/gate/check": "1.0",
+        "/api/ops/security-evidence/gate": "1.1",
+        "/api/ops/security-evidence/gate/enforce": "1.1",
+        "/api/ops/security-evidence/gate/assert": "1.1",
+        "/api/ops/security-evidence/gate/check": "1.1",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -8406,10 +8408,10 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/security-evidence/attest": "1.0",
                             "/api/ops/security-evidence/attest/latest": "1.0",
                             "/api/ops/security-evidence/freshness": "1.0",
-                            "/api/ops/security-evidence/gate": "1.0",
-                            "/api/ops/security-evidence/gate/enforce": "1.0",
-                            "/api/ops/security-evidence/gate/assert": "1.0",
-                            "/api/ops/security-evidence/gate/check": "1.0",
+                            "/api/ops/security-evidence/gate": "1.1",
+                            "/api/ops/security-evidence/gate/enforce": "1.1",
+                            "/api/ops/security-evidence/gate/assert": "1.1",
+                            "/api/ops/security-evidence/gate/check": "1.1",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
@@ -8614,11 +8616,20 @@ def ops_security_evidence_gate(
         "RETENTION_OK" if retention_ok else "RETENTION_TOO_SHORT" if isinstance(retention_days, int) else "RETENTION_UNKNOWN"
     )
 
+    failed_checks: list[str] = []
+    if not attest_ok:
+        failed_checks.append("attest")
+    if not freshness_ok:
+        failed_checks.append("freshness")
+    if not retention_ok:
+        failed_checks.append("retention")
+
     return {
-        "ok": attest_ok and freshness_ok and retention_ok,
+        "ok": len(failed_checks) == 0,
         "attest_ok": attest_ok,
         "freshness_ok": freshness_ok,
         "retention_ok": retention_ok,
+        "failed_checks": failed_checks,
         "attest_reason_code": attest.get("reason_code"),
         "freshness_reason_code": freshness.get("reason_code", "EVIDENCE_MISSING"),
         "retention_reason_code": retention_reason_code,
@@ -8634,6 +8645,7 @@ def ops_security_evidence_gate(
 def _security_evidence_gate_failure_detail(gate: dict[str, Any]) -> dict[str, Any]:
     return {
         "error": "security evidence gate failed",
+        "failed_checks": gate.get("failed_checks", []),
         "attest_reason_code": gate.get("attest_reason_code"),
         "freshness_reason_code": gate.get("freshness_reason_code"),
         "retention_reason_code": gate.get("retention_reason_code"),

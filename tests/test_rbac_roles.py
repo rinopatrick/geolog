@@ -1507,6 +1507,7 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert retention_fail.get("ok") is False
             assert retention_fail.get("retention_ok") is False
             assert retention_fail.get("retention_reason_code") == "RETENTION_TOO_SHORT"
+            assert "retention" in (retention_fail.get("failed_checks") or [])
 
             rka = client.post(
                 "/api/ops/security-evidence/gate/assert?max_age_seconds=86400&min_retention_days=31",
@@ -1515,6 +1516,7 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert rka.status_code == 503
             kdetail = rka.json().get("detail", {})
             assert kdetail.get("retention_reason_code") == "RETENTION_TOO_SHORT"
+            assert "retention" in (kdetail.get("failed_checks") or [])
 
             old_ts = time.time() - 7200
             os.utime(report_path, (old_ts, old_ts))
@@ -1533,11 +1535,13 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert gate.get("attest_ok") is True
             assert gate.get("freshness_ok") is False
             assert gate.get("freshness_reason_code") == "STALE"
+            assert "freshness" in (gate.get("failed_checks") or [])
 
             re = client.get("/api/ops/security-evidence/gate/enforce?max_age_seconds=60", headers=_h("viewer"))
             assert re.status_code == 503
             detail = re.json().get("detail", {})
             assert detail.get("freshness_reason_code") == "STALE"
+            assert "freshness" in (detail.get("failed_checks") or [])
 
             ra_forbidden = client.post("/api/ops/security-evidence/gate/assert?max_age_seconds=60", headers=_h("viewer"))
             assert ra_forbidden.status_code == 403
@@ -1546,6 +1550,7 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert ra.status_code == 503
             adetail = ra.json().get("detail", {})
             assert adetail.get("freshness_reason_code") == "STALE"
+            assert "freshness" in (adetail.get("failed_checks") or [])
 
             rc_viewer = client.post("/api/ops/security-evidence/gate/check?max_age_seconds=60", headers=_h("viewer"))
             assert rc_viewer.status_code == 403
@@ -1771,6 +1776,10 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/security-evidence/gate/enforce" in endpoints
     assert "/api/ops/security-evidence/gate/assert" in endpoints
     assert "/api/ops/security-evidence/gate/check" in endpoints
+    assert endpoints.get("/api/ops/security-evidence/gate") == "1.1"
+    assert endpoints.get("/api/ops/security-evidence/gate/enforce") == "1.1"
+    assert endpoints.get("/api/ops/security-evidence/gate/assert") == "1.1"
+    assert endpoints.get("/api/ops/security-evidence/gate/check") == "1.1"
     assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
@@ -1965,12 +1974,15 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsSecurityEvidenceGateResponse" in schemas
     assert "OpsSecurityEvidenceGateErrorDetail" in schemas
     assert "OpsSecurityEvidenceGateErrorResponse" in schemas
+    gate_error_detail_props = schemas.get("OpsSecurityEvidenceGateErrorDetail", {}).get("properties", {})
+    assert "failed_checks" in gate_error_detail_props
     gate_schema = schemas.get("OpsSecurityEvidenceGateResponse", {})
     gate_props = gate_schema.get("properties", {})
     assert "retention_ok" in gate_props
     assert "retention_reason_code" in gate_props
     assert "retention_days" in gate_props
     assert "min_retention_days" in gate_props
+    assert "failed_checks" in gate_props
     assert "OpsContractsResponse" in schemas
     assert "OpsRunbookResponse" in schemas
 
