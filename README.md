@@ -371,6 +371,7 @@ Security CI workflow:
 Ops status endpoints:
 - `/api/ops/security-posture-status`
 - `/api/ops/security-evidence-status`
+- `/api/ops/security-evidence/attest` (POST, interpreter+)
 - `/api/ops/evidence-status?probe=true`
 
 Security governance docs:

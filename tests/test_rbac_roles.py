@@ -1328,6 +1328,56 @@ def test_ops_security_evidence_status_detects_mismatch():
                 os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
 
 
+def test_ops_security_evidence_attest_happy_path():
+    import os
+    import json
+    import hashlib
+    import hmac
+
+    report = {"backup_ok": True, "restore_ok": True}
+    report_bytes = json.dumps(report, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    report_sha = hashlib.sha256(report_bytes).hexdigest()
+
+    old_key = os.environ.get("BACKUP_DRILL_SIGNING_KEY")
+    os.environ["BACKUP_DRILL_SIGNING_KEY"] = "unit-test-secret"
+    sig = hmac.new(b"unit-test-secret", report_bytes, hashlib.sha256).hexdigest()
+
+    try:
+        r = client.post(
+            "/api/ops/security-evidence/attest",
+            headers=_h("interpreter"),
+            json={
+                "report": report,
+                "signature": {
+                    "report_sha256": report_sha,
+                    "signature_alg": "hmac-sha256",
+                    "signature_kid": "backup-drill",
+                    "signature": sig,
+                    "retention_days": 30,
+                },
+            },
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data.get("ok") is True
+        assert data.get("reason_code") == "ATTEST_VALID"
+        assert data.get("report_sha256") == report_sha
+    finally:
+        if old_key is None:
+            os.environ.pop("BACKUP_DRILL_SIGNING_KEY", None)
+        else:
+            os.environ["BACKUP_DRILL_SIGNING_KEY"] = old_key
+
+
+def test_ops_security_evidence_attest_rejects_viewer_role():
+    r = client.post(
+        "/api/ops/security-evidence/attest",
+        headers=_h("viewer"),
+        json={"report": {"x": 1}, "signature": {"report_sha256": "0" * 64}},
+    )
+    assert r.status_code == 403
+
+
 def test_ops_health_unknown_role_allowed_as_viewer_floor():
     r = client.get("/api/ops/health", headers=_h("unknown"))
     assert r.status_code == 200
@@ -1397,6 +1447,7 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/evidence-status" in endpoints
     assert "/api/ops/security-posture-status" in endpoints
     assert "/api/ops/security-evidence-status" in endpoints
+    assert "/api/ops/security-evidence/attest" in endpoints
     assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
@@ -1517,6 +1568,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     evidence_status_get = paths.get("/api/ops/evidence-status", {}).get("get", {})
     security_posture_get = paths.get("/api/ops/security-posture-status", {}).get("get", {})
     security_evidence_get = paths.get("/api/ops/security-evidence-status", {}).get("get", {})
+    security_evidence_attest_post = paths.get("/api/ops/security-evidence/attest", {}).get("post", {})
     contracts_get = paths.get("/api/ops/contracts", {}).get("get", {})
     contracts_verify_path = paths.get("/api/ops/contracts/verify-signature", {})
     contracts_verify_get = contracts_verify_path.get("get", {})
@@ -1534,6 +1586,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert evidence_status_get.get("operationId")
     assert security_posture_get.get("operationId")
     assert security_evidence_get.get("operationId")
+    assert security_evidence_attest_post.get("operationId")
     assert contracts_get.get("operationId")
     assert contracts_verify_get.get("operationId")
     assert contracts_verify_post.get("operationId")
@@ -1555,6 +1608,8 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsEvidenceStatusResponse" in schemas
     assert "OpsSecurityPostureStatusResponse" in schemas
     assert "OpsSecurityEvidenceStatusResponse" in schemas
+    assert "OpsSecurityEvidenceAttestRequest" in schemas
+    assert "OpsSecurityEvidenceAttestResponse" in schemas
     assert "OpsContractsResponse" in schemas
     assert "OpsRunbookResponse" in schemas
 

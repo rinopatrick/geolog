@@ -7905,6 +7905,33 @@ class OpsContractsResponse(BaseModel):
     timestamp: str
 
 
+OpsEvidenceAttestReasonCode = Literal[
+    "ATTEST_VALID",
+    "MISSING_REPORT",
+    "MISSING_SIGNATURE",
+    "INVALID_SIGNATURE_FORMAT",
+    "DIGEST_MISMATCH",
+    "HMAC_KEY_MISSING",
+    "HMAC_SIGNATURE_MISMATCH",
+]
+
+
+class OpsSecurityEvidenceAttestRequest(BaseModel):
+    report: dict[str, Any]
+    signature: dict[str, Any]
+
+
+class OpsSecurityEvidenceAttestResponse(BaseModel):
+    ok: bool
+    reason: str
+    reason_code: OpsEvidenceAttestReasonCode
+    report_sha256: str | None = None
+    signature_alg: str | None = None
+    signature_kid: str | None = None
+    retention_days: int | None = None
+    timestamp: str
+
+
 class OpsSummaryStatus(BaseModel):
     db_ok: bool
     slo_ok: bool
@@ -8030,6 +8057,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/evidence-status": "1.0",
         "/api/ops/security-posture-status": "1.0",
         "/api/ops/security-evidence-status": "1.0",
+        "/api/ops/security-evidence/attest": "1.0",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -8067,6 +8095,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/evidence-status": "1.0",
                             "/api/ops/security-posture-status": "1.0",
                             "/api/ops/security-evidence-status": "1.0",
+                            "/api/ops/security-evidence/attest": "1.0",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
@@ -8135,6 +8164,103 @@ def ops_contracts_verify_signature_post(
 ):
     """M2M verifier for detached signature over current ops contracts payload."""
     return _verify_audit_export_signature_payload(_ops_contracts_payload(), body.signature, body.kid)
+
+
+@app.post(
+    "/api/ops/security-evidence/attest",
+    response_model=OpsSecurityEvidenceAttestResponse,
+)
+def ops_security_evidence_attest(
+    body: OpsSecurityEvidenceAttestRequest,
+    _role: str = Depends(require_interpreter),
+):
+    report = body.report if isinstance(body.report, dict) else None
+    signature_obj = body.signature if isinstance(body.signature, dict) else None
+
+    if not report:
+        return {
+            "ok": False,
+            "reason": "report object is required",
+            "reason_code": "MISSING_REPORT",
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+    if not signature_obj:
+        return {
+            "ok": False,
+            "reason": "signature object is required",
+            "reason_code": "MISSING_SIGNATURE",
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+
+    report_bytes = json.dumps(report, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    report_sha = hashlib.sha256(report_bytes).hexdigest()
+
+    declared_sha = str(signature_obj.get("report_sha256", "") or "").strip().lower()
+    signature_alg = str(signature_obj.get("signature_alg", "") or "").strip() or None
+    signature_kid = str(signature_obj.get("signature_kid", "") or "").strip() or None
+    sig = str(signature_obj.get("signature", "") or "").strip().lower()
+    rd = signature_obj.get("retention_days")
+    retention_days = int(rd) if isinstance(rd, int) else None
+
+    if not declared_sha or declared_sha != report_sha:
+        return {
+            "ok": False,
+            "reason": "report_sha256 mismatch",
+            "reason_code": "DIGEST_MISMATCH",
+            "report_sha256": report_sha,
+            "signature_alg": signature_alg,
+            "signature_kid": signature_kid,
+            "retention_days": retention_days,
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+
+    if signature_alg == "hmac-sha256":
+        if not sig or len(sig) != 64 or any(c not in "0123456789abcdef" for c in sig):
+            return {
+                "ok": False,
+                "reason": "signature must be 64-char hex",
+                "reason_code": "INVALID_SIGNATURE_FORMAT",
+                "report_sha256": report_sha,
+                "signature_alg": signature_alg,
+                "signature_kid": signature_kid,
+                "retention_days": retention_days,
+                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            }
+        key = (os.getenv("BACKUP_DRILL_SIGNING_KEY") or "").strip()
+        if not key:
+            return {
+                "ok": False,
+                "reason": "BACKUP_DRILL_SIGNING_KEY is required for hmac-sha256 verification",
+                "reason_code": "HMAC_KEY_MISSING",
+                "report_sha256": report_sha,
+                "signature_alg": signature_alg,
+                "signature_kid": signature_kid,
+                "retention_days": retention_days,
+                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            }
+        expected = hmac.new(key.encode("utf-8"), report_bytes, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            return {
+                "ok": False,
+                "reason": "hmac signature mismatch",
+                "reason_code": "HMAC_SIGNATURE_MISMATCH",
+                "report_sha256": report_sha,
+                "signature_alg": signature_alg,
+                "signature_kid": signature_kid,
+                "retention_days": retention_days,
+                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            }
+
+    return {
+        "ok": True,
+        "reason": "evidence attestation valid",
+        "reason_code": "ATTEST_VALID",
+        "report_sha256": report_sha,
+        "signature_alg": signature_alg,
+        "signature_kid": signature_kid,
+        "retention_days": retention_days,
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
 
 
 @app.get(
