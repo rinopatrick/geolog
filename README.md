@@ -201,6 +201,37 @@ Signing key env config:
 - `AUDIT_EXPORT_HMAC_ACTIVE_KID='k2'`
 - legacy fallback: `AUDIT_EXPORT_HMAC_KEY`
 
+End-to-end `curl` examples:
+
+1) Export signed payload
+```bash
+curl -s "http://localhost:8000/api/audit-log/verify/export?sign=true&kid=k1" \
+  -H "X-User-Role: viewer" > /tmp/audit_export.json
+```
+
+2) Verify via GET endpoint
+```bash
+PAYLOAD=$(jq -c '.payload' /tmp/audit_export.json)
+SIGNATURE=$(jq -r '.signature' /tmp/audit_export.json)
+KID=$(jq -r '.signature_kid' /tmp/audit_export.json)
+
+curl -G -s "http://localhost:8000/api/audit-log/verify/signature" \
+  -H "X-User-Role: viewer" \
+  --data-urlencode "payload=${PAYLOAD}" \
+  --data-urlencode "signature=${SIGNATURE}" \
+  --data-urlencode "kid=${KID}" | jq .
+```
+
+3) Verify via POST endpoint (M2M, interpreter role)
+```bash
+jq '{payload: .payload, signature: .signature, kid: .signature_kid}' /tmp/audit_export.json > /tmp/audit_verify_req.json
+
+curl -s -X POST "http://localhost:8000/api/audit-log/verify/signature" \
+  -H "Content-Type: application/json" \
+  -H "X-User-Role: interpreter" \
+  --data-binary @/tmp/audit_verify_req.json | jq .
+```
+
 ---
 
 ## Keyboard Shortcuts
