@@ -355,15 +355,31 @@ cd /home/patrick/geolog-app
 bash scripts/backup_restore_drill.sh backend/data/geolog.db
 ```
 
+Optional signing env for backup drill evidence:
+- `BACKUP_DRILL_SIGNING_KEY`
+- `BACKUP_DRILL_SIGNING_KID` (default: `backup-drill`)
+- `BACKUP_DRILL_RETENTION_DAYS` (default: `30`)
+
 Security CI workflow:
 - `.github/workflows/security-gates.yml`
 - Checks:
   - `bandit -q -r backend -lll` (high severity gate)
+  - `pip-audit -r requirements.txt`
+  - backup/restore drill smoke
   - hardcoded secret token regex gate
 
 Ops status endpoints:
 - `/api/ops/security-posture-status`
 - `/api/ops/evidence-status?probe=true`
+
+Security governance docs:
+- `docs/BRANCH_PROTECTION_CHECKLIST.md`
+- `docs/SECURITY_EVIDENCE_TEMPLATE.md`
+
+Startup security policy (non-dev fail-fast):
+- `GEOLOG_ENV` (e.g. `prod`, `staging`, `dev`)
+- `GEOLOG_ENFORCE_SECRETS_SOURCE` (default `true`)
+- `GEOLOG_SECRETS_SOURCE` (required when env is non-dev)
 
 Notes:
 - Parser tests run without server.

@@ -128,16 +128,44 @@ def test_jwt_mode_enforces_role_from_signed_token():
         "variation_pct": 20,
     }
     try:
-        r = client.post(
-            "/api/wells/999999/sensitivity",
-            headers={"Authorization": f"Bearer {token}"},
-            json=payload,
-        )
+        r = client.post("/api/wells/999999/sensitivity", headers={"Authorization": f"Bearer {token}"}, json=payload)
         assert r.status_code == 403
     finally:
         main_mod.AUTH_CONFIG.mode = old_mode
         main_mod.AUTH_CONFIG.jwt_secret = old_secret
         main_mod.AUTH_CONFIG.jwt_algorithms = old_algs
+
+
+def test_secrets_source_policy_allows_dev_without_source(monkeypatch):
+    from backend import main as main_mod
+
+    monkeypatch.setenv("GEOLOG_ENV", "dev")
+    monkeypatch.delenv("GEOLOG_SECRETS_SOURCE", raising=False)
+    monkeypatch.setenv("GEOLOG_ENFORCE_SECRETS_SOURCE", "true")
+    main_mod._enforce_secrets_source_policy()
+
+
+def test_secrets_source_policy_blocks_prod_without_source(monkeypatch):
+    from backend import main as main_mod
+
+    monkeypatch.setenv("GEOLOG_ENV", "prod")
+    monkeypatch.delenv("GEOLOG_SECRETS_SOURCE", raising=False)
+    monkeypatch.setenv("GEOLOG_ENFORCE_SECRETS_SOURCE", "true")
+
+    try:
+        main_mod._enforce_secrets_source_policy()
+        assert False, "expected RuntimeError"
+    except RuntimeError as e:
+        assert "GEOLOG_SECRETS_SOURCE" in str(e)
+
+
+def test_secrets_source_policy_allows_prod_with_source(monkeypatch):
+    from backend import main as main_mod
+
+    monkeypatch.setenv("GEOLOG_ENV", "prod")
+    monkeypatch.setenv("GEOLOG_SECRETS_SOURCE", "vault")
+    monkeypatch.setenv("GEOLOG_ENFORCE_SECRETS_SOURCE", "true")
+    main_mod._enforce_secrets_source_policy()
 
 
 def test_report_pdf_endpoint_not_found():
@@ -1185,6 +1213,8 @@ def test_ops_security_posture_status_shape_and_env_signals():
         assert data.get("container_non_root") is True
         assert data.get("secrets_source_configured") is True
         assert data.get("tls_required") is True
+        assert data.get("branch_protection_checklist_present") is True
+        assert data.get("security_evidence_template_present") is True
         assert "ci_security_gates_enabled" in data
         assert "backup_drill_script_present" in data
         assert "timestamp" in data
@@ -1452,6 +1482,8 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "secrets_source_configured" in security_posture_props
     assert "tls_required" in security_posture_props
     assert "ci_security_gates_enabled" in security_posture_props
+    assert "branch_protection_checklist_present" in security_posture_props
+    assert "security_evidence_template_present" in security_posture_props
 
     alert_rules_schema = schemas.get("OpsAlertRulesResponse", {})
     alert_rules_props = alert_rules_schema.get("properties", {})

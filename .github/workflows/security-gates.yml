@@ -33,6 +33,10 @@ jobs:
           pip-audit -r requirements.txt
 
       - name: Backup/restore drill smoke
+        env:
+          BACKUP_DRILL_SIGNING_KEY: ${{ secrets.BACKUP_DRILL_SIGNING_KEY }}
+          BACKUP_DRILL_SIGNING_KID: ci-security-gate
+          BACKUP_DRILL_RETENTION_DAYS: 30
         run: |
           python - <<'PY'
           import sqlite3, pathlib
@@ -46,6 +50,13 @@ jobs:
           conn.close()
           PY
           bash scripts/backup_restore_drill.sh backend/data/geolog.db
+
+      - name: Upload backup-drill evidence artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-drill-evidence
+          path: artifacts/backup-drill/**
+          retention-days: 30
 
       - name: Secret token grep gate
         run: |

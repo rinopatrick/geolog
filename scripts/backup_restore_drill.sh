@@ -7,6 +7,7 @@ OUT_DIR="artifacts/backup-drill/${STAMP}"
 BACKUP_PATH="${OUT_DIR}/geolog.db.backup"
 RESTORE_PATH="${OUT_DIR}/geolog.db.restore"
 REPORT_PATH="${OUT_DIR}/report.json"
+SIGNATURE_PATH="${OUT_DIR}/report.signature.json"
 
 mkdir -p "${OUT_DIR}"
 
@@ -23,7 +24,7 @@ backup_sha="$(sha256sum "${BACKUP_PATH}" | awk '{print $1}')"
 restore_sha="$(sha256sum "${RESTORE_PATH}" | awk '{print $1}')"
 
 python3 - <<'PY' "${DB_PATH}" "${RESTORE_PATH}" "${REPORT_PATH}" "${orig_sha}" "${backup_sha}" "${restore_sha}"
-import json, sqlite3, sys, datetime
+import json, sqlite3, sys, datetime, hashlib, hmac, os
 
 db_path, restore_path, report_path, orig_sha, backup_sha, restore_sha = sys.argv[1:]
 
@@ -66,7 +67,31 @@ report = {
 with open(report_path, "w", encoding="utf-8") as f:
     json.dump(report, f, ensure_ascii=False, indent=2)
 
-print(json.dumps(report, ensure_ascii=False))
+report_bytes = json.dumps(report, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+report_sha256 = hashlib.sha256(report_bytes).hexdigest()
+
+sig_payload = {
+    "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    "report_path": report_path,
+    "report_sha256": report_sha256,
+    "signature_alg": None,
+    "signature_kid": None,
+    "signature": None,
+    "retention_days": int(os.getenv("BACKUP_DRILL_RETENTION_DAYS", "30") or 30),
+}
+
+signing_key = (os.getenv("BACKUP_DRILL_SIGNING_KEY") or "").strip()
+signing_kid = (os.getenv("BACKUP_DRILL_SIGNING_KID") or "backup-drill")
+if signing_key:
+    sig_payload["signature_alg"] = "hmac-sha256"
+    sig_payload["signature_kid"] = signing_kid
+    sig_payload["signature"] = hmac.new(signing_key.encode("utf-8"), report_sha256.encode("utf-8"), hashlib.sha256).hexdigest()
+
+with open(report_path.replace("report.json", "report.signature.json"), "w", encoding="utf-8") as f:
+    json.dump(sig_payload, f, ensure_ascii=False, indent=2)
+
+print(json.dumps({"report": report, "signature": sig_payload}, ensure_ascii=False))
 PY
 
 echo "Backup drill report: ${REPORT_PATH}"
+echo "Backup drill signature: ${SIGNATURE_PATH}"

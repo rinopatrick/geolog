@@ -805,6 +805,24 @@ app.add_middleware(RequestMetricsMiddleware)
 app.add_middleware(RequestIdMiddleware)
 
 
+def _enforce_secrets_source_policy() -> None:
+    """Fail fast in non-dev environments when secrets source is not configured."""
+    env = (os.getenv("GEOLOG_ENV") or os.getenv("ENV") or "dev").strip().lower()
+    secrets_source = (os.getenv("GEOLOG_SECRETS_SOURCE") or "").strip()
+    strict = (os.getenv("GEOLOG_ENFORCE_SECRETS_SOURCE", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
+    if not strict:
+        return
+    if env in {"dev", "local", "test"}:
+        return
+    if not secrets_source:
+        raise RuntimeError("GEOLOG_SECRETS_SOURCE is required for non-dev environments")
+
+
+@app.on_event("startup")
+def _startup_security_guards():
+    _enforce_secrets_source_policy()
+
+
 # ─── Auto-seed demo data on first startup ───────────────────
 @app.on_event("startup")
 def _auto_seed():
@@ -7612,6 +7630,8 @@ class OpsSecurityPostureStatusResponse(BaseModel):
     tls_required: bool
     ci_security_gates_enabled: bool
     backup_drill_script_present: bool
+    branch_protection_checklist_present: bool
+    security_evidence_template_present: bool
     timestamp: str
 
 
@@ -7753,6 +7773,8 @@ def ops_security_posture_status(_role: str = Depends(require_viewer)):
     tls_required = (os.getenv("GEOLOG_REQUIRE_TLS", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
     ci_security_gates_enabled = os.path.exists(".github/workflows/security-gates.yml")
     backup_drill_script_present = os.path.exists("scripts/backup_restore_drill.sh")
+    branch_protection_checklist_present = os.path.exists("docs/BRANCH_PROTECTION_CHECKLIST.md")
+    security_evidence_template_present = os.path.exists("docs/SECURITY_EVIDENCE_TEMPLATE.md")
     container_non_root = True
 
     ok = bool(
@@ -7761,6 +7783,8 @@ def ops_security_posture_status(_role: str = Depends(require_viewer)):
         and tls_required
         and ci_security_gates_enabled
         and backup_drill_script_present
+        and branch_protection_checklist_present
+        and security_evidence_template_present
     )
 
     return {
@@ -7770,6 +7794,8 @@ def ops_security_posture_status(_role: str = Depends(require_viewer)):
         "tls_required": tls_required,
         "ci_security_gates_enabled": ci_security_gates_enabled,
         "backup_drill_script_present": backup_drill_script_present,
+        "branch_protection_checklist_present": branch_protection_checklist_present,
+        "security_evidence_template_present": security_evidence_template_present,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
 
