@@ -337,6 +337,11 @@ Gate scope (Phase 2 reliability/governance critical path):
 - `backend/security.py`
 - `backend/routers/reports.py`
 
+Phase 2 regression dataset evidence:
+- Manifest: `test_data/regression_datasets_phase2.json`
+- Validation test: `tests/test_phase2_regression_datasets.py`
+- Requirement: at least 3 realistic LAS datasets, parseable with expected minimum depth points and curves.
+
 Notes:
 - Parser tests run without server.
 - API tests in `test_parser.py` require GeoLog running at `http://localhost:8000`.
