@@ -7301,6 +7301,11 @@ def ops_summary(db: Session = Depends(get_db), _role: str = Depends(require_view
             "latency_ms_avg": float(metrics.get("latency_ms_avg", 0.0)),
             "error_rate": float(slo.get("current", {}).get("error_rate", 0.0)),
         },
+        "slo": {
+            "targets": dict(slo.get("targets", {})),
+            "current": dict(slo.get("current", {})),
+            "checks": dict(slo.get("checks", {})),
+        },
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
 

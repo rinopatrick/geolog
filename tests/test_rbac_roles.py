@@ -987,10 +987,12 @@ def test_ops_summary_shape_and_access():
     assert "status" in data
     assert "alerts" in data
     assert "traffic" in data
+    assert "slo" in data
 
     status = data["status"]
     alerts = data["alerts"]
     traffic = data["traffic"]
+    slo = data["slo"]
 
     assert "db_ok" in status
     assert "slo_ok" in status
@@ -1004,6 +1006,10 @@ def test_ops_summary_shape_and_access():
     assert "requests_total" in traffic
     assert "latency_ms_avg" in traffic
     assert "error_rate" in traffic
+
+    assert "targets" in slo
+    assert "current" in slo
+    assert "checks" in slo
 
 
 def test_ops_summary_unknown_role_allowed_as_viewer_floor():
