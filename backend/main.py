@@ -5387,8 +5387,51 @@ def verify_audit_log_chain(limit: int = 2000, db: Session = Depends(get_db)):
     return _compute_audit_chain_report(limit, db)
 
 
+def _resolve_audit_export_signing_key(requested_kid: str | None = None):
+    """Resolve signing key with optional key rotation.
+
+    Priority:
+    1) requested_kid -> AUDIT_EXPORT_HMAC_KEYS_JSON map
+    2) AUDIT_EXPORT_HMAC_ACTIVE_KID -> AUDIT_EXPORT_HMAC_KEYS_JSON map
+    3) legacy AUDIT_EXPORT_HMAC_KEY (kid='legacy')
+    """
+    keys_json = (os.getenv("AUDIT_EXPORT_HMAC_KEYS_JSON") or "").strip()
+    active_kid = (os.getenv("AUDIT_EXPORT_HMAC_ACTIVE_KID") or "").strip()
+
+    key_map = {}
+    if keys_json:
+        try:
+            parsed = json.loads(keys_json)
+            if isinstance(parsed, dict):
+                key_map = {str(k): str(v) for k, v in parsed.items() if str(v)}
+        except Exception:
+            raise HTTPException(status_code=500, detail="AUDIT_EXPORT_HMAC_KEYS_JSON is invalid JSON")
+
+    if requested_kid:
+        if requested_kid in key_map:
+            return requested_kid, key_map[requested_kid]
+        raise HTTPException(status_code=400, detail=f"unknown signature kid: {requested_kid}")
+
+    if active_kid and active_kid in key_map:
+        return active_kid, key_map[active_kid]
+
+    legacy = (os.getenv("AUDIT_EXPORT_HMAC_KEY") or "").strip()
+    if legacy:
+        return "legacy", legacy
+
+    if active_kid and key_map and active_kid not in key_map:
+        raise HTTPException(status_code=500, detail="AUDIT_EXPORT_HMAC_ACTIVE_KID not present in AUDIT_EXPORT_HMAC_KEYS_JSON")
+
+    raise HTTPException(status_code=500, detail="no signing key configured")
+
+
 @app.get("/api/audit-log/verify/export")
-def export_audit_log_verification(limit: int = 2000, sign: bool = False, db: Session = Depends(get_db)):
+def export_audit_log_verification(
+    limit: int = 2000,
+    sign: bool = False,
+    kid: str | None = None,
+    db: Session = Depends(get_db),
+):
     """Export verification report with SHA256 digest and optional detached HMAC signature."""
     report = _compute_audit_chain_report(limit, db)
     payload = {
@@ -5404,15 +5447,16 @@ def export_audit_log_verification(limit: int = 2000, sign: bool = False, db: Ses
         "signature": None,
         "signature_alg": None,
         "signature_detached": True,
+        "signature_kid": None,
     }
 
     if sign:
-        key = (os.getenv("AUDIT_EXPORT_HMAC_KEY") or "").encode("utf-8")
-        if not key:
-            raise HTTPException(status_code=500, detail="AUDIT_EXPORT_HMAC_KEY not configured")
+        resolved_kid, key_raw = _resolve_audit_export_signing_key(kid)
+        key = key_raw.encode("utf-8")
         sig = hmac.new(key, canonical.encode("utf-8"), hashlib.sha256).hexdigest()
         out["signature"] = sig
         out["signature_alg"] = "hmac-sha256"
+        out["signature_kid"] = resolved_kid
 
     return out
 

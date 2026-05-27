@@ -512,9 +512,100 @@ def test_audit_verify_export_hmac_missing_key_fails():
 
     old = os.environ.get("AUDIT_EXPORT_HMAC_KEY")
     os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
+    os.environ.pop("AUDIT_EXPORT_HMAC_KEYS_JSON", None)
+    os.environ.pop("AUDIT_EXPORT_HMAC_ACTIVE_KID", None)
     try:
         r = client.get("/api/audit-log/verify/export?sign=true", headers=_h("viewer"))
         assert r.status_code == 500
     finally:
         if old is not None:
             os.environ["AUDIT_EXPORT_HMAC_KEY"] = old
+
+
+def test_audit_verify_export_hmac_uses_active_kid_from_keyring():
+    import hashlib
+    import hmac
+    import json
+    import os
+
+    old_json = os.environ.get("AUDIT_EXPORT_HMAC_KEYS_JSON")
+    old_active = os.environ.get("AUDIT_EXPORT_HMAC_ACTIVE_KID")
+    old_legacy = os.environ.get("AUDIT_EXPORT_HMAC_KEY")
+
+    os.environ["AUDIT_EXPORT_HMAC_KEYS_JSON"] = '{"k1":"key-one","k2":"key-two"}'
+    os.environ["AUDIT_EXPORT_HMAC_ACTIVE_KID"] = "k2"
+    os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
+
+    try:
+        r = client.get("/api/audit-log/verify/export?sign=true", headers=_h("viewer"))
+        assert r.status_code == 200
+        data = r.json()
+        canonical = json.dumps(data["payload"], sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        expected = hmac.new(b"key-two", canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+        assert data.get("signature") == expected
+        assert data.get("signature_kid") == "k2"
+    finally:
+        if old_json is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_KEYS_JSON", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_KEYS_JSON"] = old_json
+        if old_active is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_ACTIVE_KID", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_ACTIVE_KID"] = old_active
+        if old_legacy is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_KEY"] = old_legacy
+
+
+def test_audit_verify_export_hmac_honors_requested_kid():
+    import hashlib
+    import hmac
+    import json
+    import os
+
+    old_json = os.environ.get("AUDIT_EXPORT_HMAC_KEYS_JSON")
+    old_active = os.environ.get("AUDIT_EXPORT_HMAC_ACTIVE_KID")
+
+    os.environ["AUDIT_EXPORT_HMAC_KEYS_JSON"] = '{"k1":"key-one","k2":"key-two"}'
+    os.environ["AUDIT_EXPORT_HMAC_ACTIVE_KID"] = "k2"
+    try:
+        r = client.get("/api/audit-log/verify/export?sign=true&kid=k1", headers=_h("viewer"))
+        assert r.status_code == 200
+        data = r.json()
+        canonical = json.dumps(data["payload"], sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        expected = hmac.new(b"key-one", canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+        assert data.get("signature") == expected
+        assert data.get("signature_kid") == "k1"
+    finally:
+        if old_json is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_KEYS_JSON", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_KEYS_JSON"] = old_json
+        if old_active is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_ACTIVE_KID", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_ACTIVE_KID"] = old_active
+
+
+def test_audit_verify_export_hmac_unknown_kid_fails():
+    import os
+
+    old_json = os.environ.get("AUDIT_EXPORT_HMAC_KEYS_JSON")
+    old_active = os.environ.get("AUDIT_EXPORT_HMAC_ACTIVE_KID")
+
+    os.environ["AUDIT_EXPORT_HMAC_KEYS_JSON"] = '{"k1":"key-one"}'
+    os.environ["AUDIT_EXPORT_HMAC_ACTIVE_KID"] = "k1"
+    try:
+        r = client.get("/api/audit-log/verify/export?sign=true&kid=missing", headers=_h("viewer"))
+        assert r.status_code == 400
+    finally:
+        if old_json is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_KEYS_JSON", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_KEYS_JSON"] = old_json
+        if old_active is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_ACTIVE_KID", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_ACTIVE_KID"] = old_active
