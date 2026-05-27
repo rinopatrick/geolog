@@ -891,8 +891,10 @@ def test_ops_alerts_shape_and_access():
     assert "alerts" in data
     assert "count" in data
     assert "severity_counts" in data
+    assert "code_counts" in data
     assert isinstance(data["alerts"], list)
     assert isinstance(data["severity_counts"], dict)
+    assert isinstance(data["code_counts"], dict)
     assert "warning" in data["severity_counts"]
     assert "critical" in data["severity_counts"]
 
@@ -919,10 +921,13 @@ def test_ops_alerts_can_report_breach_with_strict_env_thresholds():
             or "ERROR_RATE_SLO_BREACH" in codes
         )
         sev = data.get("severity_counts", {})
+        codes_count = data.get("code_counts", {})
         assert isinstance(sev, dict)
+        assert isinstance(codes_count, dict)
         assert int(sev.get("warning", 0)) >= 0
         assert int(sev.get("critical", 0)) >= 0
         assert int(sev.get("warning", 0)) + int(sev.get("critical", 0)) == int(data.get("count", 0))
+        assert sum(int(v) for v in codes_count.values()) == int(data.get("count", 0))
     finally:
         if old_lat is None:
             os.environ.pop("OPS_SLO_P95_MS", None)
