@@ -14,6 +14,8 @@ import numpy as np
 import json
 import os
 import math
+from typing import Any, Literal
+from pydantic import BaseModel, Field
 
 try:
     from routers.qc import router as qc_router
@@ -5464,6 +5466,31 @@ def export_audit_log_verification(
     return out
 
 
+AuditReasonCode = Literal[
+    "SIGNATURE_VALID",
+    "SIGNATURE_MISMATCH",
+    "UNKNOWN_KID",
+    "INVALID_KEYRING_JSON",
+    "ACTIVE_KID_MISSING",
+    "KEY_NOT_CONFIGURED",
+    "KEY_RESOLUTION_ERROR",
+]
+
+
+class AuditSignatureVerifyRequest(BaseModel):
+    payload: dict[str, Any]
+    signature: str = Field(..., min_length=64, max_length=64)
+    kid: str | None = None
+
+
+class AuditSignatureVerifyResponse(BaseModel):
+    ok: bool
+    reason: str
+    reason_code: AuditReasonCode
+    signature_alg: str
+    signature_kid: str | None = None
+
+
 def _verify_audit_export_signature_payload(payload_obj: dict, signature: str, kid: str | None = None):
     if not isinstance(payload_obj, dict):
         raise HTTPException(status_code=400, detail="payload JSON must be an object")
@@ -5505,7 +5532,41 @@ def _verify_audit_export_signature_payload(payload_obj: dict, signature: str, ki
     }
 
 
-@app.get("/api/audit-log/verify/signature")
+@app.get(
+    "/api/audit-log/verify/signature",
+    response_model=AuditSignatureVerifyResponse,
+    responses={
+        200: {
+            "description": "Signature verification result",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "valid": {
+                            "summary": "Valid signature",
+                            "value": {
+                                "ok": True,
+                                "reason": "signature_valid",
+                                "reason_code": "SIGNATURE_VALID",
+                                "signature_alg": "hmac-sha256",
+                                "signature_kid": "k1",
+                            },
+                        },
+                        "mismatch": {
+                            "summary": "Signature mismatch",
+                            "value": {
+                                "ok": False,
+                                "reason": "signature_mismatch",
+                                "reason_code": "SIGNATURE_MISMATCH",
+                                "signature_alg": "hmac-sha256",
+                                "signature_kid": "k1",
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
 def verify_audit_log_export_signature(payload: str, signature: str, kid: str | None = None):
     """Verify detached HMAC signature for exported audit verification payload.
 
@@ -5522,16 +5583,16 @@ def verify_audit_log_export_signature(payload: str, signature: str, kid: str | N
     return _verify_audit_export_signature_payload(parsed_payload, signature, kid)
 
 
-@app.post("/api/audit-log/verify/signature")
+@app.post(
+    "/api/audit-log/verify/signature",
+    response_model=AuditSignatureVerifyResponse,
+)
 def verify_audit_log_export_signature_post(
-    data: dict,
+    data: AuditSignatureVerifyRequest,
     _role: str = Depends(require_interpreter),
 ):
     """M2M verifier. Body: {payload: object, signature: hex64, kid?: string}."""
-    payload_obj = data.get("payload") if isinstance(data, dict) else None
-    signature = (data.get("signature") or "") if isinstance(data, dict) else ""
-    kid = (data.get("kid") or "") if isinstance(data, dict) else ""
-    return _verify_audit_export_signature_payload(payload_obj, signature, kid or None)
+    return _verify_audit_export_signature_payload(data.payload, data.signature, data.kid)
 
 
 # ─── Cross-Plot Matrix (multi-well) ──────────────────────────

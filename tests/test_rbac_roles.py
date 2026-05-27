@@ -708,6 +708,28 @@ def test_audit_verify_signature_endpoint_unknown_kid_returns_fail_reason():
             os.environ["AUDIT_EXPORT_HMAC_KEY"] = old_legacy
 
 
+def test_audit_verify_signature_openapi_reason_code_enum_present():
+    r = client.get("/openapi.json")
+    assert r.status_code == 200
+    data = r.json()
+
+    schemas = data.get("components", {}).get("schemas", {})
+    resp_schema = schemas.get("AuditSignatureVerifyResponse")
+    assert resp_schema is not None
+
+    reason_code = resp_schema.get("properties", {}).get("reason_code", {})
+    enum_vals = set(reason_code.get("enum", []))
+    assert {
+        "SIGNATURE_VALID",
+        "SIGNATURE_MISMATCH",
+        "UNKNOWN_KID",
+        "INVALID_KEYRING_JSON",
+        "ACTIVE_KID_MISSING",
+        "KEY_NOT_CONFIGURED",
+        "KEY_RESOLUTION_ERROR",
+    }.issubset(enum_vals)
+
+
 def test_audit_verify_signature_post_requires_interpreter():
     r = client.post(
         "/api/audit-log/verify/signature",
