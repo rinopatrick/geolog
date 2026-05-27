@@ -664,8 +664,45 @@ class GeoLogApp {
     _applyRoleGates() {
         const role = String(this.currentRole || 'viewer').toLowerCase();
         const rank = { viewer: 1, interpreter: 2, admin: 3 };
-        document.querySelectorAll('[data-role-required]').forEach((el) => {
-            const required = String(el.getAttribute('data-role-required') || '')
+        const roleByAction = {
+            // interpreter/admin actions
+            lockTemplateSignature: 'interpreter,admin',
+            unlockTemplateSignature: 'interpreter,admin',
+            saveCorrelationSettings: 'interpreter,admin',
+            savePetroParams: 'interpreter,admin',
+            applyWorkflowTemplate: 'interpreter,admin',
+            runAutoDepthMatch: 'interpreter,admin',
+            runSplice: 'interpreter,admin',
+            saveDepthShift: 'interpreter,admin',
+            // interpreter-only actions
+            runSensitivity: 'interpreter',
+            runElectrofacies: 'interpreter',
+            runElectrofaciesAsync: 'interpreter',
+            runDualWater: 'interpreter',
+            runMultimineral: 'interpreter',
+            runPermeabilityMulti: 'interpreter',
+            runVclEnhanced: 'interpreter',
+            computeSwMultiEquation: 'interpreter',
+        };
+
+        document.querySelectorAll('button[onclick], [data-role-required]').forEach((el) => {
+            let requiredSpec = String(el.getAttribute('data-role-required') || '').trim();
+            if (!requiredSpec) {
+                const onclick = String(el.getAttribute('onclick') || '');
+                const m = onclick.match(/app\.(\w+)\s*\(/);
+                const action = m?.[1];
+                if (action && roleByAction[action]) {
+                    requiredSpec = roleByAction[action];
+                    el.setAttribute('data-role-required', requiredSpec);
+                    if (!el.getAttribute('title')) {
+                        const pretty = requiredSpec.split(',').map(s => s.trim()).join(' or ');
+                        el.setAttribute('title', `Role required: ${pretty[0].toUpperCase()}${pretty.slice(1)}`);
+                    }
+                }
+            }
+            if (!requiredSpec) return;
+
+            const required = requiredSpec
                 .split(',')
                 .map(s => s.trim().toLowerCase())
                 .filter(Boolean);
