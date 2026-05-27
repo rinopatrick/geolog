@@ -381,6 +381,7 @@ Ops status endpoints:
 - `/api/ops/security-evidence/gate` (GET, viewer+)
 - `/api/ops/security-evidence/gate/enforce` (GET, viewer+, returns 503 when gate fails)
 - `/api/ops/security-evidence/gate/assert` (POST, interpreter+, returns 503 when gate fails)
+- `503` gate failure response is now schema-based (`OpsSecurityEvidenceGateErrorResponse`)
 - `/api/ops/security-evidence/gate/check` (POST, interpreter+, always 200 with gate payload)
 - `/api/ops/evidence-status?probe=true`
 

@@ -8123,6 +8123,19 @@ class OpsSecurityEvidenceGateResponse(BaseModel):
     timestamp: str
 
 
+class OpsSecurityEvidenceGateErrorDetail(BaseModel):
+    error: str
+    attest_reason_code: str | None = None
+    freshness_reason_code: Literal["FRESH", "STALE", "EVIDENCE_MISSING"]
+    artifact_dir: str
+    report_age_seconds: int | None = None
+    max_age_seconds: int
+
+
+class OpsSecurityEvidenceGateErrorResponse(BaseModel):
+    detail: OpsSecurityEvidenceGateErrorDetail
+
+
 def _attest_security_evidence_payload(report: dict[str, Any] | None, signature_obj: dict[str, Any] | None) -> dict[str, Any]:
     if not report:
         return {
@@ -8596,46 +8609,39 @@ def ops_security_evidence_gate(max_age_seconds: int = 86400, _role: str = Depend
     }
 
 
+def _security_evidence_gate_failure_detail(gate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "error": "security evidence gate failed",
+        "attest_reason_code": gate.get("attest_reason_code"),
+        "freshness_reason_code": gate.get("freshness_reason_code"),
+        "artifact_dir": gate.get("artifact_dir"),
+        "report_age_seconds": gate.get("report_age_seconds"),
+        "max_age_seconds": gate.get("max_age_seconds"),
+    }
+
+
 @app.get(
     "/api/ops/security-evidence/gate/enforce",
     response_model=OpsSecurityEvidenceGateResponse,
+    responses={503: {"model": OpsSecurityEvidenceGateErrorResponse, "description": "Gate failed"}},
 )
 def ops_security_evidence_gate_enforce(max_age_seconds: int = 86400, _role: str = Depends(require_viewer)):
     gate = ops_security_evidence_gate(max_age_seconds=max_age_seconds, _role=_role)
     if bool(gate.get("ok", False)):
         return gate
-    raise HTTPException(
-        status_code=503,
-        detail={
-            "error": "security evidence gate failed",
-            "attest_reason_code": gate.get("attest_reason_code"),
-            "freshness_reason_code": gate.get("freshness_reason_code"),
-            "artifact_dir": gate.get("artifact_dir"),
-            "report_age_seconds": gate.get("report_age_seconds"),
-            "max_age_seconds": gate.get("max_age_seconds"),
-        },
-    )
+    raise HTTPException(status_code=503, detail=_security_evidence_gate_failure_detail(gate))
 
 
 @app.post(
     "/api/ops/security-evidence/gate/assert",
     response_model=OpsSecurityEvidenceGateResponse,
+    responses={503: {"model": OpsSecurityEvidenceGateErrorResponse, "description": "Gate failed"}},
 )
 def ops_security_evidence_gate_assert(max_age_seconds: int = 86400, _role: str = Depends(require_interpreter)):
     gate = ops_security_evidence_gate(max_age_seconds=max_age_seconds, _role="viewer")
     if bool(gate.get("ok", False)):
         return gate
-    raise HTTPException(
-        status_code=503,
-        detail={
-            "error": "security evidence gate failed",
-            "attest_reason_code": gate.get("attest_reason_code"),
-            "freshness_reason_code": gate.get("freshness_reason_code"),
-            "artifact_dir": gate.get("artifact_dir"),
-            "report_age_seconds": gate.get("report_age_seconds"),
-            "max_age_seconds": gate.get("max_age_seconds"),
-        },
-    )
+    raise HTTPException(status_code=503, detail=_security_evidence_gate_failure_detail(gate))
 
 
 @app.post(

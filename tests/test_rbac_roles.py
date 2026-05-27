@@ -1912,6 +1912,13 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert security_evidence_gate_assert_post.get("operationId")
     assert security_evidence_gate_check_post.get("operationId")
     assert contracts_get.get("operationId")
+
+    gate_enforce_503 = security_evidence_gate_enforce_get.get("responses", {}).get("503", {})
+    gate_assert_503 = security_evidence_gate_assert_post.get("responses", {}).get("503", {})
+    gate_enforce_503_schema = gate_enforce_503.get("content", {}).get("application/json", {}).get("schema", {})
+    gate_assert_503_schema = gate_assert_503.get("content", {}).get("application/json", {}).get("schema", {})
+    assert gate_enforce_503_schema.get("$ref", "").endswith("/OpsSecurityEvidenceGateErrorResponse")
+    assert gate_assert_503_schema.get("$ref", "").endswith("/OpsSecurityEvidenceGateErrorResponse")
     assert contracts_verify_get.get("operationId")
     assert contracts_verify_post.get("operationId")
     assert runbook_get.get("operationId")
@@ -1938,6 +1945,8 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsSecurityEvidenceAttestResponse" in schemas
     assert "OpsSecurityEvidenceFreshnessResponse" in schemas
     assert "OpsSecurityEvidenceGateResponse" in schemas
+    assert "OpsSecurityEvidenceGateErrorDetail" in schemas
+    assert "OpsSecurityEvidenceGateErrorResponse" in schemas
     assert "OpsContractsResponse" in schemas
     assert "OpsRunbookResponse" in schemas
 
