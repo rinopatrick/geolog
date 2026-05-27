@@ -479,15 +479,22 @@ def test_audit_verify_export_has_valid_digest():
 
 
 def test_audit_verify_export_contains_report_shape():
-    r = client.get("/api/audit-log/verify/export", headers=_h("viewer"))
+    r = client.get("/api/audit-log/verify/export?limit=321", headers=_h("viewer"))
     assert r.status_code == 200
     data = r.json()
     payload = data.get("payload", {})
     report = payload.get("report", {})
+    trace = payload.get("trace", {})
     assert "generated_at" in payload
     assert "ok" in report
     assert "verified_entries" in report
     assert "issues" in report
+    assert "request_id" in trace
+    assert "auth_subject" in trace
+    assert "auth_role" in trace
+    assert "input" in trace and isinstance(trace.get("input"), dict)
+    assert int(trace.get("input", {}).get("limit", 0)) == 321
+    assert "code_version" in trace and isinstance(trace.get("code_version"), str)
     assert data.get("signature") is None
     assert data.get("signature_alg") is None
     assert data.get("signature_detached") is True

@@ -5507,6 +5507,7 @@ def _resolve_audit_export_signing_key(requested_kid: str | None = None):
 
 @app.get("/api/audit-log/verify/export")
 def export_audit_log_verification(
+    request: Request,
     limit: int = 2000,
     sign: bool = False,
     kid: str | None = None,
@@ -5517,6 +5518,13 @@ def export_audit_log_verification(
     payload = {
         "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
         "report": report,
+        "trace": {
+            "request_id": request.headers.get("X-Request-ID") or "",
+            "auth_subject": str(getattr(request.state, "auth_subject", "") or ""),
+            "auth_role": str(getattr(request.state, "user_role", "viewer") or "viewer"),
+            "input": {"limit": int(limit)},
+            "code_version": (os.getenv("GEOLOG_CODE_VERSION") or "unknown").strip() or "unknown",
+        },
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
