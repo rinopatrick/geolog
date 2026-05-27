@@ -8343,6 +8343,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/security-evidence/gate": "1.0",
         "/api/ops/security-evidence/gate/enforce": "1.0",
         "/api/ops/security-evidence/gate/assert": "1.0",
+        "/api/ops/security-evidence/gate/check": "1.0",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -8388,6 +8389,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/security-evidence/gate": "1.0",
                             "/api/ops/security-evidence/gate/enforce": "1.0",
                             "/api/ops/security-evidence/gate/assert": "1.0",
+                            "/api/ops/security-evidence/gate/check": "1.0",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
@@ -8634,6 +8636,14 @@ def ops_security_evidence_gate_assert(max_age_seconds: int = 86400, _role: str =
             "max_age_seconds": gate.get("max_age_seconds"),
         },
     )
+
+
+@app.post(
+    "/api/ops/security-evidence/gate/check",
+    response_model=OpsSecurityEvidenceGateResponse,
+)
+def ops_security_evidence_gate_check(max_age_seconds: int = 86400, _role: str = Depends(require_interpreter)):
+    return ops_security_evidence_gate(max_age_seconds=max_age_seconds, _role="viewer")
 
 
 @app.get(
