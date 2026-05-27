@@ -8120,6 +8120,7 @@ class OpsSecurityEvidenceGateResponse(BaseModel):
     gate_pass_ratio: float
     gate_fail_ratio: float
     gate_consistency_ok: bool
+    gate_consistency_reason: Literal["CONSISTENT", "COUNT_MISMATCH", "RATIO_MISMATCH"]
     attest_ok: bool
     freshness_ok: bool
     retention_ok: bool
@@ -8150,6 +8151,7 @@ class OpsSecurityEvidenceGateErrorDetail(BaseModel):
     gate_pass_ratio: float
     gate_fail_ratio: float
     gate_consistency_ok: bool
+    gate_consistency_reason: Literal["CONSISTENT", "COUNT_MISMATCH", "RATIO_MISMATCH"]
     strict_required_checks: bool
     defaulted_checks: bool
     requested_checks: list[str]
@@ -8388,10 +8390,10 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/security-evidence/attest": "1.0",
         "/api/ops/security-evidence/attest/latest": "1.0",
         "/api/ops/security-evidence/freshness": "1.0",
-        "/api/ops/security-evidence/gate": "1.13",
-        "/api/ops/security-evidence/gate/enforce": "1.13",
-        "/api/ops/security-evidence/gate/assert": "1.13",
-        "/api/ops/security-evidence/gate/check": "1.13",
+        "/api/ops/security-evidence/gate": "1.14",
+        "/api/ops/security-evidence/gate/enforce": "1.14",
+        "/api/ops/security-evidence/gate/assert": "1.14",
+        "/api/ops/security-evidence/gate/check": "1.14",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -8434,10 +8436,10 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/security-evidence/attest": "1.0",
                             "/api/ops/security-evidence/attest/latest": "1.0",
                             "/api/ops/security-evidence/freshness": "1.0",
-                            "/api/ops/security-evidence/gate": "1.13",
-                            "/api/ops/security-evidence/gate/enforce": "1.13",
-                            "/api/ops/security-evidence/gate/assert": "1.13",
-                            "/api/ops/security-evidence/gate/check": "1.13",
+                            "/api/ops/security-evidence/gate": "1.14",
+                            "/api/ops/security-evidence/gate/enforce": "1.14",
+                            "/api/ops/security-evidence/gate/assert": "1.14",
+                            "/api/ops/security-evidence/gate/check": "1.14",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
@@ -8688,9 +8690,11 @@ def ops_security_evidence_gate(
     gate_total_count = int(len(evaluated_checks))
     gate_pass_ratio = float(gate_passed_count / gate_total_count) if gate_total_count > 0 else 0.0
     gate_fail_ratio = float(gate_failed_count / gate_total_count) if gate_total_count > 0 else 0.0
-    gate_consistency_ok = bool(
-        (gate_failed_count + gate_passed_count == gate_total_count)
-        and abs((gate_pass_ratio + gate_fail_ratio) - 1.0) <= 1e-9 if gate_total_count > 0 else True
+    count_consistent = gate_failed_count + gate_passed_count == gate_total_count
+    ratio_consistent = abs((gate_pass_ratio + gate_fail_ratio) - 1.0) <= 1e-9 if gate_total_count > 0 else True
+    gate_consistency_ok = bool(count_consistent and ratio_consistent)
+    gate_consistency_reason = (
+        "CONSISTENT" if gate_consistency_ok else "COUNT_MISMATCH" if not count_consistent else "RATIO_MISMATCH"
     )
 
     return {
@@ -8702,6 +8706,7 @@ def ops_security_evidence_gate(
         "gate_pass_ratio": gate_pass_ratio,
         "gate_fail_ratio": gate_fail_ratio,
         "gate_consistency_ok": gate_consistency_ok,
+        "gate_consistency_reason": gate_consistency_reason,
         "attest_ok": attest_ok,
         "freshness_ok": freshness_ok,
         "retention_ok": retention_ok,
@@ -8746,6 +8751,7 @@ def _security_evidence_gate_failure_detail(gate: dict[str, Any]) -> dict[str, An
             )
             == int(len(gate.get("evaluated_checks") or []))
         ),
+        "gate_consistency_reason": "CONSISTENT",
         "strict_required_checks": bool(gate.get("strict_required_checks", False)),
         "defaulted_checks": bool(gate.get("defaulted_checks", False)),
         "requested_checks": gate.get("requested_checks", []),
