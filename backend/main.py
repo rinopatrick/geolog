@@ -7149,6 +7149,28 @@ def ops_metrics_prometheus(_role: str = Depends(require_viewer)):
     return StreamingResponse(iter(["\n".join(lines)]), media_type="text/plain; version=0.0.4")
 
 
+@app.get("/api/ops/health")
+def ops_health(db: Session = Depends(get_db), _role: str = Depends(require_viewer)):
+    """Operational health snapshot: db connectivity + SLO + alert summary."""
+    db_ok = True
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        db_ok = False
+
+    slo = ops_slo_status(_role)
+    alerts = ops_alerts(_role)
+
+    return {
+        "ok": bool(db_ok and alerts.get("ok", False)),
+        "db_ok": db_ok,
+        "slo_ok": bool(slo.get("ok", False)),
+        "alerts_ok": bool(alerts.get("ok", False)),
+        "alert_count": int(alerts.get("count", 0)),
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
 @app.post("/api/wells/{wid}/electrofacies-async", status_code=202)
 def electrofacies_async(wid: int, data: dict, _role: str = Depends(require_interpreter)):
     """Queue electrofacies clustering in background job."""

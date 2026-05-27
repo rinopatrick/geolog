@@ -883,3 +883,19 @@ def test_ops_metrics_prometheus_exposition_shape():
     assert "geolog_requests_total" in text
     assert "geolog_request_latency_ms_sum" in text
     assert "geolog_request_latency_ms_count" in text
+
+
+def test_ops_health_shape_and_access():
+    r = client.get("/api/ops/health", headers=_h("viewer"))
+    assert r.status_code == 200
+    data = r.json()
+    assert "ok" in data
+    assert "db_ok" in data
+    assert "slo_ok" in data
+    assert "alerts_ok" in data
+    assert "alert_count" in data
+
+
+def test_ops_health_unknown_role_allowed_as_viewer_floor():
+    r = client.get("/api/ops/health", headers=_h("unknown"))
+    assert r.status_code == 200
