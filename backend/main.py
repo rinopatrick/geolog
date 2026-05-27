@@ -7088,7 +7088,65 @@ def ops_metrics_recent(
     }
 
 
-@app.get("/api/ops/slo-status")
+class OpsSloTargets(BaseModel):
+    latency_ms_avg_max: float
+    latency_ms_p95_max: float
+    error_rate_max: float
+
+
+class OpsSloCurrent(BaseModel):
+    latency_ms_avg: float
+    latency_ms_p95: float
+    error_rate: float
+    requests_total: int
+    errors_5xx: int
+
+
+class OpsSloChecks(BaseModel):
+    latency_ok: bool
+    latency_avg_ok: bool
+    latency_p95_ok: bool
+    error_rate_ok: bool
+
+
+class OpsSloStatusResponse(BaseModel):
+    ok: bool
+    targets: OpsSloTargets
+    current: OpsSloCurrent
+    checks: OpsSloChecks
+    timestamp: str
+
+
+class OpsAlertsResponse(BaseModel):
+    ok: bool
+    alerts: list[dict[str, Any]]
+    count: int
+    severity_counts: dict[str, int]
+    code_counts: dict[str, int]
+    highest_severity: Literal["none", "warning", "critical"]
+    timestamp: str
+
+
+@app.get(
+    "/api/ops/slo-status",
+    response_model=OpsSloStatusResponse,
+    responses={
+        200: {
+            "description": "SLO evaluation snapshot",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "ok": True,
+                        "targets": {"latency_ms_avg_max": 500.0, "latency_ms_p95_max": 800.0, "error_rate_max": 0.01},
+                        "current": {"latency_ms_avg": 42.1, "latency_ms_p95": 88.2, "error_rate": 0.0, "requests_total": 123, "errors_5xx": 0},
+                        "checks": {"latency_ok": True, "latency_avg_ok": True, "latency_p95_ok": True, "error_rate_ok": True},
+                        "timestamp": "2026-01-01T00:00:00Z",
+                    }
+                }
+            },
+        }
+    },
+)
 def ops_slo_status(_role: str = Depends(require_viewer)):
     """Basic SLO evaluation snapshot from in-process counters."""
     target_latency_avg_ms = float(os.getenv("OPS_SLO_AVG_MS", "500") or 500)
@@ -7154,7 +7212,30 @@ def ops_slo_status(_role: str = Depends(require_viewer)):
     }
 
 
-@app.get("/api/ops/alerts")
+@app.get(
+    "/api/ops/alerts",
+    response_model=OpsAlertsResponse,
+    responses={
+        200: {
+            "description": "SLO breach alerts",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "ok": False,
+                        "alerts": [
+                            {"code": "LATENCY_P95_SLO_BREACH", "severity": "warning", "message": "latency_ms_p95 920.0 > target 800.0"}
+                        ],
+                        "count": 1,
+                        "severity_counts": {"warning": 1, "critical": 0},
+                        "code_counts": {"LATENCY_P95_SLO_BREACH": 1},
+                        "highest_severity": "warning",
+                        "timestamp": "2026-01-01T00:00:00Z",
+                    }
+                }
+            },
+        }
+    },
+)
 def ops_alerts(_role: str = Depends(require_viewer)):
     """Simple alert evaluation based on SLO snapshot."""
     slo = ops_slo_status(_role)

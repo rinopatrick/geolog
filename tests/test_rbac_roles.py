@@ -1037,6 +1037,22 @@ def test_ops_summary_openapi_contract_present():
     assert "slo" in props
 
 
+def test_ops_slo_and_alerts_openapi_contract_present():
+    r = client.get("/openapi.json")
+    assert r.status_code == 200
+    doc = r.json()
+
+    paths = doc.get("paths", {})
+    slo_get = paths.get("/api/ops/slo-status", {}).get("get", {})
+    alerts_get = paths.get("/api/ops/alerts", {}).get("get", {})
+    assert slo_get.get("operationId")
+    assert alerts_get.get("operationId")
+
+    schemas = doc.get("components", {}).get("schemas", {})
+    assert "OpsSloStatusResponse" in schemas
+    assert "OpsAlertsResponse" in schemas
+
+
 def test_ops_runbook_shape_and_alert_entries():
     r = client.get("/api/ops/runbook", headers=_h("viewer"))
     assert r.status_code == 200
