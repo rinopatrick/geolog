@@ -8115,10 +8115,14 @@ class OpsSecurityEvidenceGateResponse(BaseModel):
     ok: bool
     attest_ok: bool
     freshness_ok: bool
+    retention_ok: bool
     attest_reason_code: str | None = None
     freshness_reason_code: Literal["FRESH", "STALE", "EVIDENCE_MISSING"]
+    retention_reason_code: Literal["RETENTION_OK", "RETENTION_TOO_SHORT", "RETENTION_UNKNOWN"]
     artifact_dir: str
     report_age_seconds: int | None = None
+    retention_days: int | None = None
+    min_retention_days: int
     max_age_seconds: int
     timestamp: str
 
@@ -8127,8 +8131,11 @@ class OpsSecurityEvidenceGateErrorDetail(BaseModel):
     error: str
     attest_reason_code: str | None = None
     freshness_reason_code: Literal["FRESH", "STALE", "EVIDENCE_MISSING"]
+    retention_reason_code: Literal["RETENTION_OK", "RETENTION_TOO_SHORT", "RETENTION_UNKNOWN"]
     artifact_dir: str
     report_age_seconds: int | None = None
+    retention_days: int | None = None
+    min_retention_days: int
     max_age_seconds: int
 
 
@@ -8589,21 +8596,36 @@ def ops_security_evidence_freshness(max_age_seconds: int = 86400, _role: str = D
     "/api/ops/security-evidence/gate",
     response_model=OpsSecurityEvidenceGateResponse,
 )
-def ops_security_evidence_gate(max_age_seconds: int = 86400, _role: str = Depends(require_viewer)):
+def ops_security_evidence_gate(
+    max_age_seconds: int = 86400,
+    min_retention_days: int = 30,
+    _role: str = Depends(require_viewer),
+):
     max_age_seconds = max(60, int(max_age_seconds))
+    min_retention_days = max(1, int(min_retention_days))
     attest = ops_security_evidence_attest_latest(_role=_role)
     freshness = ops_security_evidence_freshness(max_age_seconds=max_age_seconds, _role=_role)
 
     attest_ok = bool(attest.get("ok", False))
     freshness_ok = bool(freshness.get("ok", False))
+    retention_days = attest.get("retention_days")
+    retention_ok = isinstance(retention_days, int) and retention_days >= min_retention_days
+    retention_reason_code = (
+        "RETENTION_OK" if retention_ok else "RETENTION_TOO_SHORT" if isinstance(retention_days, int) else "RETENTION_UNKNOWN"
+    )
+
     return {
-        "ok": attest_ok and freshness_ok,
+        "ok": attest_ok and freshness_ok and retention_ok,
         "attest_ok": attest_ok,
         "freshness_ok": freshness_ok,
+        "retention_ok": retention_ok,
         "attest_reason_code": attest.get("reason_code"),
         "freshness_reason_code": freshness.get("reason_code", "EVIDENCE_MISSING"),
+        "retention_reason_code": retention_reason_code,
         "artifact_dir": str(freshness.get("artifact_dir") or ""),
         "report_age_seconds": freshness.get("report_age_seconds"),
+        "retention_days": retention_days if isinstance(retention_days, int) else None,
+        "min_retention_days": min_retention_days,
         "max_age_seconds": int(freshness.get("max_age_seconds") or max_age_seconds),
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
@@ -8614,8 +8636,11 @@ def _security_evidence_gate_failure_detail(gate: dict[str, Any]) -> dict[str, An
         "error": "security evidence gate failed",
         "attest_reason_code": gate.get("attest_reason_code"),
         "freshness_reason_code": gate.get("freshness_reason_code"),
+        "retention_reason_code": gate.get("retention_reason_code"),
         "artifact_dir": gate.get("artifact_dir"),
         "report_age_seconds": gate.get("report_age_seconds"),
+        "retention_days": gate.get("retention_days"),
+        "min_retention_days": gate.get("min_retention_days"),
         "max_age_seconds": gate.get("max_age_seconds"),
     }
 
@@ -8625,8 +8650,16 @@ def _security_evidence_gate_failure_detail(gate: dict[str, Any]) -> dict[str, An
     response_model=OpsSecurityEvidenceGateResponse,
     responses={503: {"model": OpsSecurityEvidenceGateErrorResponse, "description": "Gate failed"}},
 )
-def ops_security_evidence_gate_enforce(max_age_seconds: int = 86400, _role: str = Depends(require_viewer)):
-    gate = ops_security_evidence_gate(max_age_seconds=max_age_seconds, _role=_role)
+def ops_security_evidence_gate_enforce(
+    max_age_seconds: int = 86400,
+    min_retention_days: int = 30,
+    _role: str = Depends(require_viewer),
+):
+    gate = ops_security_evidence_gate(
+        max_age_seconds=max_age_seconds,
+        min_retention_days=min_retention_days,
+        _role=_role,
+    )
     if bool(gate.get("ok", False)):
         return gate
     raise HTTPException(status_code=503, detail=_security_evidence_gate_failure_detail(gate))
@@ -8637,8 +8670,16 @@ def ops_security_evidence_gate_enforce(max_age_seconds: int = 86400, _role: str 
     response_model=OpsSecurityEvidenceGateResponse,
     responses={503: {"model": OpsSecurityEvidenceGateErrorResponse, "description": "Gate failed"}},
 )
-def ops_security_evidence_gate_assert(max_age_seconds: int = 86400, _role: str = Depends(require_interpreter)):
-    gate = ops_security_evidence_gate(max_age_seconds=max_age_seconds, _role="viewer")
+def ops_security_evidence_gate_assert(
+    max_age_seconds: int = 86400,
+    min_retention_days: int = 30,
+    _role: str = Depends(require_interpreter),
+):
+    gate = ops_security_evidence_gate(
+        max_age_seconds=max_age_seconds,
+        min_retention_days=min_retention_days,
+        _role="viewer",
+    )
     if bool(gate.get("ok", False)):
         return gate
     raise HTTPException(status_code=503, detail=_security_evidence_gate_failure_detail(gate))
@@ -8648,8 +8689,16 @@ def ops_security_evidence_gate_assert(max_age_seconds: int = 86400, _role: str =
     "/api/ops/security-evidence/gate/check",
     response_model=OpsSecurityEvidenceGateResponse,
 )
-def ops_security_evidence_gate_check(max_age_seconds: int = 86400, _role: str = Depends(require_interpreter)):
-    return ops_security_evidence_gate(max_age_seconds=max_age_seconds, _role="viewer")
+def ops_security_evidence_gate_check(
+    max_age_seconds: int = 86400,
+    min_retention_days: int = 30,
+    _role: str = Depends(require_interpreter),
+):
+    return ops_security_evidence_gate(
+        max_age_seconds=max_age_seconds,
+        min_retention_days=min_retention_days,
+        _role="viewer",
+    )
 
 
 @app.get(

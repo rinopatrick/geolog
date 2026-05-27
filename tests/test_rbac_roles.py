@@ -1498,6 +1498,24 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert fresh.get("stale") is False
             assert fresh.get("reason_code") == "FRESH"
 
+            rk = client.post(
+                "/api/ops/security-evidence/gate/check?max_age_seconds=86400&min_retention_days=31",
+                headers=_h("interpreter"),
+            )
+            assert rk.status_code == 200
+            retention_fail = rk.json()
+            assert retention_fail.get("ok") is False
+            assert retention_fail.get("retention_ok") is False
+            assert retention_fail.get("retention_reason_code") == "RETENTION_TOO_SHORT"
+
+            rka = client.post(
+                "/api/ops/security-evidence/gate/assert?max_age_seconds=86400&min_retention_days=31",
+                headers=_h("interpreter"),
+            )
+            assert rka.status_code == 503
+            kdetail = rka.json().get("detail", {})
+            assert kdetail.get("retention_reason_code") == "RETENTION_TOO_SHORT"
+
             old_ts = time.time() - 7200
             os.utime(report_path, (old_ts, old_ts))
 
@@ -1947,6 +1965,12 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsSecurityEvidenceGateResponse" in schemas
     assert "OpsSecurityEvidenceGateErrorDetail" in schemas
     assert "OpsSecurityEvidenceGateErrorResponse" in schemas
+    gate_schema = schemas.get("OpsSecurityEvidenceGateResponse", {})
+    gate_props = gate_schema.get("properties", {})
+    assert "retention_ok" in gate_props
+    assert "retention_reason_code" in gate_props
+    assert "retention_days" in gate_props
+    assert "min_retention_days" in gate_props
     assert "OpsContractsResponse" in schemas
     assert "OpsRunbookResponse" in schemas
 
