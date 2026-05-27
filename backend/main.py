@@ -8341,6 +8341,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/security-evidence/attest/latest": "1.0",
         "/api/ops/security-evidence/freshness": "1.0",
         "/api/ops/security-evidence/gate": "1.0",
+        "/api/ops/security-evidence/gate/enforce": "1.0",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -8384,6 +8385,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/security-evidence/attest/latest": "1.0",
                             "/api/ops/security-evidence/freshness": "1.0",
                             "/api/ops/security-evidence/gate": "1.0",
+                            "/api/ops/security-evidence/gate/enforce": "1.0",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
@@ -8588,6 +8590,27 @@ def ops_security_evidence_gate(max_age_seconds: int = 86400, _role: str = Depend
         "max_age_seconds": int(freshness.get("max_age_seconds") or max_age_seconds),
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
+
+
+@app.get(
+    "/api/ops/security-evidence/gate/enforce",
+    response_model=OpsSecurityEvidenceGateResponse,
+)
+def ops_security_evidence_gate_enforce(max_age_seconds: int = 86400, _role: str = Depends(require_viewer)):
+    gate = ops_security_evidence_gate(max_age_seconds=max_age_seconds, _role=_role)
+    if bool(gate.get("ok", False)):
+        return gate
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "error": "security evidence gate failed",
+            "attest_reason_code": gate.get("attest_reason_code"),
+            "freshness_reason_code": gate.get("freshness_reason_code"),
+            "artifact_dir": gate.get("artifact_dir"),
+            "report_age_seconds": gate.get("report_age_seconds"),
+            "max_age_seconds": gate.get("max_age_seconds"),
+        },
+    )
 
 
 @app.get(
