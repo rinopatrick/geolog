@@ -609,3 +609,97 @@ def test_audit_verify_export_hmac_unknown_kid_fails():
             os.environ.pop("AUDIT_EXPORT_HMAC_ACTIVE_KID", None)
         else:
             os.environ["AUDIT_EXPORT_HMAC_ACTIVE_KID"] = old_active
+
+
+def test_audit_verify_signature_endpoint_valid_and_mismatch():
+    import os
+
+    old = os.environ.get("AUDIT_EXPORT_HMAC_KEY")
+    os.environ["AUDIT_EXPORT_HMAC_KEY"] = "unit-test-key"
+    try:
+        exported = client.get("/api/audit-log/verify/export?sign=true", headers=_h("viewer"))
+        assert exported.status_code == 200
+        data = exported.json()
+
+        import json
+
+        payload_json = json.dumps(data["payload"], sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        ok_r = client.get(
+            "/api/audit-log/verify/signature",
+            headers=_h("viewer"),
+            params={
+                "payload": payload_json,
+                "signature": data["signature"],
+                "kid": data.get("signature_kid"),
+            },
+        )
+        assert ok_r.status_code == 200
+        ok_data = ok_r.json()
+        assert ok_data["ok"] is True
+        assert ok_data["reason"] == "signature_valid"
+
+        bad_r = client.get(
+            "/api/audit-log/verify/signature",
+            headers=_h("viewer"),
+            params={
+                "payload": payload_json,
+                "signature": "0" * 64,
+                "kid": data.get("signature_kid"),
+            },
+        )
+        assert bad_r.status_code == 200
+        bad_data = bad_r.json()
+        assert bad_data["ok"] is False
+        assert bad_data["reason"] == "signature_mismatch"
+    finally:
+        if old is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_KEY"] = old
+
+
+def test_audit_verify_signature_endpoint_unknown_kid_returns_fail_reason():
+    import os
+
+    old_json = os.environ.get("AUDIT_EXPORT_HMAC_KEYS_JSON")
+    old_active = os.environ.get("AUDIT_EXPORT_HMAC_ACTIVE_KID")
+    old_legacy = os.environ.get("AUDIT_EXPORT_HMAC_KEY")
+
+    os.environ["AUDIT_EXPORT_HMAC_KEYS_JSON"] = '{"k1":"key-one"}'
+    os.environ["AUDIT_EXPORT_HMAC_ACTIVE_KID"] = "k1"
+    os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
+
+    try:
+        exported = client.get("/api/audit-log/verify/export?sign=true&kid=k1", headers=_h("viewer"))
+        assert exported.status_code == 200
+        data = exported.json()
+
+        import json
+
+        payload_json = json.dumps(data["payload"], sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        r = client.get(
+            "/api/audit-log/verify/signature",
+            headers=_h("viewer"),
+            params={
+                "payload": payload_json,
+                "signature": data["signature"],
+                "kid": "missing",
+            },
+        )
+        assert r.status_code == 200
+        out = r.json()
+        assert out["ok"] is False
+        assert "unknown signature kid" in out["reason"]
+    finally:
+        if old_json is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_KEYS_JSON", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_KEYS_JSON"] = old_json
+        if old_active is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_ACTIVE_KID", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_ACTIVE_KID"] = old_active
+        if old_legacy is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_KEY"] = old_legacy

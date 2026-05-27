@@ -5410,6 +5410,9 @@ def _resolve_audit_export_signing_key(requested_kid: str | None = None):
     if requested_kid:
         if requested_kid in key_map:
             return requested_kid, key_map[requested_kid]
+        legacy = (os.getenv("AUDIT_EXPORT_HMAC_KEY") or "").strip()
+        if requested_kid == "legacy" and legacy:
+            return "legacy", legacy
         raise HTTPException(status_code=400, detail=f"unknown signature kid: {requested_kid}")
 
     if active_kid and active_kid in key_map:
@@ -5459,6 +5462,48 @@ def export_audit_log_verification(
         out["signature_kid"] = resolved_kid
 
     return out
+
+
+@app.get("/api/audit-log/verify/signature")
+def verify_audit_log_export_signature(payload: str, signature: str, kid: str | None = None):
+    """Verify detached HMAC signature for exported audit verification payload.
+
+    payload: canonical payload JSON string.
+    """
+    if not isinstance(payload, str) or not payload.strip():
+        raise HTTPException(status_code=400, detail="payload must be a non-empty JSON string")
+    if not isinstance(signature, str) or len(signature) != 64:
+        raise HTTPException(status_code=400, detail="signature must be a 64-char hex string")
+
+    try:
+        parsed_payload = json.loads(payload)
+    except Exception:
+        raise HTTPException(status_code=400, detail="payload must be valid JSON")
+
+    if not isinstance(parsed_payload, dict):
+        raise HTTPException(status_code=400, detail="payload JSON must be an object")
+
+    canonical = json.dumps(parsed_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+    try:
+        resolved_kid, key_raw = _resolve_audit_export_signing_key(kid or None)
+    except HTTPException as e:
+        return {
+            "ok": False,
+            "reason": str(e.detail),
+            "signature_alg": "hmac-sha256",
+            "signature_kid": kid or None,
+        }
+
+    expected = hmac.new(key_raw.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+    ok = hmac.compare_digest(expected, signature)
+
+    return {
+        "ok": ok,
+        "reason": "signature_valid" if ok else "signature_mismatch",
+        "signature_alg": "hmac-sha256",
+        "signature_kid": resolved_kid,
+    }
 
 
 # ─── Cross-Plot Matrix (multi-well) ──────────────────────────
