@@ -1026,6 +1026,10 @@ def test_ops_contracts_shape_and_access():
 
     assert data.get("api_group") == "ops-audit"
     assert "contract_version" in data
+    assert "digest_sha256" in data
+    digest = str(data.get("digest_sha256", ""))
+    assert len(digest) == 64
+    assert all(c in "0123456789abcdef" for c in digest.lower())
     endpoints = data.get("endpoints", {})
     assert isinstance(endpoints, dict)
     assert "/api/ops/summary" in endpoints
@@ -1091,6 +1095,10 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsHealthResponse" in schemas
     assert "OpsContractsResponse" in schemas
     assert "OpsRunbookResponse" in schemas
+
+    contracts_schema = schemas.get("OpsContractsResponse", {})
+    contracts_props = contracts_schema.get("properties", {})
+    assert "digest_sha256" in contracts_props
 
 
 def test_ops_runbook_shape_and_alert_entries():

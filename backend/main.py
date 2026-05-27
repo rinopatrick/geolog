@@ -7482,6 +7482,7 @@ class OpsContractsResponse(BaseModel):
     api_group: str
     contract_version: str
     endpoints: dict[str, str]
+    digest_sha256: str
     timestamp: str
 
 
@@ -7616,6 +7617,7 @@ def ops_summary(db: Session = Depends(get_db), _role: str = Depends(require_view
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
+                        "digest_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                         "timestamp": "2026-01-01T00:00:00Z",
                     }
                 }
@@ -7625,21 +7627,31 @@ def ops_summary(db: Session = Depends(get_db), _role: str = Depends(require_view
 )
 def ops_contracts(_role: str = Depends(require_viewer)):
     """Machine-readable contract/version registry for ops and audit APIs."""
+    endpoints = {
+        "/api/audit-log/verify/export": "1.2",
+        "/api/audit-log/verify/signature": "1.1",
+        "/api/ops/metrics": "1.0",
+        "/api/ops/metrics/recent": "1.1",
+        "/api/ops/metrics/prometheus": "1.0",
+        "/api/ops/slo-status": "1.1",
+        "/api/ops/alerts": "1.2",
+        "/api/ops/health": "1.0",
+        "/api/ops/runbook": "1.0",
+        "/api/ops/summary": "1.1",
+    }
+    digest_payload = {
+        "api_group": "ops-audit",
+        "contract_version": "2.0",
+        "endpoints": endpoints,
+    }
+    canonical = json.dumps(digest_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
     return {
         "api_group": "ops-audit",
         "contract_version": "2.0",
-        "endpoints": {
-            "/api/audit-log/verify/export": "1.2",
-            "/api/audit-log/verify/signature": "1.1",
-            "/api/ops/metrics": "1.0",
-            "/api/ops/metrics/recent": "1.1",
-            "/api/ops/metrics/prometheus": "1.0",
-            "/api/ops/slo-status": "1.1",
-            "/api/ops/alerts": "1.2",
-            "/api/ops/health": "1.0",
-            "/api/ops/runbook": "1.0",
-            "/api/ops/summary": "1.1",
-        },
+        "endpoints": endpoints,
+        "digest_sha256": digest,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
 
