@@ -7385,6 +7385,19 @@ def ops_health(db: Session = Depends(get_db), _role: str = Depends(require_viewe
     }
 
 
+class OpsRunbookEntry(BaseModel):
+    severity: Literal["warning", "critical"]
+    what_it_means: str
+    checks: list[str]
+    actions: list[str]
+
+
+class OpsRunbookResponse(BaseModel):
+    version: str
+    alerts: dict[str, OpsRunbookEntry]
+    timestamp: str
+
+
 class OpsSummaryStatus(BaseModel):
     db_ok: bool
     slo_ok: bool
@@ -7493,7 +7506,37 @@ def ops_summary(db: Session = Depends(get_db), _role: str = Depends(require_view
     }
 
 
-@app.get("/api/ops/runbook")
+@app.get(
+    "/api/ops/runbook",
+    response_model=OpsRunbookResponse,
+    responses={
+        200: {
+            "description": "Machine-readable runbook for known ops alert codes",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "version": "1.0",
+                        "alerts": {
+                            "LATENCY_AVG_SLO_BREACH": {
+                                "severity": "warning",
+                                "what_it_means": "Average API latency is above configured SLO threshold.",
+                                "checks": ["Call /api/ops/slo-status and verify avg target vs current"],
+                                "actions": ["Identify top high-latency endpoints and payload sizes"],
+                            },
+                            "ERROR_RATE_SLO_BREACH": {
+                                "severity": "critical",
+                                "what_it_means": "5xx error rate is above configured SLO threshold.",
+                                "checks": ["Call /api/ops/metrics and inspect requests_by_status"],
+                                "actions": ["Open incident and capture failing request samples"],
+                            },
+                        },
+                        "timestamp": "2026-01-01T00:00:00Z",
+                    }
+                }
+            },
+        }
+    },
+)
 def ops_runbook(_role: str = Depends(require_viewer)):
     """Machine-readable operator runbook for current alert codes."""
     return {
