@@ -321,6 +321,13 @@ cd /home/patrick/geolog-app
 python3 tests/test_parser.py
 ```
 
+### Browser e2e smoke (views + role-gates)
+```bash
+cd /home/patrick/geolog-app
+node scripts/e2e_panel_smoke.js
+node scripts/e2e_role_gate_smoke.js
+```
+
 ### With pytest
 ```bash
 cd /home/patrick/geolog-app
