@@ -172,6 +172,35 @@ def _ensure_audit_log_columns():
 _ensure_audit_log_columns()
 
 
+def _ensure_audit_log_immutability_triggers():
+    """Prevent updates/deletes on audit_log rows (append-only)."""
+    stmts = [
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_audit_log_no_update
+        BEFORE UPDATE ON audit_log
+        BEGIN
+            SELECT RAISE(ABORT, 'audit_log is immutable');
+        END;
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_audit_log_no_delete
+        BEFORE DELETE ON audit_log
+        BEGIN
+            SELECT RAISE(ABORT, 'audit_log is immutable');
+        END;
+        """,
+    ]
+    with engine.begin() as conn:
+        for stmt in stmts:
+            try:
+                conn.execute(text(stmt))
+            except Exception:
+                pass
+
+
+_ensure_audit_log_immutability_triggers()
+
+
 def _ensure_completion_table():
     """Create completion table for existing deployments without migrations."""
     ddl = """

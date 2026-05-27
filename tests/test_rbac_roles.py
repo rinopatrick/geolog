@@ -387,30 +387,66 @@ def test_audit_verify_endpoint_reports_ok_for_clean_chain():
 
 def test_audit_verify_endpoint_detects_tamper_gap():
     db = SessionLocal()
-    target_id = None
-    old_prev = None
+    bad_id = None
     try:
-        row = db.query(AuditLog).filter(AuditLog.action == "write:post").order_by(AuditLog.id.desc()).first()
-        assert row is not None
-        target_id = row.id
-        old_prev = row.prev_hash
-        row.prev_hash = "tampered_prev_hash"
+        prev = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
+        prev_hash = (prev.entry_hash if prev else "") or ""
+        bad = AuditLog(
+            action="write:post",
+            entity_type="api",
+            details="/api/fake",
+            request_id="tamper-test",
+            auth_subject="u-test",
+            auth_role="interpreter",
+            route_path="/api/fake",
+            method="POST",
+            status_code=200,
+            payload_hash="0" * 64,
+            prev_hash=prev_hash,
+            entry_hash="f" * 64,  # intentionally wrong
+        )
+        db.add(bad)
         db.commit()
+        bad_id = bad.id
     finally:
         db.close()
 
+    r = client.get("/api/audit-log/verify", headers=_h("viewer"))
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is False
+    assert any((it.get("id") == bad_id and it.get("type") == "entry_hash_mismatch") for it in data["issues"])
+
+
+def test_audit_log_update_is_blocked_by_trigger():
+    db = SessionLocal()
     try:
-        r = client.get("/api/audit-log/verify", headers=_h("viewer"))
-        assert r.status_code == 200
-        data = r.json()
-        assert data["ok"] is False
-        assert any((it.get("id") == target_id and it.get("type") == "prev_hash_mismatch") for it in data["issues"])
-    finally:
-        db2 = SessionLocal()
+        row = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
+        assert row is not None
+        row.details = "mutated"
+        blocked = False
         try:
-            row2 = db2.query(AuditLog).filter(AuditLog.id == target_id).first()
-            if row2 is not None:
-                row2.prev_hash = old_prev
-                db2.commit()
-        finally:
-            db2.close()
+            db.commit()
+        except Exception:
+            blocked = True
+            db.rollback()
+        assert blocked is True
+    finally:
+        db.close()
+
+
+def test_audit_log_delete_is_blocked_by_trigger():
+    db = SessionLocal()
+    try:
+        row = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
+        assert row is not None
+        blocked = False
+        try:
+            db.delete(row)
+            db.commit()
+        except Exception:
+            blocked = True
+            db.rollback()
+        assert blocked is True
+    finally:
+        db.close()
