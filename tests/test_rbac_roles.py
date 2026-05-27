@@ -132,3 +132,25 @@ def test_zonation_report_csv_contract():
     body = r.text
     assert "# ZONATION REPORT" in body
     assert "# SUMMARY" in body
+
+
+def test_auto_zone_from_tops_role_gate_viewer_blocked():
+    wells = client.get("/api/wells", headers=_h("viewer"))
+    assert wells.status_code == 200
+    data = wells.json()
+    assert isinstance(data, list) and len(data) > 0
+    wid = data[0]["id"]
+
+    r = client.post(f"/api/wells/{wid}/auto-zone-from-tops", headers=_h("viewer"))
+    assert r.status_code == 403
+
+
+def test_auto_zone_from_tops_interpreter_not_forbidden():
+    wells = client.get("/api/wells", headers=_h("viewer"))
+    assert wells.status_code == 200
+    data = wells.json()
+    assert isinstance(data, list) and len(data) > 0
+    wid = data[0]["id"]
+
+    r = client.post(f"/api/wells/{wid}/auto-zone-from-tops", headers=_h("interpreter"))
+    assert r.status_code != 403
