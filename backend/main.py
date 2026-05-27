@@ -8116,6 +8116,7 @@ class OpsSecurityEvidenceGateResponse(BaseModel):
     gate_reason_code: Literal["GATE_PASS", "GATE_FAIL"]
     gate_failed_count: int
     gate_passed_count: int
+    gate_total_count: int
     attest_ok: bool
     freshness_ok: bool
     retention_ok: bool
@@ -8142,6 +8143,7 @@ class OpsSecurityEvidenceGateErrorDetail(BaseModel):
     gate_reason_code: Literal["GATE_FAIL"]
     gate_failed_count: int
     gate_passed_count: int
+    gate_total_count: int
     strict_required_checks: bool
     defaulted_checks: bool
     requested_checks: list[str]
@@ -8380,10 +8382,10 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/security-evidence/attest": "1.0",
         "/api/ops/security-evidence/attest/latest": "1.0",
         "/api/ops/security-evidence/freshness": "1.0",
-        "/api/ops/security-evidence/gate": "1.9",
-        "/api/ops/security-evidence/gate/enforce": "1.9",
-        "/api/ops/security-evidence/gate/assert": "1.9",
-        "/api/ops/security-evidence/gate/check": "1.9",
+        "/api/ops/security-evidence/gate": "1.10",
+        "/api/ops/security-evidence/gate/enforce": "1.10",
+        "/api/ops/security-evidence/gate/assert": "1.10",
+        "/api/ops/security-evidence/gate/check": "1.10",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -8426,10 +8428,10 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/security-evidence/attest": "1.0",
                             "/api/ops/security-evidence/attest/latest": "1.0",
                             "/api/ops/security-evidence/freshness": "1.0",
-                            "/api/ops/security-evidence/gate": "1.9",
-                            "/api/ops/security-evidence/gate/enforce": "1.9",
-                            "/api/ops/security-evidence/gate/assert": "1.9",
-                            "/api/ops/security-evidence/gate/check": "1.9",
+                            "/api/ops/security-evidence/gate": "1.10",
+                            "/api/ops/security-evidence/gate/enforce": "1.10",
+                            "/api/ops/security-evidence/gate/assert": "1.10",
+                            "/api/ops/security-evidence/gate/check": "1.10",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
@@ -8677,12 +8679,14 @@ def ops_security_evidence_gate(
     failed_checks: list[str] = [c for c in evaluated_checks if not bool(check_status.get(c, False))]
     gate_failed_count = int(len(failed_checks))
     gate_passed_count = int(max(0, len(evaluated_checks) - gate_failed_count))
+    gate_total_count = int(len(evaluated_checks))
 
     return {
         "ok": gate_failed_count == 0,
         "gate_reason_code": "GATE_PASS" if gate_failed_count == 0 else "GATE_FAIL",
         "gate_failed_count": gate_failed_count,
         "gate_passed_count": gate_passed_count,
+        "gate_total_count": gate_total_count,
         "attest_ok": attest_ok,
         "freshness_ok": freshness_ok,
         "retention_ok": retention_ok,
@@ -8711,6 +8715,7 @@ def _security_evidence_gate_failure_detail(gate: dict[str, Any]) -> dict[str, An
         "gate_reason_code": "GATE_FAIL",
         "gate_failed_count": int(len(gate.get("failed_checks") or [])),
         "gate_passed_count": int(max(0, len(gate.get("evaluated_checks") or []) - len(gate.get("failed_checks") or []))),
+        "gate_total_count": int(len(gate.get("evaluated_checks") or [])),
         "strict_required_checks": bool(gate.get("strict_required_checks", False)),
         "defaulted_checks": bool(gate.get("defaulted_checks", False)),
         "requested_checks": gate.get("requested_checks", []),

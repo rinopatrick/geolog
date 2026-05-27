@@ -1535,7 +1535,9 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert with_invalid.get("gate_reason_code") in {"GATE_PASS", "GATE_FAIL"}
             assert isinstance(with_invalid.get("gate_failed_count"), int)
             assert isinstance(with_invalid.get("gate_passed_count"), int)
+            assert isinstance(with_invalid.get("gate_total_count"), int)
             assert with_invalid.get("gate_failed_count") + with_invalid.get("gate_passed_count") == len(with_invalid.get("evaluated_checks") or [])
+            assert with_invalid.get("gate_total_count") == len(with_invalid.get("evaluated_checks") or [])
 
             rk_defaulted = client.post(
                 "/api/ops/security-evidence/gate/check?max_age_seconds=86400&min_retention_days=31&required_checks=foo",
@@ -1548,7 +1550,9 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert defaulted.get("gate_reason_code") in {"GATE_PASS", "GATE_FAIL"}
             assert isinstance(defaulted.get("gate_failed_count"), int)
             assert isinstance(defaulted.get("gate_passed_count"), int)
+            assert isinstance(defaulted.get("gate_total_count"), int)
             assert defaulted.get("gate_failed_count") + defaulted.get("gate_passed_count") == len(defaulted.get("evaluated_checks") or [])
+            assert defaulted.get("gate_total_count") == len(defaulted.get("evaluated_checks") or [])
 
             rk_with_invalid_strict = client.post(
                 "/api/ops/security-evidence/gate/check?max_age_seconds=86400&min_retention_days=31&required_checks=attest,foo,attest&strict_required_checks=true",
@@ -1570,6 +1574,8 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert kdetail.get("retention_reason_code") == "RETENTION_TOO_SHORT"
             assert "retention" in (kdetail.get("failed_checks") or [])
             assert isinstance(kdetail.get("gate_passed_count"), int)
+            assert isinstance(kdetail.get("gate_total_count"), int)
+            assert kdetail.get("gate_total_count") == len(kdetail.get("evaluated_checks") or [])
 
             old_ts = time.time() - 7200
             os.utime(report_path, (old_ts, old_ts))
@@ -1829,10 +1835,10 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/security-evidence/gate/enforce" in endpoints
     assert "/api/ops/security-evidence/gate/assert" in endpoints
     assert "/api/ops/security-evidence/gate/check" in endpoints
-    assert endpoints.get("/api/ops/security-evidence/gate") == "1.9"
-    assert endpoints.get("/api/ops/security-evidence/gate/enforce") == "1.9"
-    assert endpoints.get("/api/ops/security-evidence/gate/assert") == "1.9"
-    assert endpoints.get("/api/ops/security-evidence/gate/check") == "1.9"
+    assert endpoints.get("/api/ops/security-evidence/gate") == "1.10"
+    assert endpoints.get("/api/ops/security-evidence/gate/enforce") == "1.10"
+    assert endpoints.get("/api/ops/security-evidence/gate/assert") == "1.10"
+    assert endpoints.get("/api/ops/security-evidence/gate/check") == "1.10"
     assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
@@ -2035,6 +2041,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "gate_reason_code" in gate_error_detail_props
     assert "gate_failed_count" in gate_error_detail_props
     assert "gate_passed_count" in gate_error_detail_props
+    assert "gate_total_count" in gate_error_detail_props
     assert "requested_checks" in gate_error_detail_props
     assert "ignored_checks" in gate_error_detail_props
     assert "duplicate_checks" in gate_error_detail_props
@@ -2051,6 +2058,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "gate_reason_code" in gate_props
     assert "gate_failed_count" in gate_props
     assert "gate_passed_count" in gate_props
+    assert "gate_total_count" in gate_props
     assert "requested_checks" in gate_props
     assert "ignored_checks" in gate_props
     assert "duplicate_checks" in gate_props
