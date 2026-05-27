@@ -909,7 +909,11 @@ def test_ops_alerts_can_report_breach_with_strict_env_thresholds():
         data = r.json()
         assert data["ok"] is False
         codes = {a.get("code") for a in data.get("alerts", [])}
-        assert "LATENCY_SLO_BREACH" in codes or "ERROR_RATE_SLO_BREACH" in codes
+        assert (
+            "LATENCY_AVG_SLO_BREACH" in codes
+            or "LATENCY_P95_SLO_BREACH" in codes
+            or "ERROR_RATE_SLO_BREACH" in codes
+        )
     finally:
         if old_lat is None:
             os.environ.pop("OPS_SLO_P95_MS", None)
@@ -956,14 +960,18 @@ def test_ops_runbook_shape_and_alert_entries():
 
     assert data.get("version") == "1.0"
     alerts = data.get("alerts", {})
-    assert "LATENCY_SLO_BREACH" in alerts
+    assert "LATENCY_AVG_SLO_BREACH" in alerts
+    assert "LATENCY_P95_SLO_BREACH" in alerts
     assert "ERROR_RATE_SLO_BREACH" in alerts
 
-    lat = alerts["LATENCY_SLO_BREACH"]
+    lat_avg = alerts["LATENCY_AVG_SLO_BREACH"]
+    lat_p95 = alerts["LATENCY_P95_SLO_BREACH"]
     err = alerts["ERROR_RATE_SLO_BREACH"]
-    assert lat.get("severity") == "warning"
+    assert lat_avg.get("severity") == "warning"
+    assert lat_p95.get("severity") == "warning"
     assert err.get("severity") == "critical"
-    assert isinstance(lat.get("checks"), list) and len(lat.get("checks")) > 0
+    assert isinstance(lat_avg.get("checks"), list) and len(lat_avg.get("checks")) > 0
+    assert isinstance(lat_p95.get("checks"), list) and len(lat_p95.get("checks")) > 0
     assert isinstance(err.get("actions"), list) and len(err.get("actions")) > 0
 
 

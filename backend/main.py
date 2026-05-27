@@ -7160,12 +7160,21 @@ def ops_alerts(_role: str = Depends(require_viewer)):
     slo = ops_slo_status(_role)
     alerts = []
 
-    if not slo["checks"]["latency_ok"]:
+    if not slo["checks"]["latency_avg_ok"]:
         alerts.append({
-            "code": "LATENCY_SLO_BREACH",
+            "code": "LATENCY_AVG_SLO_BREACH",
             "severity": "warning",
             "message": (
                 f"latency_ms_avg {slo['current']['latency_ms_avg']} > target {slo['targets']['latency_ms_avg_max']}"
+            ),
+        })
+
+    if not slo["checks"]["latency_p95_ok"]:
+        alerts.append({
+            "code": "LATENCY_P95_SLO_BREACH",
+            "severity": "warning",
+            "message": (
+                f"latency_ms_p95 {slo['current']['latency_ms_p95']} > target {slo['targets']['latency_ms_p95_max']}"
             ),
         })
 
@@ -7253,18 +7262,32 @@ def ops_runbook(_role: str = Depends(require_viewer)):
     return {
         "version": "1.0",
         "alerts": {
-            "LATENCY_SLO_BREACH": {
+            "LATENCY_AVG_SLO_BREACH": {
                 "severity": "warning",
                 "what_it_means": "Average API latency is above configured SLO threshold.",
                 "checks": [
                     "Call /api/ops/metrics and inspect latency_ms_avg + requests_by_status",
-                    "Call /api/ops/slo-status and verify target vs current",
+                    "Call /api/ops/slo-status and verify avg target vs current",
                     "Inspect recent structured logs for slow endpoints",
                 ],
                 "actions": [
                     "Identify top high-latency endpoints and payload sizes",
                     "Reduce heavy query scope or enable/adjust decimation where applicable",
                     "Scale worker/container resources if sustained load increased",
+                ],
+            },
+            "LATENCY_P95_SLO_BREACH": {
+                "severity": "warning",
+                "what_it_means": "P95 API latency is above configured SLO threshold.",
+                "checks": [
+                    "Call /api/ops/slo-status and verify p95 target vs current",
+                    "Call /api/ops/metrics/recent with status/path filters to isolate spikes",
+                    "Inspect structured logs for long-tail endpoints",
+                ],
+                "actions": [
+                    "Profile worst endpoints and identify tail-latency bottlenecks",
+                    "Apply caching/precomputation for expensive repeated reads",
+                    "Tune infra resources or concurrency limits for burst traffic",
                 ],
             },
             "ERROR_RATE_SLO_BREACH": {
