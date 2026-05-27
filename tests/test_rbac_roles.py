@@ -1445,6 +1445,61 @@ def test_ops_security_evidence_attest_rejects_viewer_role():
     assert r.status_code == 403
 
 
+def test_ops_security_evidence_attest_latest_happy_path():
+    import os
+    import json
+    import tempfile
+    import hashlib
+    import hmac
+
+    old_dir = os.environ.get("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR")
+    old_key = os.environ.get("BACKUP_DRILL_SIGNING_KEY")
+
+    with tempfile.TemporaryDirectory() as td:
+        report = {"backup_ok": True, "restore_ok": True}
+        report_bytes = json.dumps(report, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        report_sha = hashlib.sha256(report_bytes).hexdigest()
+
+        report_path = os.path.join(td, "report.json")
+        sig_path = os.path.join(td, "report.signature.json")
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(report, f)
+
+        key = "unit-test-secret"
+        sig = hmac.new(key.encode("utf-8"), report_sha.encode("utf-8"), hashlib.sha256).hexdigest()
+        with open(sig_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "report_sha256": report_sha,
+                    "signature_alg": "hmac-sha256",
+                    "signature_kid": "backup-drill",
+                    "signature": sig,
+                    "retention_days": 30,
+                },
+                f,
+            )
+
+        os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = td
+        os.environ["BACKUP_DRILL_SIGNING_KEY"] = key
+
+        try:
+            r = client.get("/api/ops/security-evidence/attest/latest", headers=_h("viewer"))
+            assert r.status_code == 200
+            data = r.json()
+            assert data.get("ok") is True
+            assert data.get("reason_code") == "ATTEST_VALID"
+            assert data.get("report_sha256") == report_sha
+        finally:
+            if old_dir is None:
+                os.environ.pop("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR", None)
+            else:
+                os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
+            if old_key is None:
+                os.environ.pop("BACKUP_DRILL_SIGNING_KEY", None)
+            else:
+                os.environ["BACKUP_DRILL_SIGNING_KEY"] = old_key
+
+
 def test_ops_security_evidence_manifest_sign_happy_path():
     import os
     import json
@@ -1644,6 +1699,7 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/security-evidence/manifest" in endpoints
     assert "/api/ops/security-evidence/manifest/verify-signature" in endpoints
     assert "/api/ops/security-evidence/attest" in endpoints
+    assert "/api/ops/security-evidence/attest/latest" in endpoints
     assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
@@ -1769,6 +1825,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     security_evidence_manifest_verify_get = security_evidence_manifest_verify_path.get("get", {})
     security_evidence_manifest_verify_post = security_evidence_manifest_verify_path.get("post", {})
     security_evidence_attest_post = paths.get("/api/ops/security-evidence/attest", {}).get("post", {})
+    security_evidence_attest_latest_get = paths.get("/api/ops/security-evidence/attest/latest", {}).get("get", {})
     contracts_get = paths.get("/api/ops/contracts", {}).get("get", {})
     contracts_verify_path = paths.get("/api/ops/contracts/verify-signature", {})
     contracts_verify_get = contracts_verify_path.get("get", {})
@@ -1790,6 +1847,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert security_evidence_manifest_verify_get.get("operationId")
     assert security_evidence_manifest_verify_post.get("operationId")
     assert security_evidence_attest_post.get("operationId")
+    assert security_evidence_attest_latest_get.get("operationId")
     assert contracts_get.get("operationId")
     assert contracts_verify_get.get("operationId")
     assert contracts_verify_post.get("operationId")

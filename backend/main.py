@@ -8099,6 +8099,93 @@ class OpsSecurityEvidenceAttestResponse(BaseModel):
     timestamp: str
 
 
+def _attest_security_evidence_payload(report: dict[str, Any] | None, signature_obj: dict[str, Any] | None) -> dict[str, Any]:
+    if not report:
+        return {
+            "ok": False,
+            "reason": "report object is required",
+            "reason_code": "MISSING_REPORT",
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+    if not signature_obj:
+        return {
+            "ok": False,
+            "reason": "signature object is required",
+            "reason_code": "MISSING_SIGNATURE",
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+
+    report_bytes = json.dumps(report, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    report_sha = hashlib.sha256(report_bytes).hexdigest()
+
+    declared_sha = str(signature_obj.get("report_sha256", "") or "").strip().lower()
+    signature_alg = str(signature_obj.get("signature_alg", "") or "").strip() or None
+    signature_kid = str(signature_obj.get("signature_kid", "") or "").strip() or None
+    sig = str(signature_obj.get("signature", "") or "").strip().lower()
+    rd = signature_obj.get("retention_days")
+    retention_days = int(rd) if isinstance(rd, int) else None
+
+    if not declared_sha or declared_sha != report_sha:
+        return {
+            "ok": False,
+            "reason": "report_sha256 mismatch",
+            "reason_code": "DIGEST_MISMATCH",
+            "report_sha256": report_sha,
+            "signature_alg": signature_alg,
+            "signature_kid": signature_kid,
+            "retention_days": retention_days,
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+
+    if signature_alg == "hmac-sha256":
+        if not sig or len(sig) != 64 or any(c not in "0123456789abcdef" for c in sig):
+            return {
+                "ok": False,
+                "reason": "signature must be 64-char hex",
+                "reason_code": "INVALID_SIGNATURE_FORMAT",
+                "report_sha256": report_sha,
+                "signature_alg": signature_alg,
+                "signature_kid": signature_kid,
+                "retention_days": retention_days,
+                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            }
+        key = (os.getenv("BACKUP_DRILL_SIGNING_KEY") or "").strip()
+        if not key:
+            return {
+                "ok": False,
+                "reason": "BACKUP_DRILL_SIGNING_KEY is required for hmac-sha256 verification",
+                "reason_code": "HMAC_KEY_MISSING",
+                "report_sha256": report_sha,
+                "signature_alg": signature_alg,
+                "signature_kid": signature_kid,
+                "retention_days": retention_days,
+                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            }
+        expected = hmac.new(key.encode("utf-8"), report_sha.encode("utf-8"), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            return {
+                "ok": False,
+                "reason": "hmac signature mismatch",
+                "reason_code": "HMAC_SIGNATURE_MISMATCH",
+                "report_sha256": report_sha,
+                "signature_alg": signature_alg,
+                "signature_kid": signature_kid,
+                "retention_days": retention_days,
+                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            }
+
+    return {
+        "ok": True,
+        "reason": "evidence attestation valid",
+        "reason_code": "ATTEST_VALID",
+        "report_sha256": report_sha,
+        "signature_alg": signature_alg,
+        "signature_kid": signature_kid,
+        "retention_days": retention_days,
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
 class OpsSummaryStatus(BaseModel):
     db_ok: bool
     slo_ok: bool
@@ -8227,6 +8314,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/security-evidence/manifest": "1.0",
         "/api/ops/security-evidence/manifest/verify-signature": "1.0",
         "/api/ops/security-evidence/attest": "1.0",
+        "/api/ops/security-evidence/attest/latest": "1.0",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -8267,6 +8355,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/security-evidence/manifest": "1.0",
                             "/api/ops/security-evidence/manifest/verify-signature": "1.0",
                             "/api/ops/security-evidence/attest": "1.0",
+                            "/api/ops/security-evidence/attest/latest": "1.0",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
@@ -8347,91 +8436,49 @@ def ops_security_evidence_attest(
 ):
     report = body.report if isinstance(body.report, dict) else None
     signature_obj = body.signature if isinstance(body.signature, dict) else None
+    return _attest_security_evidence_payload(report, signature_obj)
 
-    if not report:
-        return {
-            "ok": False,
-            "reason": "report object is required",
-            "reason_code": "MISSING_REPORT",
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-        }
-    if not signature_obj:
-        return {
-            "ok": False,
-            "reason": "signature object is required",
-            "reason_code": "MISSING_SIGNATURE",
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-        }
 
-    report_bytes = json.dumps(report, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    report_sha = hashlib.sha256(report_bytes).hexdigest()
+@app.get(
+    "/api/ops/security-evidence/attest/latest",
+    response_model=OpsSecurityEvidenceAttestResponse,
+)
+def ops_security_evidence_attest_latest(_role: str = Depends(require_viewer)):
+    artifact_dir = (os.getenv("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
+    report_path = os.path.join(artifact_dir, "report.json")
+    sig_path = os.path.join(artifact_dir, "report.signature.json")
 
-    declared_sha = str(signature_obj.get("report_sha256", "") or "").strip().lower()
-    signature_alg = str(signature_obj.get("signature_alg", "") or "").strip() or None
-    signature_kid = str(signature_obj.get("signature_kid", "") or "").strip() or None
-    sig = str(signature_obj.get("signature", "") or "").strip().lower()
-    rd = signature_obj.get("retention_days")
-    retention_days = int(rd) if isinstance(rd, int) else None
+    if not (os.path.exists(report_path) and os.path.exists(sig_path)):
+        try:
+            candidates = []
+            for name in os.listdir(artifact_dir):
+                sub = os.path.join(artifact_dir, name)
+                rp = os.path.join(sub, "report.json")
+                sp = os.path.join(sub, "report.signature.json")
+                if os.path.isdir(sub) and os.path.exists(rp) and os.path.exists(sp):
+                    candidates.append((os.path.getmtime(rp), rp, sp))
+            if candidates:
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                _, report_path, sig_path = candidates[0]
+        except Exception:
+            pass
 
-    if not declared_sha or declared_sha != report_sha:
-        return {
-            "ok": False,
-            "reason": "report_sha256 mismatch",
-            "reason_code": "DIGEST_MISMATCH",
-            "report_sha256": report_sha,
-            "signature_alg": signature_alg,
-            "signature_kid": signature_kid,
-            "retention_days": retention_days,
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-        }
+    report_obj = None
+    signature_obj = None
 
-    if signature_alg == "hmac-sha256":
-        if not sig or len(sig) != 64 or any(c not in "0123456789abcdef" for c in sig):
-            return {
-                "ok": False,
-                "reason": "signature must be 64-char hex",
-                "reason_code": "INVALID_SIGNATURE_FORMAT",
-                "report_sha256": report_sha,
-                "signature_alg": signature_alg,
-                "signature_kid": signature_kid,
-                "retention_days": retention_days,
-                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-            }
-        key = (os.getenv("BACKUP_DRILL_SIGNING_KEY") or "").strip()
-        if not key:
-            return {
-                "ok": False,
-                "reason": "BACKUP_DRILL_SIGNING_KEY is required for hmac-sha256 verification",
-                "reason_code": "HMAC_KEY_MISSING",
-                "report_sha256": report_sha,
-                "signature_alg": signature_alg,
-                "signature_kid": signature_kid,
-                "retention_days": retention_days,
-                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-            }
-        expected = hmac.new(key.encode("utf-8"), report_sha.encode("utf-8"), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, sig):
-            return {
-                "ok": False,
-                "reason": "hmac signature mismatch",
-                "reason_code": "HMAC_SIGNATURE_MISMATCH",
-                "report_sha256": report_sha,
-                "signature_alg": signature_alg,
-                "signature_kid": signature_kid,
-                "retention_days": retention_days,
-                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-            }
+    try:
+        with open(report_path, "r", encoding="utf-8") as f:
+            report_obj = json.load(f)
+    except Exception:
+        report_obj = None
 
-    return {
-        "ok": True,
-        "reason": "evidence attestation valid",
-        "reason_code": "ATTEST_VALID",
-        "report_sha256": report_sha,
-        "signature_alg": signature_alg,
-        "signature_kid": signature_kid,
-        "retention_days": retention_days,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-    }
+    try:
+        with open(sig_path, "r", encoding="utf-8") as f:
+            signature_obj = json.load(f)
+    except Exception:
+        signature_obj = None
+
+    return _attest_security_evidence_payload(report_obj, signature_obj)
 
 
 @app.get(

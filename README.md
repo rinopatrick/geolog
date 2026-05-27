@@ -376,6 +376,7 @@ Ops status endpoints:
 - `/api/ops/security-evidence/manifest`
 - `/api/ops/security-evidence/manifest/verify-signature` (GET viewer+, POST interpreter+)
 - `/api/ops/security-evidence/attest` (POST, interpreter+)
+- `/api/ops/security-evidence/attest/latest` (GET, viewer+)
 - `/api/ops/evidence-status?probe=true`
 
 Security governance docs:
