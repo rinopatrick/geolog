@@ -1019,6 +1019,24 @@ def test_ops_summary_unknown_role_allowed_as_viewer_floor():
     assert r.status_code == 200
 
 
+def test_ops_summary_openapi_contract_present():
+    r = client.get("/openapi.json")
+    assert r.status_code == 200
+    doc = r.json()
+
+    op = doc.get("paths", {}).get("/api/ops/summary", {}).get("get", {})
+    assert op.get("operationId")
+
+    schemas = doc.get("components", {}).get("schemas", {})
+    summary = schemas.get("OpsSummaryResponse", {})
+    props = summary.get("properties", {})
+    assert "contract_version" in props
+    assert "status" in props
+    assert "alerts" in props
+    assert "traffic" in props
+    assert "slo" in props
+
+
 def test_ops_runbook_shape_and_alert_entries():
     r = client.get("/api/ops/runbook", headers=_h("viewer"))
     assert r.status_code == 200

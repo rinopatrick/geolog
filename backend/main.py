@@ -7275,7 +7275,78 @@ def ops_health(db: Session = Depends(get_db), _role: str = Depends(require_viewe
     }
 
 
-@app.get("/api/ops/summary")
+class OpsSummaryStatus(BaseModel):
+    db_ok: bool
+    slo_ok: bool
+    alerts_ok: bool
+
+
+class OpsSummaryAlerts(BaseModel):
+    count: int
+    highest_severity: Literal["none", "warning", "critical"]
+    severity_counts: dict[str, int]
+    code_counts: dict[str, int]
+
+
+class OpsSummaryTraffic(BaseModel):
+    requests_total: int
+    latency_ms_avg: float
+    error_rate: float
+    recent_events_size: int
+
+
+class OpsSummarySlo(BaseModel):
+    targets: dict[str, Any]
+    current: dict[str, Any]
+    checks: dict[str, Any]
+
+
+class OpsSummaryResponse(BaseModel):
+    ok: bool
+    contract_version: str
+    status: OpsSummaryStatus
+    alerts: OpsSummaryAlerts
+    traffic: OpsSummaryTraffic
+    slo: OpsSummarySlo
+    timestamp: str
+
+
+@app.get(
+    "/api/ops/summary",
+    response_model=OpsSummaryResponse,
+    responses={
+        200: {
+            "description": "Aggregated ops summary snapshot",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "ok": True,
+                        "contract_version": "1.1",
+                        "status": {"db_ok": True, "slo_ok": True, "alerts_ok": True},
+                        "alerts": {
+                            "count": 0,
+                            "highest_severity": "none",
+                            "severity_counts": {"warning": 0, "critical": 0},
+                            "code_counts": {},
+                        },
+                        "traffic": {
+                            "requests_total": 123,
+                            "latency_ms_avg": 42.1,
+                            "error_rate": 0.0,
+                            "recent_events_size": 50,
+                        },
+                        "slo": {
+                            "targets": {"latency_ms_avg_max": 500.0, "latency_ms_p95_max": 800.0, "error_rate_max": 0.01},
+                            "current": {"latency_ms_avg": 42.1, "latency_ms_p95": 88.2, "error_rate": 0.0, "requests_total": 123, "errors_5xx": 0},
+                            "checks": {"latency_ok": True, "latency_avg_ok": True, "latency_p95_ok": True, "error_rate_ok": True},
+                        },
+                        "timestamp": "2026-01-01T00:00:00Z",
+                    }
+                }
+            },
+        }
+    },
+)
 def ops_summary(db: Session = Depends(get_db), _role: str = Depends(require_viewer)):
     """One-shot ops summary for dashboards and external monitors."""
     health = ops_health(db, _role)
