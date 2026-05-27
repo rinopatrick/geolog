@@ -5464,26 +5464,13 @@ def export_audit_log_verification(
     return out
 
 
-@app.get("/api/audit-log/verify/signature")
-def verify_audit_log_export_signature(payload: str, signature: str, kid: str | None = None):
-    """Verify detached HMAC signature for exported audit verification payload.
-
-    payload: canonical payload JSON string.
-    """
-    if not isinstance(payload, str) or not payload.strip():
-        raise HTTPException(status_code=400, detail="payload must be a non-empty JSON string")
+def _verify_audit_export_signature_payload(payload_obj: dict, signature: str, kid: str | None = None):
+    if not isinstance(payload_obj, dict):
+        raise HTTPException(status_code=400, detail="payload JSON must be an object")
     if not isinstance(signature, str) or len(signature) != 64:
         raise HTTPException(status_code=400, detail="signature must be a 64-char hex string")
 
-    try:
-        parsed_payload = json.loads(payload)
-    except Exception:
-        raise HTTPException(status_code=400, detail="payload must be valid JSON")
-
-    if not isinstance(parsed_payload, dict):
-        raise HTTPException(status_code=400, detail="payload JSON must be an object")
-
-    canonical = json.dumps(parsed_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    canonical = json.dumps(payload_obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
     try:
         resolved_kid, key_raw = _resolve_audit_export_signing_key(kid or None)
@@ -5504,6 +5491,35 @@ def verify_audit_log_export_signature(payload: str, signature: str, kid: str | N
         "signature_alg": "hmac-sha256",
         "signature_kid": resolved_kid,
     }
+
+
+@app.get("/api/audit-log/verify/signature")
+def verify_audit_log_export_signature(payload: str, signature: str, kid: str | None = None):
+    """Verify detached HMAC signature for exported audit verification payload.
+
+    payload: canonical payload JSON string.
+    """
+    if not isinstance(payload, str) or not payload.strip():
+        raise HTTPException(status_code=400, detail="payload must be a non-empty JSON string")
+
+    try:
+        parsed_payload = json.loads(payload)
+    except Exception:
+        raise HTTPException(status_code=400, detail="payload must be valid JSON")
+
+    return _verify_audit_export_signature_payload(parsed_payload, signature, kid)
+
+
+@app.post("/api/audit-log/verify/signature")
+def verify_audit_log_export_signature_post(
+    data: dict,
+    _role: str = Depends(require_interpreter),
+):
+    """M2M verifier. Body: {payload: object, signature: hex64, kid?: string}."""
+    payload_obj = data.get("payload") if isinstance(data, dict) else None
+    signature = (data.get("signature") or "") if isinstance(data, dict) else ""
+    kid = (data.get("kid") or "") if isinstance(data, dict) else ""
+    return _verify_audit_export_signature_payload(payload_obj, signature, kid or None)
 
 
 # ─── Cross-Plot Matrix (multi-well) ──────────────────────────

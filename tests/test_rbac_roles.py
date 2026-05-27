@@ -703,3 +703,54 @@ def test_audit_verify_signature_endpoint_unknown_kid_returns_fail_reason():
             os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
         else:
             os.environ["AUDIT_EXPORT_HMAC_KEY"] = old_legacy
+
+
+def test_audit_verify_signature_post_requires_interpreter():
+    r = client.post(
+        "/api/audit-log/verify/signature",
+        headers=_h("viewer"),
+        json={"payload": {}, "signature": "0" * 64},
+    )
+    assert r.status_code == 403
+
+
+def test_audit_verify_signature_post_interpreter_ok_and_mismatch():
+    import os
+
+    old = os.environ.get("AUDIT_EXPORT_HMAC_KEY")
+    os.environ["AUDIT_EXPORT_HMAC_KEY"] = "unit-test-key"
+    try:
+        exported = client.get("/api/audit-log/verify/export?sign=true", headers=_h("viewer"))
+        assert exported.status_code == 200
+        data = exported.json()
+
+        ok_r = client.post(
+            "/api/audit-log/verify/signature",
+            headers=_h("interpreter"),
+            json={
+                "payload": data["payload"],
+                "signature": data["signature"],
+                "kid": data.get("signature_kid"),
+            },
+        )
+        assert ok_r.status_code == 200
+        assert ok_r.json().get("ok") is True
+
+        bad_r = client.post(
+            "/api/audit-log/verify/signature",
+            headers=_h("interpreter"),
+            json={
+                "payload": data["payload"],
+                "signature": "f" * 64,
+                "kid": data.get("signature_kid"),
+            },
+        )
+        assert bad_r.status_code == 200
+        out = bad_r.json()
+        assert out.get("ok") is False
+        assert out.get("reason") == "signature_mismatch"
+    finally:
+        if old is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_KEY"] = old
