@@ -366,6 +366,7 @@ Security CI workflow:
   - `bandit -q -r backend -lll` (high severity gate)
   - `pip-audit -r requirements.txt`
   - backup/restore drill smoke
+  - API attestation gate for `artifacts/backup-drill` (`scripts/security_evidence_attest.py`)
   - hardcoded secret token regex gate
 
 Ops status endpoints:

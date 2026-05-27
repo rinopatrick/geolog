@@ -7816,8 +7816,30 @@ def ops_security_posture_status(_role: str = Depends(require_viewer)):
 @app.get("/api/ops/security-evidence-status", response_model=OpsSecurityEvidenceStatusResponse)
 def ops_security_evidence_status(_role: str = Depends(require_viewer)):
     artifact_dir = (os.getenv("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
-    report_path = os.path.join(artifact_dir, "report.json")
-    sig_path = os.path.join(artifact_dir, "report.signature.json")
+
+    def _resolve_paths(base_dir: str):
+        root_report = os.path.join(base_dir, "report.json")
+        root_sig = os.path.join(base_dir, "report.signature.json")
+        if os.path.exists(root_report) and os.path.exists(root_sig):
+            return root_report, root_sig
+
+        try:
+            candidates = []
+            for name in os.listdir(base_dir):
+                sub = os.path.join(base_dir, name)
+                rp = os.path.join(sub, "report.json")
+                sp = os.path.join(sub, "report.signature.json")
+                if os.path.isdir(sub) and os.path.exists(rp) and os.path.exists(sp):
+                    candidates.append((os.path.getmtime(rp), rp, sp))
+            if candidates:
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                _, rp, sp = candidates[0]
+                return rp, sp
+        except Exception:
+            return root_report, root_sig
+        return root_report, root_sig
+
+    report_path, sig_path = _resolve_paths(artifact_dir)
 
     report_present = os.path.exists(report_path)
     signature_present = os.path.exists(sig_path)
@@ -7852,7 +7874,8 @@ def ops_security_evidence_status(_role: str = Depends(require_viewer)):
                 key = (os.getenv("BACKUP_DRILL_SIGNING_KEY") or "").strip()
                 sig = str(sig_obj.get("signature", "") or "").strip().lower()
                 if key and sig and len(sig) == 64 and all(c in "0123456789abcdef" for c in sig):
-                    expected = hmac.new(key.encode("utf-8"), report_bytes, hashlib.sha256).hexdigest()
+                    signed_value = (declared_sha or report_sha).encode("utf-8")
+                    expected = hmac.new(key.encode("utf-8"), signed_value, hashlib.sha256).hexdigest()
                     hmac_signature_valid = hmac.compare_digest(expected, sig)
                 else:
                     hmac_signature_valid = False
@@ -8238,7 +8261,7 @@ def ops_security_evidence_attest(
                 "retention_days": retention_days,
                 "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
             }
-        expected = hmac.new(key.encode("utf-8"), report_bytes, hashlib.sha256).hexdigest()
+        expected = hmac.new(key.encode("utf-8"), report_sha.encode("utf-8"), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected, sig):
             return {
                 "ok": False,

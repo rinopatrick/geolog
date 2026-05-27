@@ -1249,7 +1249,7 @@ def test_ops_security_evidence_status_valid_signature_happy_path():
 
         key = "unit-test-secret"
         sha = hashlib.sha256(report_bytes).hexdigest()
-        sig = hmac.new(key.encode("utf-8"), report_bytes, hashlib.sha256).hexdigest()
+        sig = hmac.new(key.encode("utf-8"), sha.encode("utf-8"), hashlib.sha256).hexdigest()
         with open(sig_path, "w", encoding="utf-8") as f:
             json.dump(
                 {
@@ -1328,6 +1328,73 @@ def test_ops_security_evidence_status_detects_mismatch():
                 os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
 
 
+def test_ops_security_evidence_status_resolves_latest_nested_artifact_dir():
+    import os
+    import json
+    import hmac
+    import hashlib
+    import tempfile
+    import pathlib
+
+    old_dir = os.environ.get("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR")
+    old_key = os.environ.get("BACKUP_DRILL_SIGNING_KEY")
+
+    with tempfile.TemporaryDirectory() as td:
+        base = pathlib.Path(td)
+        key = "nested-secret"
+
+        old = base / "20260101T000000Z"
+        old.mkdir(parents=True, exist_ok=True)
+        old_report = json.dumps({"v": "old"}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        (old / "report.json").write_bytes(old_report)
+        (old / "report.signature.json").write_text(
+            json.dumps(
+                {
+                    "report_sha256": hashlib.sha256(old_report).hexdigest(),
+                    "signature_alg": "hmac-sha256",
+                    "signature": hmac.new(key.encode("utf-8"), hashlib.sha256(old_report).hexdigest().encode("utf-8"), hashlib.sha256).hexdigest(),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        latest = base / "20260101T000001Z"
+        latest.mkdir(parents=True, exist_ok=True)
+        latest_report = json.dumps({"v": "latest"}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        (latest / "report.json").write_bytes(latest_report)
+        (latest / "report.signature.json").write_text(
+            json.dumps(
+                {
+                    "report_sha256": hashlib.sha256(latest_report).hexdigest(),
+                    "signature_alg": "hmac-sha256",
+                    "signature": hmac.new(key.encode("utf-8"), hashlib.sha256(latest_report).hexdigest().encode("utf-8"), hashlib.sha256).hexdigest(),
+                    "signature_kid": "k-latest",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = str(base)
+        os.environ["BACKUP_DRILL_SIGNING_KEY"] = key
+
+        try:
+            r = client.get("/api/ops/security-evidence-status", headers=_h("viewer"))
+            assert r.status_code == 200
+            data = r.json()
+            assert data.get("ok") is True
+            assert data.get("signature_kid") == "k-latest"
+            assert data.get("hmac_signature_valid") is True
+        finally:
+            if old_dir is None:
+                os.environ.pop("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR", None)
+            else:
+                os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
+            if old_key is None:
+                os.environ.pop("BACKUP_DRILL_SIGNING_KEY", None)
+            else:
+                os.environ["BACKUP_DRILL_SIGNING_KEY"] = old_key
+
+
 def test_ops_security_evidence_attest_happy_path():
     import os
     import json
@@ -1340,7 +1407,7 @@ def test_ops_security_evidence_attest_happy_path():
 
     old_key = os.environ.get("BACKUP_DRILL_SIGNING_KEY")
     os.environ["BACKUP_DRILL_SIGNING_KEY"] = "unit-test-secret"
-    sig = hmac.new(b"unit-test-secret", report_bytes, hashlib.sha256).hexdigest()
+    sig = hmac.new(b"unit-test-secret", report_sha.encode("utf-8"), hashlib.sha256).hexdigest()
 
     try:
         r = client.post(
@@ -1376,6 +1443,60 @@ def test_ops_security_evidence_attest_rejects_viewer_role():
         json={"report": {"x": 1}, "signature": {"report_sha256": "0" * 64}},
     )
     assert r.status_code == 403
+
+
+def test_ops_security_evidence_attest_reports_digest_mismatch():
+    r = client.post(
+        "/api/ops/security-evidence/attest",
+        headers=_h("interpreter"),
+        json={
+            "report": {"backup_ok": True},
+            "signature": {
+                "report_sha256": "0" * 64,
+                "signature_alg": "hmac-sha256",
+                "signature": "f" * 64,
+            },
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data.get("ok") is False
+    assert data.get("reason_code") == "DIGEST_MISMATCH"
+
+
+def test_ops_security_evidence_attest_requires_key_for_hmac():
+    import os
+    import json
+    import hashlib
+
+    report = {"backup_ok": True}
+    report_bytes = json.dumps(report, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    report_sha = hashlib.sha256(report_bytes).hexdigest()
+
+    old_key = os.environ.get("BACKUP_DRILL_SIGNING_KEY")
+    os.environ.pop("BACKUP_DRILL_SIGNING_KEY", None)
+    try:
+        r = client.post(
+            "/api/ops/security-evidence/attest",
+            headers=_h("interpreter"),
+            json={
+                "report": report,
+                "signature": {
+                    "report_sha256": report_sha,
+                    "signature_alg": "hmac-sha256",
+                    "signature": "f" * 64,
+                },
+            },
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data.get("ok") is False
+        assert data.get("reason_code") == "HMAC_KEY_MISSING"
+    finally:
+        if old_key is None:
+            os.environ.pop("BACKUP_DRILL_SIGNING_KEY", None)
+        else:
+            os.environ["BACKUP_DRILL_SIGNING_KEY"] = old_key
 
 
 def test_ops_health_unknown_role_allowed_as_viewer_floor():
