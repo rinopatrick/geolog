@@ -7662,6 +7662,11 @@ class OpsSecurityEvidenceManifestResponse(BaseModel):
     timestamp: str
 
 
+class OpsSecurityEvidenceManifestVerifyRequest(BaseModel):
+    signature: str = Field(..., min_length=64, max_length=64, pattern="^[0-9a-fA-F]{64}$")
+    kid: str | None = None
+
+
 @app.get(
     "/api/ops/health",
     response_model=OpsHealthResponse,
@@ -7988,6 +7993,61 @@ def ops_security_evidence_manifest(sign: bool = False, kid: str | None = None, _
     return out
 
 
+@app.get(
+    "/api/ops/security-evidence/manifest/verify-signature",
+    response_model=AuditSignatureVerifyResponse,
+)
+def ops_security_evidence_manifest_verify_signature(
+    signature: str,
+    kid: str | None = None,
+    _role: str = Depends(require_viewer),
+):
+    payload = ops_security_evidence_manifest(sign=False, kid=None, _role=_role)
+    if not bool(payload.get("ok", False)):
+        return {
+            "ok": False,
+            "reason": "evidence manifest unavailable",
+            "reason_code": "KEY_RESOLUTION_ERROR",
+            "signature_alg": "hmac-sha256",
+            "signature_kid": kid or None,
+        }
+    payload_obj = {
+        "artifact_dir": payload.get("artifact_dir"),
+        "report_path": payload.get("report_path"),
+        "signature_path": payload.get("signature_path"),
+        "report_sha256": payload.get("report_sha256"),
+        "signature_sha256": payload.get("signature_sha256"),
+    }
+    return _verify_audit_export_signature_payload(payload_obj, signature, kid)
+
+
+@app.post(
+    "/api/ops/security-evidence/manifest/verify-signature",
+    response_model=AuditSignatureVerifyResponse,
+)
+def ops_security_evidence_manifest_verify_signature_post(
+    body: OpsSecurityEvidenceManifestVerifyRequest,
+    _role: str = Depends(require_interpreter),
+):
+    payload = ops_security_evidence_manifest(sign=False, kid=None, _role="viewer")
+    if not bool(payload.get("ok", False)):
+        return {
+            "ok": False,
+            "reason": "evidence manifest unavailable",
+            "reason_code": "KEY_RESOLUTION_ERROR",
+            "signature_alg": "hmac-sha256",
+            "signature_kid": body.kid or None,
+        }
+    payload_obj = {
+        "artifact_dir": payload.get("artifact_dir"),
+        "report_path": payload.get("report_path"),
+        "signature_path": payload.get("signature_path"),
+        "report_sha256": payload.get("report_sha256"),
+        "signature_sha256": payload.get("signature_sha256"),
+    }
+    return _verify_audit_export_signature_payload(payload_obj, body.signature, body.kid)
+
+
 class OpsRunbookEntry(BaseModel):
     severity: Literal["warning", "critical"]
     what_it_means: str
@@ -8165,6 +8225,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/security-posture-status": "1.0",
         "/api/ops/security-evidence-status": "1.0",
         "/api/ops/security-evidence/manifest": "1.0",
+        "/api/ops/security-evidence/manifest/verify-signature": "1.0",
         "/api/ops/security-evidence/attest": "1.0",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
@@ -8204,6 +8265,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/security-posture-status": "1.0",
                             "/api/ops/security-evidence-status": "1.0",
                             "/api/ops/security-evidence/manifest": "1.0",
+                            "/api/ops/security-evidence/manifest/verify-signature": "1.0",
                             "/api/ops/security-evidence/attest": "1.0",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",

@@ -1477,6 +1477,23 @@ def test_ops_security_evidence_manifest_sign_happy_path():
             assert data.get("signature_kid") == "k1"
             assert len(str(data.get("bundle_digest_sha256") or "")) == 64
             assert len(str(data.get("signature") or "")) == 64
+
+            sig = str(data.get("signature") or "")
+            rv = client.get(f"/api/ops/security-evidence/manifest/verify-signature?kid=k1&signature={sig}", headers=_h("viewer"))
+            assert rv.status_code == 200
+            out = rv.json()
+            assert out.get("ok") is True
+            assert out.get("reason_code") == "SIGNATURE_VALID"
+
+            rp = client.post(
+                "/api/ops/security-evidence/manifest/verify-signature",
+                headers=_h("interpreter"),
+                json={"signature": sig, "kid": "k1"},
+            )
+            assert rp.status_code == 200
+            outp = rp.json()
+            assert outp.get("ok") is True
+            assert outp.get("reason_code") == "SIGNATURE_VALID"
         finally:
             if old_dir is None:
                 os.environ.pop("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR", None)
@@ -1490,6 +1507,15 @@ def test_ops_security_evidence_manifest_sign_happy_path():
                 os.environ.pop("AUDIT_EXPORT_HMAC_ACTIVE_KID", None)
             else:
                 os.environ["AUDIT_EXPORT_HMAC_ACTIVE_KID"] = old_active
+
+
+def test_ops_security_evidence_manifest_verify_post_rejects_viewer():
+    r = client.post(
+        "/api/ops/security-evidence/manifest/verify-signature",
+        headers=_h("viewer"),
+        json={"signature": "f" * 64, "kid": "k1"},
+    )
+    assert r.status_code == 403
 
 
 def test_ops_security_evidence_attest_reports_digest_mismatch():
@@ -1616,6 +1642,7 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/security-posture-status" in endpoints
     assert "/api/ops/security-evidence-status" in endpoints
     assert "/api/ops/security-evidence/manifest" in endpoints
+    assert "/api/ops/security-evidence/manifest/verify-signature" in endpoints
     assert "/api/ops/security-evidence/attest" in endpoints
     assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
@@ -1738,6 +1765,9 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     security_posture_get = paths.get("/api/ops/security-posture-status", {}).get("get", {})
     security_evidence_get = paths.get("/api/ops/security-evidence-status", {}).get("get", {})
     security_evidence_manifest_get = paths.get("/api/ops/security-evidence/manifest", {}).get("get", {})
+    security_evidence_manifest_verify_path = paths.get("/api/ops/security-evidence/manifest/verify-signature", {})
+    security_evidence_manifest_verify_get = security_evidence_manifest_verify_path.get("get", {})
+    security_evidence_manifest_verify_post = security_evidence_manifest_verify_path.get("post", {})
     security_evidence_attest_post = paths.get("/api/ops/security-evidence/attest", {}).get("post", {})
     contracts_get = paths.get("/api/ops/contracts", {}).get("get", {})
     contracts_verify_path = paths.get("/api/ops/contracts/verify-signature", {})
@@ -1757,6 +1787,8 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert security_posture_get.get("operationId")
     assert security_evidence_get.get("operationId")
     assert security_evidence_manifest_get.get("operationId")
+    assert security_evidence_manifest_verify_get.get("operationId")
+    assert security_evidence_manifest_verify_post.get("operationId")
     assert security_evidence_attest_post.get("operationId")
     assert contracts_get.get("operationId")
     assert contracts_verify_get.get("operationId")
@@ -1780,6 +1812,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsSecurityPostureStatusResponse" in schemas
     assert "OpsSecurityEvidenceStatusResponse" in schemas
     assert "OpsSecurityEvidenceManifestResponse" in schemas
+    assert "OpsSecurityEvidenceManifestVerifyRequest" in schemas
     assert "OpsSecurityEvidenceAttestRequest" in schemas
     assert "OpsSecurityEvidenceAttestResponse" in schemas
     assert "OpsContractsResponse" in schemas
