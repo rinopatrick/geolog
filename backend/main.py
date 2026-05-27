@@ -7197,12 +7197,19 @@ def ops_alerts(_role: str = Depends(require_viewer)):
         if code:
             code_counts[code] = int(code_counts.get(code, 0)) + 1
 
+    highest_severity = "none"
+    if int(severity_counts.get("critical", 0)) > 0:
+        highest_severity = "critical"
+    elif int(severity_counts.get("warning", 0)) > 0:
+        highest_severity = "warning"
+
     return {
         "ok": len(alerts) == 0,
         "alerts": alerts,
         "count": len(alerts),
         "severity_counts": severity_counts,
         "code_counts": code_counts,
+        "highest_severity": highest_severity,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
 

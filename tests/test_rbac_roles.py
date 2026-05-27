@@ -892,9 +892,11 @@ def test_ops_alerts_shape_and_access():
     assert "count" in data
     assert "severity_counts" in data
     assert "code_counts" in data
+    assert "highest_severity" in data
     assert isinstance(data["alerts"], list)
     assert isinstance(data["severity_counts"], dict)
     assert isinstance(data["code_counts"], dict)
+    assert data["highest_severity"] in {"none", "warning", "critical"}
     assert "warning" in data["severity_counts"]
     assert "critical" in data["severity_counts"]
 
@@ -922,12 +924,20 @@ def test_ops_alerts_can_report_breach_with_strict_env_thresholds():
         )
         sev = data.get("severity_counts", {})
         codes_count = data.get("code_counts", {})
+        hs = data.get("highest_severity")
         assert isinstance(sev, dict)
         assert isinstance(codes_count, dict)
+        assert hs in {"none", "warning", "critical"}
         assert int(sev.get("warning", 0)) >= 0
         assert int(sev.get("critical", 0)) >= 0
         assert int(sev.get("warning", 0)) + int(sev.get("critical", 0)) == int(data.get("count", 0))
         assert sum(int(v) for v in codes_count.values()) == int(data.get("count", 0))
+        if int(sev.get("critical", 0)) > 0:
+            assert hs == "critical"
+        elif int(sev.get("warning", 0)) > 0:
+            assert hs == "warning"
+        else:
+            assert hs == "none"
     finally:
         if old_lat is None:
             os.environ.pop("OPS_SLO_P95_MS", None)
