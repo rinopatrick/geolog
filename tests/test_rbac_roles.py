@@ -899,3 +899,26 @@ def test_ops_health_shape_and_access():
 def test_ops_health_unknown_role_allowed_as_viewer_floor():
     r = client.get("/api/ops/health", headers=_h("unknown"))
     assert r.status_code == 200
+
+
+def test_ops_runbook_shape_and_alert_entries():
+    r = client.get("/api/ops/runbook", headers=_h("viewer"))
+    assert r.status_code == 200
+    data = r.json()
+
+    assert data.get("version") == "1.0"
+    alerts = data.get("alerts", {})
+    assert "LATENCY_SLO_BREACH" in alerts
+    assert "ERROR_RATE_SLO_BREACH" in alerts
+
+    lat = alerts["LATENCY_SLO_BREACH"]
+    err = alerts["ERROR_RATE_SLO_BREACH"]
+    assert lat.get("severity") == "warning"
+    assert err.get("severity") == "critical"
+    assert isinstance(lat.get("checks"), list) and len(lat.get("checks")) > 0
+    assert isinstance(err.get("actions"), list) and len(err.get("actions")) > 0
+
+
+def test_ops_runbook_unknown_role_allowed_as_viewer_floor():
+    r = client.get("/api/ops/runbook", headers=_h("unknown"))
+    assert r.status_code == 200

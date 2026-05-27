@@ -7171,6 +7171,45 @@ def ops_health(db: Session = Depends(get_db), _role: str = Depends(require_viewe
     }
 
 
+@app.get("/api/ops/runbook")
+def ops_runbook(_role: str = Depends(require_viewer)):
+    """Machine-readable operator runbook for current alert codes."""
+    return {
+        "version": "1.0",
+        "alerts": {
+            "LATENCY_SLO_BREACH": {
+                "severity": "warning",
+                "what_it_means": "Average API latency is above configured SLO threshold.",
+                "checks": [
+                    "Call /api/ops/metrics and inspect latency_ms_avg + requests_by_status",
+                    "Call /api/ops/slo-status and verify target vs current",
+                    "Inspect recent structured logs for slow endpoints",
+                ],
+                "actions": [
+                    "Identify top high-latency endpoints and payload sizes",
+                    "Reduce heavy query scope or enable/adjust decimation where applicable",
+                    "Scale worker/container resources if sustained load increased",
+                ],
+            },
+            "ERROR_RATE_SLO_BREACH": {
+                "severity": "critical",
+                "what_it_means": "5xx error rate is above configured SLO threshold.",
+                "checks": [
+                    "Call /api/ops/metrics and inspect requests_by_status",
+                    "Check /api/ops/health for db_ok and alerts summary",
+                    "Inspect backend error logs around spike window",
+                ],
+                "actions": [
+                    "Rollback latest risky change if correlated with spike",
+                    "Mitigate failing endpoint path (feature flag/route guard)",
+                    "Open incident and capture failing request samples",
+                ],
+            },
+        },
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
 @app.post("/api/wells/{wid}/electrofacies-async", status_code=202)
 def electrofacies_async(wid: int, data: dict, _role: str = Depends(require_interpreter)):
     """Queue electrofacies clustering in background job."""
