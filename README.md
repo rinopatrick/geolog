@@ -367,11 +367,13 @@ Security CI workflow:
   - `pip-audit -r requirements.txt`
   - backup/restore drill smoke
   - API attestation gate for `artifacts/backup-drill` (`scripts/security_evidence_attest.py`)
+  - signed manifest gate (`/api/ops/security-evidence/manifest?sign=true`)
   - hardcoded secret token regex gate
 
 Ops status endpoints:
 - `/api/ops/security-posture-status`
 - `/api/ops/security-evidence-status`
+- `/api/ops/security-evidence/manifest`
 - `/api/ops/security-evidence/attest` (POST, interpreter+)
 - `/api/ops/evidence-status?probe=true`
 

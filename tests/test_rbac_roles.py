@@ -1445,6 +1445,53 @@ def test_ops_security_evidence_attest_rejects_viewer_role():
     assert r.status_code == 403
 
 
+def test_ops_security_evidence_manifest_sign_happy_path():
+    import os
+    import json
+    import tempfile
+    import hashlib
+
+    old_dir = os.environ.get("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR")
+    old_ring = os.environ.get("AUDIT_EXPORT_HMAC_KEYS_JSON")
+    old_active = os.environ.get("AUDIT_EXPORT_HMAC_ACTIVE_KID")
+
+    with tempfile.TemporaryDirectory() as td:
+        report = {"backup_ok": True}
+        report_path = os.path.join(td, "report.json")
+        sig_path = os.path.join(td, "report.signature.json")
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(report, f)
+        with open(sig_path, "w", encoding="utf-8") as f:
+            json.dump({"report_sha256": hashlib.sha256(json.dumps(report).encode("utf-8")).hexdigest()}, f)
+
+        os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = td
+        os.environ["AUDIT_EXPORT_HMAC_KEYS_JSON"] = '{"k1":"secret-one"}'
+        os.environ["AUDIT_EXPORT_HMAC_ACTIVE_KID"] = "k1"
+
+        try:
+            r = client.get("/api/ops/security-evidence/manifest?sign=true", headers=_h("viewer"))
+            assert r.status_code == 200
+            data = r.json()
+            assert data.get("ok") is True
+            assert data.get("signature_alg") == "hmac-sha256"
+            assert data.get("signature_kid") == "k1"
+            assert len(str(data.get("bundle_digest_sha256") or "")) == 64
+            assert len(str(data.get("signature") or "")) == 64
+        finally:
+            if old_dir is None:
+                os.environ.pop("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR", None)
+            else:
+                os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
+            if old_ring is None:
+                os.environ.pop("AUDIT_EXPORT_HMAC_KEYS_JSON", None)
+            else:
+                os.environ["AUDIT_EXPORT_HMAC_KEYS_JSON"] = old_ring
+            if old_active is None:
+                os.environ.pop("AUDIT_EXPORT_HMAC_ACTIVE_KID", None)
+            else:
+                os.environ["AUDIT_EXPORT_HMAC_ACTIVE_KID"] = old_active
+
+
 def test_ops_security_evidence_attest_reports_digest_mismatch():
     r = client.post(
         "/api/ops/security-evidence/attest",
@@ -1568,6 +1615,7 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/evidence-status" in endpoints
     assert "/api/ops/security-posture-status" in endpoints
     assert "/api/ops/security-evidence-status" in endpoints
+    assert "/api/ops/security-evidence/manifest" in endpoints
     assert "/api/ops/security-evidence/attest" in endpoints
     assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
@@ -1689,6 +1737,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     evidence_status_get = paths.get("/api/ops/evidence-status", {}).get("get", {})
     security_posture_get = paths.get("/api/ops/security-posture-status", {}).get("get", {})
     security_evidence_get = paths.get("/api/ops/security-evidence-status", {}).get("get", {})
+    security_evidence_manifest_get = paths.get("/api/ops/security-evidence/manifest", {}).get("get", {})
     security_evidence_attest_post = paths.get("/api/ops/security-evidence/attest", {}).get("post", {})
     contracts_get = paths.get("/api/ops/contracts", {}).get("get", {})
     contracts_verify_path = paths.get("/api/ops/contracts/verify-signature", {})
@@ -1707,6 +1756,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert evidence_status_get.get("operationId")
     assert security_posture_get.get("operationId")
     assert security_evidence_get.get("operationId")
+    assert security_evidence_manifest_get.get("operationId")
     assert security_evidence_attest_post.get("operationId")
     assert contracts_get.get("operationId")
     assert contracts_verify_get.get("operationId")
@@ -1729,6 +1779,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsEvidenceStatusResponse" in schemas
     assert "OpsSecurityPostureStatusResponse" in schemas
     assert "OpsSecurityEvidenceStatusResponse" in schemas
+    assert "OpsSecurityEvidenceManifestResponse" in schemas
     assert "OpsSecurityEvidenceAttestRequest" in schemas
     assert "OpsSecurityEvidenceAttestResponse" in schemas
     assert "OpsContractsResponse" in schemas

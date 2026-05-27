@@ -55,6 +55,7 @@ jobs:
         env:
           BACKUP_DRILL_SIGNING_KEY: ${{ secrets.BACKUP_DRILL_SIGNING_KEY }}
           GEOLOG_ENV: dev
+          AUDIT_EXPORT_HMAC_KEY: ${{ secrets.BACKUP_DRILL_SIGNING_KEY }}
         run: |
           python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 >/tmp/geolog-api.log 2>&1 &
           API_PID=$!
@@ -71,6 +72,16 @@ jobs:
           raise SystemExit('api not ready')
           PY
           python scripts/security_evidence_attest.py --base-url http://127.0.0.1:8000 --artifact-dir artifacts/backup-drill
+          python - <<'PY'
+          import json, urllib.request
+          req = urllib.request.Request('http://127.0.0.1:8000/api/ops/security-evidence/manifest?sign=true', headers={'X-User-Role':'viewer'})
+          with urllib.request.urlopen(req, timeout=10) as r:
+              data = json.loads(r.read().decode('utf-8'))
+          assert data.get('ok') is True, data
+          assert data.get('signature_alg') == 'hmac-sha256', data
+          assert isinstance(data.get('signature'), str) and len(data['signature']) == 64, data
+          print('manifest gate passed')
+          PY
 
       - name: Upload backup-drill evidence artifact
         uses: actions/upload-artifact@v4

@@ -7648,6 +7648,20 @@ class OpsSecurityEvidenceStatusResponse(BaseModel):
     timestamp: str
 
 
+class OpsSecurityEvidenceManifestResponse(BaseModel):
+    ok: bool
+    artifact_dir: str
+    report_path: str | None = None
+    signature_path: str | None = None
+    report_sha256: str | None = None
+    signature_sha256: str | None = None
+    bundle_digest_sha256: str | None = None
+    signature: str | None = None
+    signature_alg: str | None = None
+    signature_kid: str | None = None
+    timestamp: str
+
+
 @app.get(
     "/api/ops/health",
     response_model=OpsHealthResponse,
@@ -7904,6 +7918,76 @@ def ops_security_evidence_status(_role: str = Depends(require_viewer)):
     }
 
 
+@app.get("/api/ops/security-evidence/manifest", response_model=OpsSecurityEvidenceManifestResponse)
+def ops_security_evidence_manifest(sign: bool = False, kid: str | None = None, _role: str = Depends(require_viewer)):
+    artifact_dir = (os.getenv("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
+
+    report_path = os.path.join(artifact_dir, "report.json")
+    sig_path = os.path.join(artifact_dir, "report.signature.json")
+    if not (os.path.exists(report_path) and os.path.exists(sig_path)):
+        try:
+            candidates = []
+            for name in os.listdir(artifact_dir):
+                sub = os.path.join(artifact_dir, name)
+                rp = os.path.join(sub, "report.json")
+                sp = os.path.join(sub, "report.signature.json")
+                if os.path.isdir(sub) and os.path.exists(rp) and os.path.exists(sp):
+                    candidates.append((os.path.getmtime(rp), rp, sp))
+            if candidates:
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                _, report_path, sig_path = candidates[0]
+        except Exception:
+            pass
+
+    if not (os.path.exists(report_path) and os.path.exists(sig_path)):
+        return {
+            "ok": False,
+            "artifact_dir": artifact_dir,
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+
+    with open(report_path, "rb") as f:
+        report_bytes = f.read()
+    with open(sig_path, "rb") as f:
+        sig_bytes = f.read()
+
+    report_sha = hashlib.sha256(report_bytes).hexdigest()
+    signature_sha = hashlib.sha256(sig_bytes).hexdigest()
+
+    payload = {
+        "artifact_dir": artifact_dir,
+        "report_path": report_path,
+        "signature_path": sig_path,
+        "report_sha256": report_sha,
+        "signature_sha256": signature_sha,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    bundle_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    out = {
+        "ok": True,
+        "artifact_dir": artifact_dir,
+        "report_path": report_path,
+        "signature_path": sig_path,
+        "report_sha256": report_sha,
+        "signature_sha256": signature_sha,
+        "bundle_digest_sha256": bundle_digest,
+        "signature": None,
+        "signature_alg": None,
+        "signature_kid": None,
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+    if sign:
+        resolved_kid, key_raw = _resolve_audit_export_signing_key(kid)
+        sig = hmac.new(key_raw.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+        out["signature"] = sig
+        out["signature_alg"] = "hmac-sha256"
+        out["signature_kid"] = resolved_kid
+
+    return out
+
+
 class OpsRunbookEntry(BaseModel):
     severity: Literal["warning", "critical"]
     what_it_means: str
@@ -8080,6 +8164,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/evidence-status": "1.0",
         "/api/ops/security-posture-status": "1.0",
         "/api/ops/security-evidence-status": "1.0",
+        "/api/ops/security-evidence/manifest": "1.0",
         "/api/ops/security-evidence/attest": "1.0",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
@@ -8118,6 +8203,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/evidence-status": "1.0",
                             "/api/ops/security-posture-status": "1.0",
                             "/api/ops/security-evidence-status": "1.0",
+                            "/api/ops/security-evidence/manifest": "1.0",
                             "/api/ops/security-evidence/attest": "1.0",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
