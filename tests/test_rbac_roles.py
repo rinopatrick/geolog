@@ -1533,6 +1533,7 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert with_invalid.get("duplicate_checks") == ["attest"]
             assert with_invalid.get("strict_required_checks") is False
             assert with_invalid.get("gate_reason_code") in {"GATE_PASS", "GATE_FAIL"}
+            assert isinstance(with_invalid.get("gate_failed_count"), int)
 
             rk_defaulted = client.post(
                 "/api/ops/security-evidence/gate/check?max_age_seconds=86400&min_retention_days=31&required_checks=foo",
@@ -1543,6 +1544,7 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert defaulted.get("defaulted_checks") is True
             assert defaulted.get("evaluated_checks") == ["attest", "freshness", "retention"]
             assert defaulted.get("gate_reason_code") in {"GATE_PASS", "GATE_FAIL"}
+            assert isinstance(defaulted.get("gate_failed_count"), int)
 
             rk_with_invalid_strict = client.post(
                 "/api/ops/security-evidence/gate/check?max_age_seconds=86400&min_retention_days=31&required_checks=attest,foo,attest&strict_required_checks=true",
@@ -1822,10 +1824,10 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/security-evidence/gate/enforce" in endpoints
     assert "/api/ops/security-evidence/gate/assert" in endpoints
     assert "/api/ops/security-evidence/gate/check" in endpoints
-    assert endpoints.get("/api/ops/security-evidence/gate") == "1.7"
-    assert endpoints.get("/api/ops/security-evidence/gate/enforce") == "1.7"
-    assert endpoints.get("/api/ops/security-evidence/gate/assert") == "1.7"
-    assert endpoints.get("/api/ops/security-evidence/gate/check") == "1.7"
+    assert endpoints.get("/api/ops/security-evidence/gate") == "1.8"
+    assert endpoints.get("/api/ops/security-evidence/gate/enforce") == "1.8"
+    assert endpoints.get("/api/ops/security-evidence/gate/assert") == "1.8"
+    assert endpoints.get("/api/ops/security-evidence/gate/check") == "1.8"
     assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
@@ -2026,6 +2028,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "strict_required_checks" in gate_error_detail_props
     assert "defaulted_checks" in gate_error_detail_props
     assert "gate_reason_code" in gate_error_detail_props
+    assert "gate_failed_count" in gate_error_detail_props
     assert "requested_checks" in gate_error_detail_props
     assert "ignored_checks" in gate_error_detail_props
     assert "duplicate_checks" in gate_error_detail_props
@@ -2040,6 +2043,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "strict_required_checks" in gate_props
     assert "defaulted_checks" in gate_props
     assert "gate_reason_code" in gate_props
+    assert "gate_failed_count" in gate_props
     assert "requested_checks" in gate_props
     assert "ignored_checks" in gate_props
     assert "duplicate_checks" in gate_props
