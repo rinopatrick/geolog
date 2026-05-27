@@ -7695,6 +7695,18 @@ def ops_contracts_verify_signature(
     return _verify_audit_export_signature_payload(_ops_contracts_payload(), signature, kid)
 
 
+@app.post(
+    "/api/ops/contracts/verify-signature",
+    response_model=AuditSignatureVerifyResponse,
+)
+def ops_contracts_verify_signature_post(
+    body: AuditSignatureVerifyRequest,
+    _role: str = Depends(require_interpreter),
+):
+    """M2M verifier for detached signature over current ops contracts payload."""
+    return _verify_audit_export_signature_payload(_ops_contracts_payload(), body.signature, body.kid)
+
+
 @app.get(
     "/api/ops/runbook",
     response_model=OpsRunbookResponse,

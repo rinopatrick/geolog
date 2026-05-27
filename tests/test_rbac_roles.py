@@ -1065,6 +1065,23 @@ def test_ops_contracts_sign_hmac_with_requested_kid(monkeypatch):
         out = rv.json()
         assert out.get("ok") is True
         assert out.get("reason_code") == "SIGNATURE_VALID"
+
+        rp = client.post(
+            "/api/ops/contracts/verify-signature",
+            headers=_h("interpreter"),
+            json={"payload": {"ignored": True}, "signature": sig, "kid": "k1"},
+        )
+        assert rp.status_code == 200
+        outp = rp.json()
+        assert outp.get("ok") is True
+        assert outp.get("reason_code") == "SIGNATURE_VALID"
+
+        rf = client.post(
+            "/api/ops/contracts/verify-signature",
+            headers=_h("viewer"),
+            json={"payload": {"ignored": True}, "signature": sig, "kid": "k1"},
+        )
+        assert rf.status_code == 403
     finally:
         if old_ring is None:
             os.environ.pop("AUDIT_EXPORT_HMAC_KEYS_JSON", None)
@@ -1116,7 +1133,9 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     alerts_get = paths.get("/api/ops/alerts", {}).get("get", {})
     health_get = paths.get("/api/ops/health", {}).get("get", {})
     contracts_get = paths.get("/api/ops/contracts", {}).get("get", {})
-    contracts_verify_get = paths.get("/api/ops/contracts/verify-signature", {}).get("get", {})
+    contracts_verify_path = paths.get("/api/ops/contracts/verify-signature", {})
+    contracts_verify_get = contracts_verify_path.get("get", {})
+    contracts_verify_post = contracts_verify_path.get("post", {})
     runbook_get = paths.get("/api/ops/runbook", {}).get("get", {})
     assert metrics_get.get("operationId")
     assert metrics_recent_get.get("operationId")
@@ -1126,6 +1145,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert health_get.get("operationId")
     assert contracts_get.get("operationId")
     assert contracts_verify_get.get("operationId")
+    assert contracts_verify_post.get("operationId")
     assert runbook_get.get("operationId")
 
     prom_200 = metrics_prom_get.get("responses", {}).get("200", {})
