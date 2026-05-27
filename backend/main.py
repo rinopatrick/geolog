@@ -561,12 +561,29 @@ def _lttb_indices(x: np.ndarray, y: np.ndarray, threshold: int):
     return np.unique(np.clip(sampled, 0, n - 1))
 
 
+def _extract_trace_id_from_traceparent(traceparent: str) -> str:
+    raw = (traceparent or "").strip()
+    parts = raw.split("-")
+    if len(parts) != 4:
+        return ""
+    trace_id = parts[1].strip().lower()
+    if len(trace_id) != 32:
+        return ""
+    if not all(ch in "0123456789abcdef" for ch in trace_id):
+        return ""
+    return trace_id
+
+
 class RequestIdMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         request_id = (request.headers.get("X-Request-ID") or "").strip() or uuid.uuid4().hex[:16]
+        trace_id = _extract_trace_id_from_traceparent(request.headers.get("traceparent", ""))
         request.state.request_id = request_id
+        request.state.trace_id = trace_id
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
+        if trace_id:
+            response.headers["X-Trace-ID"] = trace_id
         return response
 
 
@@ -605,6 +622,7 @@ class RequestMetricsMiddleware(BaseHTTPMiddleware):
                 recent.append({
                     "ts": datetime.datetime.utcnow().isoformat() + "Z",
                     "request_id": str(getattr(request.state, "request_id", "") or ""),
+                    "trace_id": str(getattr(request.state, "trace_id", "") or ""),
                     "method": method,
                     "path": request.url.path,
                     "status": int(status),
@@ -616,6 +634,7 @@ class RequestMetricsMiddleware(BaseHTTPMiddleware):
         logger.info(json.dumps({
             "event": "http_request",
             "request_id": str(getattr(request.state, "request_id", "") or ""),
+            "trace_id": str(getattr(request.state, "trace_id", "") or ""),
             "method": method,
             "path": request.url.path,
             "status": int(status),
@@ -7473,8 +7492,10 @@ class OpsHealthResponse(BaseModel):
 class OpsObservabilityStatusResponse(BaseModel):
     ok: bool
     request_id_propagation: bool
+    trace_context_propagation: bool
     structured_logging: bool
     recent_events_include_request_id: bool
+    recent_events_include_trace_id: bool
     otel_enabled: bool
     timestamp: str
 
@@ -7527,12 +7548,15 @@ def ops_observability_status(_role: str = Depends(require_viewer)):
     with OBS_METRICS_LOCK:
         recent = list(OBS_METRICS.get("recent_events", []))
     has_request_id = any(bool(str(e.get("request_id", "")).strip()) for e in recent if isinstance(e, dict))
+    has_trace_id = any(bool(str(e.get("trace_id", "")).strip()) for e in recent if isinstance(e, dict))
     otel_enabled = bool((os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or "").strip())
     return {
         "ok": True,
         "request_id_propagation": True,
+        "trace_context_propagation": True,
         "structured_logging": True,
         "recent_events_include_request_id": has_request_id,
+        "recent_events_include_trace_id": has_trace_id,
         "otel_enabled": otel_enabled,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
@@ -7681,7 +7705,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/slo-status": "1.1",
         "/api/ops/alerts": "1.2",
         "/api/ops/health": "1.0",
-        "/api/ops/observability-status": "1.0",
+        "/api/ops/observability-status": "1.1",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -7713,7 +7737,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/slo-status": "1.1",
                             "/api/ops/alerts": "1.2",
                             "/api/ops/health": "1.0",
-                            "/api/ops/observability-status": "1.0",
+                            "/api/ops/observability-status": "1.1",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },

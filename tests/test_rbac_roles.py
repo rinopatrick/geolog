@@ -834,9 +834,15 @@ def test_ops_metrics_viewer_access_and_shape():
 
 def test_request_id_response_header_propagation():
     req_id = "rid-test-123"
-    r = client.get("/api/ops/metrics", headers={**_h("viewer"), "X-Request-ID": req_id})
+    trace_id = "0af7651916cd43dd8448eb211c80319c"
+    traceparent = f"00-{trace_id}-b7ad6b7169203331-01"
+    r = client.get(
+        "/api/ops/metrics",
+        headers={**_h("viewer"), "X-Request-ID": req_id, "traceparent": traceparent},
+    )
     assert r.status_code == 200
     assert r.headers.get("X-Request-ID") == req_id
+    assert r.headers.get("X-Trace-ID") == trace_id
 
 
 def test_ops_metrics_requires_viewer_role_floor():
@@ -1012,14 +1018,21 @@ def test_ops_health_shape_and_access():
 
 def test_ops_observability_status_shape_and_request_id_signal():
     rid = "obs-rid-001"
-    _ = client.get("/api/ops/metrics", headers={**_h("viewer"), "X-Request-ID": rid})
+    trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+    traceparent = f"00-{trace_id}-00f067aa0ba902b7-01"
+    _ = client.get(
+        "/api/ops/metrics",
+        headers={**_h("viewer"), "X-Request-ID": rid, "traceparent": traceparent},
+    )
     r = client.get("/api/ops/observability-status", headers=_h("viewer"))
     assert r.status_code == 200
     data = r.json()
     assert data.get("ok") is True
     assert data.get("request_id_propagation") is True
+    assert data.get("trace_context_propagation") is True
     assert data.get("structured_logging") is True
-    assert "recent_events_include_request_id" in data
+    assert data.get("recent_events_include_request_id") is True
+    assert data.get("recent_events_include_trace_id") is True
     assert "otel_enabled" in data
     assert "timestamp" in data
 
@@ -1233,6 +1246,11 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsObservabilityStatusResponse" in schemas
     assert "OpsContractsResponse" in schemas
     assert "OpsRunbookResponse" in schemas
+
+    obs_schema = schemas.get("OpsObservabilityStatusResponse", {})
+    obs_props = obs_schema.get("properties", {})
+    assert "trace_context_propagation" in obs_props
+    assert "recent_events_include_trace_id" in obs_props
 
     contracts_schema = schemas.get("OpsContractsResponse", {})
     contracts_props = contracts_schema.get("properties", {})
