@@ -1229,6 +1229,105 @@ def test_ops_security_posture_status_shape_and_env_signals():
             os.environ["GEOLOG_REQUIRE_TLS"] = old_tls
 
 
+def test_ops_security_evidence_status_valid_signature_happy_path():
+    import os
+    import json
+    import hmac
+    import hashlib
+    import tempfile
+
+    old_dir = os.environ.get("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR")
+    old_key = os.environ.get("BACKUP_DRILL_SIGNING_KEY")
+
+    with tempfile.TemporaryDirectory() as td:
+        report_path = os.path.join(td, "report.json")
+        sig_path = os.path.join(td, "report.signature.json")
+        report_obj = {"backup_ok": True, "restore_ok": True}
+        report_bytes = json.dumps(report_obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        with open(report_path, "wb") as f:
+            f.write(report_bytes)
+
+        key = "unit-test-secret"
+        sha = hashlib.sha256(report_bytes).hexdigest()
+        sig = hmac.new(key.encode("utf-8"), report_bytes, hashlib.sha256).hexdigest()
+        with open(sig_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "report_sha256": sha,
+                    "signature_alg": "hmac-sha256",
+                    "signature_kid": "backup-drill",
+                    "signature": sig,
+                    "retention_days": 30,
+                },
+                f,
+            )
+
+        os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = td
+        os.environ["BACKUP_DRILL_SIGNING_KEY"] = key
+
+        try:
+            r = client.get("/api/ops/security-evidence-status", headers=_h("viewer"))
+            assert r.status_code == 200
+            data = r.json()
+            assert data.get("ok") is True
+            assert data.get("report_present") is True
+            assert data.get("signature_present") is True
+            assert data.get("report_sha256_matches_signature") is True
+            assert data.get("hmac_signature_valid") is True
+            assert data.get("signature_alg") == "hmac-sha256"
+            assert data.get("signature_kid") == "backup-drill"
+            assert data.get("retention_days") == 30
+            assert "timestamp" in data
+        finally:
+            if old_dir is None:
+                os.environ.pop("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR", None)
+            else:
+                os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
+            if old_key is None:
+                os.environ.pop("BACKUP_DRILL_SIGNING_KEY", None)
+            else:
+                os.environ["BACKUP_DRILL_SIGNING_KEY"] = old_key
+
+
+def test_ops_security_evidence_status_detects_mismatch():
+    import os
+    import json
+    import tempfile
+
+    old_dir = os.environ.get("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR")
+
+    with tempfile.TemporaryDirectory() as td:
+        with open(os.path.join(td, "report.json"), "w", encoding="utf-8") as f:
+            json.dump({"backup_ok": True}, f)
+        with open(os.path.join(td, "report.signature.json"), "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "report_sha256": "0" * 64,
+                    "signature_alg": "hmac-sha256",
+                    "signature": "f" * 64,
+                },
+                f,
+            )
+
+        os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = td
+        os.environ.pop("BACKUP_DRILL_SIGNING_KEY", None)
+
+        try:
+            r = client.get("/api/ops/security-evidence-status", headers=_h("viewer"))
+            assert r.status_code == 200
+            data = r.json()
+            assert data.get("ok") is False
+            assert data.get("report_present") is True
+            assert data.get("signature_present") is True
+            assert data.get("report_sha256_matches_signature") is False
+            assert data.get("hmac_signature_valid") is False
+        finally:
+            if old_dir is None:
+                os.environ.pop("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR", None)
+            else:
+                os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
+
+
 def test_ops_health_unknown_role_allowed_as_viewer_floor():
     r = client.get("/api/ops/health", headers=_h("unknown"))
     assert r.status_code == 200
@@ -1297,6 +1396,7 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/otel-status" in endpoints
     assert "/api/ops/evidence-status" in endpoints
     assert "/api/ops/security-posture-status" in endpoints
+    assert "/api/ops/security-evidence-status" in endpoints
     assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
@@ -1416,6 +1516,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     otel_status_get = paths.get("/api/ops/otel-status", {}).get("get", {})
     evidence_status_get = paths.get("/api/ops/evidence-status", {}).get("get", {})
     security_posture_get = paths.get("/api/ops/security-posture-status", {}).get("get", {})
+    security_evidence_get = paths.get("/api/ops/security-evidence-status", {}).get("get", {})
     contracts_get = paths.get("/api/ops/contracts", {}).get("get", {})
     contracts_verify_path = paths.get("/api/ops/contracts/verify-signature", {})
     contracts_verify_get = contracts_verify_path.get("get", {})
@@ -1432,6 +1533,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert otel_status_get.get("operationId")
     assert evidence_status_get.get("operationId")
     assert security_posture_get.get("operationId")
+    assert security_evidence_get.get("operationId")
     assert contracts_get.get("operationId")
     assert contracts_verify_get.get("operationId")
     assert contracts_verify_post.get("operationId")
@@ -1452,6 +1554,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsOtelStatusResponse" in schemas
     assert "OpsEvidenceStatusResponse" in schemas
     assert "OpsSecurityPostureStatusResponse" in schemas
+    assert "OpsSecurityEvidenceStatusResponse" in schemas
     assert "OpsContractsResponse" in schemas
     assert "OpsRunbookResponse" in schemas
 

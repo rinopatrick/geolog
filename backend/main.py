@@ -7635,6 +7635,19 @@ class OpsSecurityPostureStatusResponse(BaseModel):
     timestamp: str
 
 
+class OpsSecurityEvidenceStatusResponse(BaseModel):
+    ok: bool
+    artifact_dir: str
+    report_present: bool
+    signature_present: bool
+    report_sha256_matches_signature: bool | None = None
+    signature_alg: str | None = None
+    signature_kid: str | None = None
+    hmac_signature_valid: bool | None = None
+    retention_days: int | None = None
+    timestamp: str
+
+
 @app.get(
     "/api/ops/health",
     response_model=OpsHealthResponse,
@@ -7800,6 +7813,74 @@ def ops_security_posture_status(_role: str = Depends(require_viewer)):
     }
 
 
+@app.get("/api/ops/security-evidence-status", response_model=OpsSecurityEvidenceStatusResponse)
+def ops_security_evidence_status(_role: str = Depends(require_viewer)):
+    artifact_dir = (os.getenv("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
+    report_path = os.path.join(artifact_dir, "report.json")
+    sig_path = os.path.join(artifact_dir, "report.signature.json")
+
+    report_present = os.path.exists(report_path)
+    signature_present = os.path.exists(sig_path)
+    report_sha256_matches_signature: bool | None = None
+    hmac_signature_valid: bool | None = None
+    signature_alg: str | None = None
+    signature_kid: str | None = None
+    retention_days: int | None = None
+
+    if report_present and signature_present:
+        try:
+            with open(report_path, "rb") as f:
+                report_bytes = f.read()
+            report_sha = hashlib.sha256(report_bytes).hexdigest()
+
+            with open(sig_path, "r", encoding="utf-8") as f:
+                sig_obj = json.load(f)
+
+            declared_sha = str(sig_obj.get("report_sha256", "") or "").strip().lower()
+            signature_alg = str(sig_obj.get("signature_alg", "") or "").strip() or None
+            signature_kid = str(sig_obj.get("signature_kid", "") or "").strip() or None
+
+            rd = sig_obj.get("retention_days")
+            try:
+                retention_days = int(rd) if rd is not None else None
+            except Exception:
+                retention_days = None
+
+            report_sha256_matches_signature = bool(declared_sha and declared_sha == report_sha)
+
+            if signature_alg == "hmac-sha256":
+                key = (os.getenv("BACKUP_DRILL_SIGNING_KEY") or "").strip()
+                sig = str(sig_obj.get("signature", "") or "").strip().lower()
+                if key and sig and len(sig) == 64 and all(c in "0123456789abcdef" for c in sig):
+                    expected = hmac.new(key.encode("utf-8"), report_bytes, hashlib.sha256).hexdigest()
+                    hmac_signature_valid = hmac.compare_digest(expected, sig)
+                else:
+                    hmac_signature_valid = False
+        except Exception:
+            report_sha256_matches_signature = False
+            hmac_signature_valid = False
+
+    ok = bool(
+        report_present
+        and signature_present
+        and report_sha256_matches_signature is True
+        and (hmac_signature_valid is not False)
+    )
+
+    return {
+        "ok": ok,
+        "artifact_dir": artifact_dir,
+        "report_present": report_present,
+        "signature_present": signature_present,
+        "report_sha256_matches_signature": report_sha256_matches_signature,
+        "signature_alg": signature_alg,
+        "signature_kid": signature_kid,
+        "hmac_signature_valid": hmac_signature_valid,
+        "retention_days": retention_days,
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
 class OpsRunbookEntry(BaseModel):
     severity: Literal["warning", "critical"]
     what_it_means: str
@@ -7948,6 +8029,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/otel-status": "1.0",
         "/api/ops/evidence-status": "1.0",
         "/api/ops/security-posture-status": "1.0",
+        "/api/ops/security-evidence-status": "1.0",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -7984,6 +8066,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/otel-status": "1.0",
                             "/api/ops/evidence-status": "1.0",
                             "/api/ops/security-posture-status": "1.0",
+                            "/api/ops/security-evidence-status": "1.0",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
