@@ -74,3 +74,28 @@ def test_jwt_mode_rejects_missing_bearer_token(monkeypatch):
         assert r.status_code == 401
     finally:
         main_mod.AUTH_CONFIG.mode = old_mode
+
+
+def test_report_pdf_endpoint_not_found():
+    r = client.get(
+        "/api/wells/999999/report-pdf",
+        params={"template": "professional", "include_curve_summary": True, "include_qc": True},
+        headers=_h("viewer"),
+    )
+    assert r.status_code == 404
+
+
+def test_report_pdf_endpoint_success_content_type():
+    wells = client.get("/api/wells", headers=_h("viewer"))
+    assert wells.status_code == 200
+    data = wells.json()
+    assert isinstance(data, list) and len(data) > 0
+    wid = data[0]["id"]
+
+    r = client.get(
+        f"/api/wells/{wid}/report-pdf",
+        params={"template": "professional", "include_curve_summary": True, "include_qc": True},
+        headers=_h("viewer"),
+    )
+    assert r.status_code == 200
+    assert "application/pdf" in (r.headers.get("content-type") or "")
