@@ -7334,7 +7334,36 @@ def ops_metrics_prometheus(_role: str = Depends(require_viewer)):
     return StreamingResponse(iter(["\n".join(lines)]), media_type="text/plain; version=0.0.4")
 
 
-@app.get("/api/ops/health")
+class OpsHealthResponse(BaseModel):
+    ok: bool
+    db_ok: bool
+    slo_ok: bool
+    alerts_ok: bool
+    alert_count: int
+    timestamp: str
+
+
+@app.get(
+    "/api/ops/health",
+    response_model=OpsHealthResponse,
+    responses={
+        200: {
+            "description": "Operational health snapshot",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "ok": True,
+                        "db_ok": True,
+                        "slo_ok": True,
+                        "alerts_ok": True,
+                        "alert_count": 0,
+                        "timestamp": "2026-01-01T00:00:00Z",
+                    }
+                }
+            },
+        }
+    },
+)
 def ops_health(db: Session = Depends(get_db), _role: str = Depends(require_viewer)):
     """Operational health snapshot: db connectivity + SLO + alert summary."""
     db_ok = True
