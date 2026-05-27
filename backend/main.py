@@ -148,6 +148,30 @@ def _ensure_production_table():
 _ensure_production_table()
 
 
+def _ensure_audit_log_columns():
+    """Backfill audit_log schema for immutable provenance chain (idempotent)."""
+    ddls = [
+        "ALTER TABLE audit_log ADD COLUMN request_id VARCHAR(64) DEFAULT '';",
+        "ALTER TABLE audit_log ADD COLUMN auth_subject VARCHAR(120) DEFAULT '';",
+        "ALTER TABLE audit_log ADD COLUMN auth_role VARCHAR(50) DEFAULT 'viewer';",
+        "ALTER TABLE audit_log ADD COLUMN route_path VARCHAR(255) DEFAULT '';",
+        "ALTER TABLE audit_log ADD COLUMN method VARCHAR(10) DEFAULT '';",
+        "ALTER TABLE audit_log ADD COLUMN status_code INTEGER;",
+        "ALTER TABLE audit_log ADD COLUMN payload_hash VARCHAR(64) DEFAULT '';",
+        "ALTER TABLE audit_log ADD COLUMN prev_hash VARCHAR(64) DEFAULT '';",
+        "ALTER TABLE audit_log ADD COLUMN entry_hash VARCHAR(64) DEFAULT '';",
+    ]
+    with engine.begin() as conn:
+        for ddl in ddls:
+            try:
+                conn.execute(text(ddl))
+            except Exception:
+                pass
+
+
+_ensure_audit_log_columns()
+
+
 def _ensure_completion_table():
     """Create completion table for existing deployments without migrations."""
     ddl = """
@@ -578,11 +602,89 @@ class ErrorLoggingMiddleware(BaseHTTPMiddleware):
             logger.debug(traceback.format_exc())
             return SafeJSONResponse(
                 status_code=500,
-                content={"detail": "Internal server error", "error": str(e)},
+                content={"detail": "internal error"},
             )
+
+
+class ImmutableAuditTrailMiddleware(BaseHTTPMiddleware):
+    """Append-only provenance records for successful auth-critical writes."""
+    async def dispatch(self, request: Request, call_next):
+        method = request.method.upper()
+        path = request.url.path
+        if method not in {"POST", "PUT", "DELETE"} or not path.startswith("/api/"):
+            return await call_next(request)
+
+        body = await request.body()
+        response = await call_next(request)
+
+        # log only successful/accepted writes (exclude auth failures)
+        if response.status_code >= 400:
+            return response
+
+        role = (getattr(request.state, "user_role", None) or "viewer").strip().lower()
+        subject = (getattr(request.state, "auth_subject", None) or "").strip()
+        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:16]
+
+        # best effort well/project extraction
+        well_id = None
+        project_id = None
+        parts = [p for p in path.split("/") if p]
+        try:
+            if len(parts) >= 3 and parts[0] == "api" and parts[1] == "wells":
+                well_id = int(parts[2])
+            if len(parts) >= 3 and parts[0] == "api" and parts[1] == "projects":
+                project_id = int(parts[2])
+        except Exception:
+            pass
+
+        payload_hash = hashlib.sha256(body).hexdigest() if body else ""
+
+        db = SessionLocal()
+        try:
+            prev = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
+            prev_hash = getattr(prev, "entry_hash", "") if prev else ""
+            canonical = json.dumps({
+                "request_id": request_id,
+                "subject": subject,
+                "role": role,
+                "method": method,
+                "path": path,
+                "status": int(response.status_code),
+                "payload_hash": payload_hash,
+                "prev_hash": prev_hash,
+                "well_id": well_id,
+                "project_id": project_id,
+            }, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            entry_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+            db.add(AuditLog(
+                project_id=project_id,
+                well_id=well_id,
+                action=f"write:{method.lower()}",
+                entity_type="api",
+                details=path,
+                user_label="local",
+                request_id=request_id,
+                auth_subject=subject,
+                auth_role=role,
+                route_path=path,
+                method=method,
+                status_code=int(response.status_code),
+                payload_hash=payload_hash,
+                prev_hash=prev_hash,
+                entry_hash=entry_hash,
+            ))
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+
+        return response
 
 app.add_middleware(RBACWriteGuardMiddleware)
 app.add_middleware(ErrorLoggingMiddleware)
+app.add_middleware(ImmutableAuditTrailMiddleware)
 app.add_middleware(AuthContextMiddleware)
 
 

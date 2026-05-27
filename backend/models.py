@@ -314,6 +314,16 @@ class AuditLog(Base):
     entity_id = Column(Integer, nullable=True)
     details = Column(Text, default="")  # JSON details of what changed
     user_label = Column(String(100), default="local")  # user identifier
+    # Immutable provenance chain
+    request_id = Column(String(64), default="")
+    auth_subject = Column(String(120), default="")
+    auth_role = Column(String(50), default="viewer")
+    route_path = Column(String(255), default="")
+    method = Column(String(10), default="")
+    status_code = Column(Integer, nullable=True)
+    payload_hash = Column(String(64), default="")
+    prev_hash = Column(String(64), default="")
+    entry_hash = Column(String(64), default="")
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 

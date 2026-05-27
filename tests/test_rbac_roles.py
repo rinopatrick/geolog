@@ -8,6 +8,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.main import app
+from backend.main import SessionLocal, AuditLog
 
 
 client = TestClient(app)
@@ -341,3 +342,36 @@ def test_jwt_mode_uses_roles_array_fallback():
         main_mod.AUTH_CONFIG.mode = old_mode
         main_mod.AUTH_CONFIG.jwt_secret = old_secret
         main_mod.AUTH_CONFIG.jwt_algorithms = old_algs
+
+
+def test_immutable_audit_chain_records_successful_writes():
+    wells = client.get("/api/wells", headers=_h("viewer"))
+    assert wells.status_code == 200
+    ws = wells.json()
+    assert len(ws) >= 2
+    w1, w2 = ws[0]["id"], ws[1]["id"]
+
+    payload1 = {"well_a_id": w1, "well_b_id": w2, "depth_a": 1000.0, "depth_b": 1001.0, "label": "chain-a"}
+    payload2 = {"well_a_id": w1, "well_b_id": w2, "depth_a": 1002.0, "depth_b": 1003.0, "label": "chain-b"}
+
+    r1 = client.post("/api/correlation-markers", headers=_h("interpreter"), json=payload1)
+    assert r1.status_code in (200, 201)
+    r2 = client.post("/api/correlation-markers", headers=_h("interpreter"), json=payload2)
+    assert r2.status_code in (200, 201)
+
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(AuditLog)
+            .filter(AuditLog.action == "write:post", AuditLog.route_path == "/api/correlation-markers")
+            .order_by(AuditLog.id.desc())
+            .limit(2)
+            .all()
+        )
+        assert len(rows) == 2
+        newest, previous = rows[0], rows[1]
+        assert newest.entry_hash and len(newest.entry_hash) == 64
+        assert newest.payload_hash and len(newest.payload_hash) == 64
+        assert newest.prev_hash == previous.entry_hash
+    finally:
+        db.close()
