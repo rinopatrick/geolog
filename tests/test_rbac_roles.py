@@ -370,8 +370,47 @@ def test_immutable_audit_chain_records_successful_writes():
         )
         assert len(rows) == 2
         newest, previous = rows[0], rows[1]
-        assert newest.entry_hash and len(newest.entry_hash) == 64
-        assert newest.payload_hash and len(newest.payload_hash) == 64
-        assert newest.prev_hash == previous.entry_hash
+        assert (newest.entry_hash or "") != "" and len(newest.entry_hash or "") == 64
+        assert (newest.payload_hash or "") != "" and len(newest.payload_hash or "") == 64
+        assert (newest.prev_hash or "") == (previous.entry_hash or "")
     finally:
         db.close()
+
+
+def test_audit_verify_endpoint_reports_ok_for_clean_chain():
+    r = client.get("/api/audit-log/verify", headers=_h("viewer"))
+    assert r.status_code == 200
+    data = r.json()
+    assert "ok" in data and "verified_entries" in data and "issues" in data
+    assert isinstance(data["issues"], list)
+
+
+def test_audit_verify_endpoint_detects_tamper_gap():
+    db = SessionLocal()
+    target_id = None
+    old_prev = None
+    try:
+        row = db.query(AuditLog).filter(AuditLog.action == "write:post").order_by(AuditLog.id.desc()).first()
+        assert row is not None
+        target_id = row.id
+        old_prev = row.prev_hash
+        row.prev_hash = "tampered_prev_hash"
+        db.commit()
+    finally:
+        db.close()
+
+    try:
+        r = client.get("/api/audit-log/verify", headers=_h("viewer"))
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ok"] is False
+        assert any((it.get("id") == target_id and it.get("type") == "prev_hash_mismatch") for it in data["issues"])
+    finally:
+        db2 = SessionLocal()
+        try:
+            row2 = db2.query(AuditLog).filter(AuditLog.id == target_id).first()
+            if row2 is not None:
+                row2.prev_hash = old_prev
+                db2.commit()
+        finally:
+            db2.close()

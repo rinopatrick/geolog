@@ -5315,6 +5315,44 @@ def get_audit_log(project_id: int = None, well_id: int = None, limit: int = 100,
     return result
 
 
+@app.get("/api/audit-log/verify")
+def verify_audit_log_chain(limit: int = 2000, db: Session = Depends(get_db)):
+    """Recompute immutable audit chain and report tamper gaps."""
+    rows = db.query(AuditLog).order_by(AuditLog.id.asc()).limit(min(max(limit, 1), 10000)).all()
+    issues = []
+    verified = 0
+    prev_hash = ""
+
+    for r in rows:
+        canonical = json.dumps({
+            "request_id": r.request_id or "",
+            "subject": r.auth_subject or "",
+            "role": r.auth_role or "viewer",
+            "method": (r.method or "").upper(),
+            "path": r.route_path or "",
+            "status": int(r.status_code) if r.status_code is not None else 0,
+            "payload_hash": r.payload_hash or "",
+            "prev_hash": r.prev_hash or "",
+            "well_id": r.well_id,
+            "project_id": r.project_id,
+        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        recomputed = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+        if (r.prev_hash or "") != prev_hash:
+            issues.append({"id": r.id, "type": "prev_hash_mismatch", "expected": prev_hash, "actual": r.prev_hash or ""})
+        if (r.entry_hash or "") != recomputed:
+            issues.append({"id": r.id, "type": "entry_hash_mismatch", "expected": recomputed, "actual": r.entry_hash or ""})
+
+        prev_hash = r.entry_hash or ""
+        verified += 1
+
+    return {
+        "ok": len(issues) == 0,
+        "verified_entries": verified,
+        "issues": issues,
+    }
+
+
 # ─── Cross-Plot Matrix (multi-well) ──────────────────────────
 @app.get("/api/projects/{pid}/crossplot-matrix")
 def crossplot_matrix(pid: int, curve_x: str = "GR", curve_y: str = "RT",
