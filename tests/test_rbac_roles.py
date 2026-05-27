@@ -637,6 +637,7 @@ def test_audit_verify_signature_endpoint_valid_and_mismatch():
         ok_data = ok_r.json()
         assert ok_data["ok"] is True
         assert ok_data["reason"] == "signature_valid"
+        assert ok_data["reason_code"] == "SIGNATURE_VALID"
 
         bad_r = client.get(
             "/api/audit-log/verify/signature",
@@ -651,6 +652,7 @@ def test_audit_verify_signature_endpoint_valid_and_mismatch():
         bad_data = bad_r.json()
         assert bad_data["ok"] is False
         assert bad_data["reason"] == "signature_mismatch"
+        assert bad_data["reason_code"] == "SIGNATURE_MISMATCH"
     finally:
         if old is None:
             os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
@@ -690,6 +692,7 @@ def test_audit_verify_signature_endpoint_unknown_kid_returns_fail_reason():
         out = r.json()
         assert out["ok"] is False
         assert "unknown signature kid" in out["reason"]
+        assert out["reason_code"] == "UNKNOWN_KID"
     finally:
         if old_json is None:
             os.environ.pop("AUDIT_EXPORT_HMAC_KEYS_JSON", None)
@@ -749,6 +752,7 @@ def test_audit_verify_signature_post_interpreter_ok_and_mismatch():
         out = bad_r.json()
         assert out.get("ok") is False
         assert out.get("reason") == "signature_mismatch"
+        assert out.get("reason_code") == "SIGNATURE_MISMATCH"
     finally:
         if old is None:
             os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)

@@ -5475,9 +5475,20 @@ def _verify_audit_export_signature_payload(payload_obj: dict, signature: str, ki
     try:
         resolved_kid, key_raw = _resolve_audit_export_signing_key(kid or None)
     except HTTPException as e:
+        detail = str(e.detail)
+        reason_code = "KEY_RESOLUTION_ERROR"
+        if "unknown signature kid" in detail:
+            reason_code = "UNKNOWN_KID"
+        elif "invalid JSON" in detail:
+            reason_code = "INVALID_KEYRING_JSON"
+        elif "not present" in detail:
+            reason_code = "ACTIVE_KID_MISSING"
+        elif "no signing key configured" in detail:
+            reason_code = "KEY_NOT_CONFIGURED"
         return {
             "ok": False,
-            "reason": str(e.detail),
+            "reason": detail,
+            "reason_code": reason_code,
             "signature_alg": "hmac-sha256",
             "signature_kid": kid or None,
         }
@@ -5488,6 +5499,7 @@ def _verify_audit_export_signature_payload(payload_obj: dict, signature: str, ki
     return {
         "ok": ok,
         "reason": "signature_valid" if ok else "signature_mismatch",
+        "reason_code": "SIGNATURE_VALID" if ok else "SIGNATURE_MISMATCH",
         "signature_alg": "hmac-sha256",
         "signature_kid": resolved_kid,
     }
