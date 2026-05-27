@@ -7032,6 +7032,52 @@ def ops_metrics(_role: str = Depends(require_viewer)):
         }
 
 
+@app.get("/api/ops/slo-status")
+def ops_slo_status(_role: str = Depends(require_viewer)):
+    """Basic SLO evaluation snapshot from in-process counters."""
+    target_latency_ms = float(os.getenv("OPS_SLO_P95_MS", "500") or 500)
+    target_error_rate = float(os.getenv("OPS_SLO_ERROR_RATE", "0.01") or 0.01)
+
+    with OBS_METRICS_LOCK:
+        total = int(OBS_METRICS.get("requests_total", 0))
+        avg = 0.0
+        count = int(OBS_METRICS.get("latency_ms_count", 0))
+        if count > 0:
+            avg = float(OBS_METRICS.get("latency_ms_sum", 0.0)) / count
+        by_status = dict(OBS_METRICS.get("requests_by_status", {}))
+
+    error_count = 0
+    for k, v in by_status.items():
+        try:
+            if int(k) >= 500:
+                error_count += int(v)
+        except Exception:
+            continue
+
+    error_rate = (float(error_count) / total) if total > 0 else 0.0
+    latency_ok = avg <= target_latency_ms
+    error_ok = error_rate <= target_error_rate
+
+    return {
+        "ok": bool(latency_ok and error_ok),
+        "targets": {
+            "latency_ms_avg_max": target_latency_ms,
+            "error_rate_max": target_error_rate,
+        },
+        "current": {
+            "latency_ms_avg": round(avg, 2),
+            "error_rate": round(error_rate, 6),
+            "requests_total": total,
+            "errors_5xx": error_count,
+        },
+        "checks": {
+            "latency_ok": latency_ok,
+            "error_rate_ok": error_ok,
+        },
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
 @app.post("/api/wells/{wid}/electrofacies-async", status_code=202)
 def electrofacies_async(wid: int, data: dict, _role: str = Depends(require_interpreter)):
     """Queue electrofacies clustering in background job."""

@@ -804,3 +804,32 @@ def test_ops_metrics_requires_viewer_role_floor():
     # unknown role normalized to viewer by auth layer; should still pass read access
     r = client.get("/api/ops/metrics", headers=_h("unknown"))
     assert r.status_code == 200
+
+
+def test_ops_slo_status_shape_and_access():
+    # generate some traffic
+    _ = client.get("/api/wells", headers=_h("viewer"))
+    _ = client.get("/api/does-not-exist", headers=_h("viewer"))
+
+    r = client.get("/api/ops/slo-status", headers=_h("viewer"))
+    assert r.status_code == 200
+    data = r.json()
+
+    assert "ok" in data
+    assert "targets" in data
+    assert "current" in data
+    assert "checks" in data
+
+    assert "latency_ms_avg_max" in data["targets"]
+    assert "error_rate_max" in data["targets"]
+    assert "latency_ms_avg" in data["current"]
+    assert "error_rate" in data["current"]
+    assert "requests_total" in data["current"]
+    assert "errors_5xx" in data["current"]
+    assert "latency_ok" in data["checks"]
+    assert "error_rate_ok" in data["checks"]
+
+
+def test_ops_slo_status_unknown_role_allowed_as_viewer_floor():
+    r = client.get("/api/ops/slo-status", headers=_h("unknown"))
+    assert r.status_code == 200
