@@ -217,3 +217,127 @@ def test_auto_zone_from_tops_interpreter_not_forbidden():
 
     r = client.post(f"/api/wells/{wid}/auto-zone-from-tops", headers=_h("interpreter"))
     assert r.status_code != 403
+
+
+def test_jwt_mode_enforces_issuer_and_audience_valid():
+    import jwt
+    from backend import main as main_mod
+
+    old_mode = main_mod.AUTH_CONFIG.mode
+    old_secret = main_mod.AUTH_CONFIG.jwt_secret
+    old_algs = main_mod.AUTH_CONFIG.jwt_algorithms
+    old_iss = main_mod.AUTH_CONFIG.jwt_issuer
+    old_aud = main_mod.AUTH_CONFIG.jwt_audience
+
+    main_mod.AUTH_CONFIG.mode = "jwt"
+    main_mod.AUTH_CONFIG.jwt_secret = "test-secret"
+    main_mod.AUTH_CONFIG.jwt_algorithms = ("HS256",)
+    main_mod.AUTH_CONFIG.jwt_issuer = "geolog-auth"
+    main_mod.AUTH_CONFIG.jwt_audience = "geolog-api"
+
+    token = jwt.encode(
+        {"sub": "u3", "role": "viewer", "iss": "geolog-auth", "aud": "geolog-api"},
+        "test-secret",
+        algorithm="HS256",
+    )
+    try:
+        r = client.get("/api/wells", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+    finally:
+        main_mod.AUTH_CONFIG.mode = old_mode
+        main_mod.AUTH_CONFIG.jwt_secret = old_secret
+        main_mod.AUTH_CONFIG.jwt_algorithms = old_algs
+        main_mod.AUTH_CONFIG.jwt_issuer = old_iss
+        main_mod.AUTH_CONFIG.jwt_audience = old_aud
+
+
+def test_jwt_mode_rejects_wrong_issuer():
+    import jwt
+    from backend import main as main_mod
+
+    old_mode = main_mod.AUTH_CONFIG.mode
+    old_secret = main_mod.AUTH_CONFIG.jwt_secret
+    old_algs = main_mod.AUTH_CONFIG.jwt_algorithms
+    old_iss = main_mod.AUTH_CONFIG.jwt_issuer
+
+    main_mod.AUTH_CONFIG.mode = "jwt"
+    main_mod.AUTH_CONFIG.jwt_secret = "test-secret"
+    main_mod.AUTH_CONFIG.jwt_algorithms = ("HS256",)
+    main_mod.AUTH_CONFIG.jwt_issuer = "expected-issuer"
+    main_mod.AUTH_CONFIG.jwt_audience = None
+
+    token = jwt.encode({"sub": "u4", "role": "viewer", "iss": "wrong-issuer"}, "test-secret", algorithm="HS256")
+    try:
+        r = client.get("/api/wells", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 401
+    finally:
+        main_mod.AUTH_CONFIG.mode = old_mode
+        main_mod.AUTH_CONFIG.jwt_secret = old_secret
+        main_mod.AUTH_CONFIG.jwt_algorithms = old_algs
+        main_mod.AUTH_CONFIG.jwt_issuer = old_iss
+
+
+def test_jwt_mode_rejects_wrong_audience():
+    import jwt
+    from backend import main as main_mod
+
+    old_mode = main_mod.AUTH_CONFIG.mode
+    old_secret = main_mod.AUTH_CONFIG.jwt_secret
+    old_algs = main_mod.AUTH_CONFIG.jwt_algorithms
+    old_aud = main_mod.AUTH_CONFIG.jwt_audience
+
+    main_mod.AUTH_CONFIG.mode = "jwt"
+    main_mod.AUTH_CONFIG.jwt_secret = "test-secret"
+    main_mod.AUTH_CONFIG.jwt_algorithms = ("HS256",)
+    main_mod.AUTH_CONFIG.jwt_issuer = None
+    main_mod.AUTH_CONFIG.jwt_audience = "expected-aud"
+
+    token = jwt.encode({"sub": "u5", "role": "viewer", "aud": "wrong-aud"}, "test-secret", algorithm="HS256")
+    try:
+        r = client.get("/api/wells", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 401
+    finally:
+        main_mod.AUTH_CONFIG.mode = old_mode
+        main_mod.AUTH_CONFIG.jwt_secret = old_secret
+        main_mod.AUTH_CONFIG.jwt_algorithms = old_algs
+        main_mod.AUTH_CONFIG.jwt_audience = old_aud
+
+
+def test_jwt_mode_uses_roles_array_fallback():
+    import jwt
+    from backend import main as main_mod
+
+    old_mode = main_mod.AUTH_CONFIG.mode
+    old_secret = main_mod.AUTH_CONFIG.jwt_secret
+    old_algs = main_mod.AUTH_CONFIG.jwt_algorithms
+
+    main_mod.AUTH_CONFIG.mode = "jwt"
+    main_mod.AUTH_CONFIG.jwt_secret = "test-secret"
+    main_mod.AUTH_CONFIG.jwt_algorithms = ("HS256",)
+    main_mod.AUTH_CONFIG.jwt_issuer = None
+    main_mod.AUTH_CONFIG.jwt_audience = None
+
+    token = jwt.encode({"sub": "u6", "roles": ["interpreter"]}, "test-secret", algorithm="HS256")
+    payload = {
+        "a": 1.0,
+        "m": 2.0,
+        "n": 2.0,
+        "rw": 0.1,
+        "vsh_cutoff": 0.35,
+        "phie_cutoff": 0.1,
+        "sw_cutoff": 0.6,
+        "iterations": 100,
+        "variation_pct": 20,
+    }
+    try:
+        r = client.post(
+            "/api/wells/999999/sensitivity",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+        # should pass auth+RBAC, then fail domain (well not found)
+        assert r.status_code == 404
+    finally:
+        main_mod.AUTH_CONFIG.mode = old_mode
+        main_mod.AUTH_CONFIG.jwt_secret = old_secret
+        main_mod.AUTH_CONFIG.jwt_algorithms = old_algs
