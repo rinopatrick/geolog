@@ -8119,6 +8119,7 @@ class OpsSecurityEvidenceGateResponse(BaseModel):
     strict_required_checks: bool
     requested_checks: list[str]
     ignored_checks: list[str]
+    duplicate_checks: list[str]
     evaluated_checks: list[Literal["attest", "freshness", "retention"]]
     failed_checks: list[Literal["attest", "freshness", "retention"]]
     attest_reason_code: Literal["ATTEST_VALID", "ATTEST_INVALID", "ATTEST_ERROR"]
@@ -8137,6 +8138,7 @@ class OpsSecurityEvidenceGateErrorDetail(BaseModel):
     strict_required_checks: bool
     requested_checks: list[str]
     ignored_checks: list[str]
+    duplicate_checks: list[str]
     evaluated_checks: list[Literal["attest", "freshness", "retention"]]
     failed_checks: list[Literal["attest", "freshness", "retention"]]
     attest_reason_code: str | None = None
@@ -8370,10 +8372,10 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/security-evidence/attest": "1.0",
         "/api/ops/security-evidence/attest/latest": "1.0",
         "/api/ops/security-evidence/freshness": "1.0",
-        "/api/ops/security-evidence/gate": "1.4",
-        "/api/ops/security-evidence/gate/enforce": "1.4",
-        "/api/ops/security-evidence/gate/assert": "1.4",
-        "/api/ops/security-evidence/gate/check": "1.4",
+        "/api/ops/security-evidence/gate": "1.5",
+        "/api/ops/security-evidence/gate/enforce": "1.5",
+        "/api/ops/security-evidence/gate/assert": "1.5",
+        "/api/ops/security-evidence/gate/check": "1.5",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -8416,10 +8418,10 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/security-evidence/attest": "1.0",
                             "/api/ops/security-evidence/attest/latest": "1.0",
                             "/api/ops/security-evidence/freshness": "1.0",
-                            "/api/ops/security-evidence/gate": "1.4",
-                            "/api/ops/security-evidence/gate/enforce": "1.4",
-                            "/api/ops/security-evidence/gate/assert": "1.4",
-                            "/api/ops/security-evidence/gate/check": "1.4",
+                            "/api/ops/security-evidence/gate": "1.5",
+                            "/api/ops/security-evidence/gate/enforce": "1.5",
+                            "/api/ops/security-evidence/gate/assert": "1.5",
+                            "/api/ops/security-evidence/gate/check": "1.5",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
@@ -8618,8 +8620,20 @@ def ops_security_evidence_gate(
 
     allowed_checks = {"attest", "freshness", "retention"}
     parsed_checks = [c.strip().lower() for c in str(required_checks).split(",") if c.strip()]
-    evaluated_checks = [c for c in parsed_checks if c in allowed_checks]
-    ignored_checks = [c for c in parsed_checks if c not in allowed_checks]
+
+    seen: set[str] = set()
+    duplicate_checks: list[str] = []
+    deduped_checks: list[str] = []
+    for c in parsed_checks:
+        if c in seen:
+            if c not in duplicate_checks:
+                duplicate_checks.append(c)
+            continue
+        seen.add(c)
+        deduped_checks.append(c)
+
+    evaluated_checks = [c for c in deduped_checks if c in allowed_checks]
+    ignored_checks = [c for c in deduped_checks if c not in allowed_checks]
     if strict_required_checks and ignored_checks:
         raise HTTPException(
             status_code=400,
@@ -8627,6 +8641,7 @@ def ops_security_evidence_gate(
                 "error": "invalid required_checks values",
                 "requested_checks": parsed_checks,
                 "ignored_checks": ignored_checks,
+                "duplicate_checks": duplicate_checks,
                 "allowed_checks": ["attest", "freshness", "retention"],
             },
         )
@@ -8660,6 +8675,7 @@ def ops_security_evidence_gate(
         "strict_required_checks": bool(strict_required_checks),
         "requested_checks": parsed_checks,
         "ignored_checks": ignored_checks,
+        "duplicate_checks": duplicate_checks,
         "evaluated_checks": evaluated_checks,
         "failed_checks": failed_checks,
         "attest_reason_code": attest.get("reason_code"),
@@ -8680,6 +8696,7 @@ def _security_evidence_gate_failure_detail(gate: dict[str, Any]) -> dict[str, An
         "strict_required_checks": bool(gate.get("strict_required_checks", False)),
         "requested_checks": gate.get("requested_checks", []),
         "ignored_checks": gate.get("ignored_checks", []),
+        "duplicate_checks": gate.get("duplicate_checks", []),
         "evaluated_checks": gate.get("evaluated_checks", []),
         "failed_checks": gate.get("failed_checks", []),
         "attest_reason_code": gate.get("attest_reason_code"),
