@@ -108,6 +108,7 @@ OBS_METRICS = {
     "requests_by_status": {},
     "latency_ms_sum": 0.0,
     "latency_ms_count": 0,
+    "recent_events": [],
 }
 
 Base.metadata.create_all(bind=engine)
@@ -589,6 +590,18 @@ class RequestMetricsMiddleware(BaseHTTPMiddleware):
             by_status = OBS_METRICS["requests_by_status"]
             by_method[method] = int(by_method.get(method, 0)) + 1
             by_status[status] = int(by_status.get(status, 0)) + 1
+
+            recent = OBS_METRICS.get("recent_events")
+            if isinstance(recent, list):
+                recent.append({
+                    "ts": datetime.datetime.utcnow().isoformat() + "Z",
+                    "method": method,
+                    "path": request.url.path,
+                    "status": int(status),
+                    "latency_ms": round(elapsed_ms, 2),
+                })
+                if len(recent) > 200:
+                    del recent[:-200]
 
         logger.info(json.dumps({
             "event": "http_request",
@@ -7028,8 +7041,26 @@ def ops_metrics(_role: str = Depends(require_viewer)):
             "requests_by_status": dict(OBS_METRICS.get("requests_by_status", {})),
             "latency_ms_avg": round(avg, 2),
             "latency_samples": count,
+            "recent_events_size": len(OBS_METRICS.get("recent_events", [])) if isinstance(OBS_METRICS.get("recent_events"), list) else 0,
             "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
         }
+
+
+@app.get("/api/ops/metrics/recent")
+def ops_metrics_recent(limit: int = 20, _role: str = Depends(require_viewer)):
+    """Return recent request events captured by in-process metrics middleware."""
+    limit = max(1, min(int(limit or 20), 200))
+    with OBS_METRICS_LOCK:
+        recent = OBS_METRICS.get("recent_events")
+        if not isinstance(recent, list):
+            recent = []
+        out = recent[-limit:]
+    return {
+        "events": out,
+        "count": len(out),
+        "limit": limit,
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
 
 
 @app.get("/api/ops/slo-status")

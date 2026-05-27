@@ -795,6 +795,7 @@ def test_ops_metrics_viewer_access_and_shape():
     assert "requests_by_status" in data
     assert "latency_ms_avg" in data
     assert "latency_samples" in data
+    assert "recent_events_size" in data
     assert data["requests_total"] >= 1
     assert isinstance(data["requests_by_method"], dict)
     assert isinstance(data["requests_by_status"], dict)
@@ -803,6 +804,32 @@ def test_ops_metrics_viewer_access_and_shape():
 def test_ops_metrics_requires_viewer_role_floor():
     # unknown role normalized to viewer by auth layer; should still pass read access
     r = client.get("/api/ops/metrics", headers=_h("unknown"))
+    assert r.status_code == 200
+
+
+def test_ops_metrics_recent_shape_and_limit():
+    _ = client.get("/api/wells", headers=_h("viewer"))
+    _ = client.get("/api/projects", headers=_h("viewer"))
+
+    r = client.get("/api/ops/metrics/recent?limit=5", headers=_h("viewer"))
+    assert r.status_code == 200
+    data = r.json()
+    assert "events" in data
+    assert "count" in data
+    assert "limit" in data
+    assert data["limit"] == 5
+    assert isinstance(data["events"], list)
+    assert data["count"] <= 5
+    if data["events"]:
+        e = data["events"][-1]
+        assert "method" in e
+        assert "path" in e
+        assert "status" in e
+        assert "latency_ms" in e
+
+
+def test_ops_metrics_recent_unknown_role_allowed_as_viewer_floor():
+    r = client.get("/api/ops/metrics/recent", headers=_h("unknown"))
     assert r.status_code == 200
 
 
