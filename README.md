@@ -378,6 +378,7 @@ Ops status endpoints:
 - `/api/ops/security-evidence/attest` (POST, interpreter+)
 - `/api/ops/security-evidence/attest/latest` (GET, viewer+)
 - `/api/ops/security-evidence/freshness` (GET, viewer+)
+- `/api/ops/security-evidence/gate` (GET, viewer+)
 - `/api/ops/evidence-status?probe=true`
 
 Security governance docs:

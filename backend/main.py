@@ -8111,6 +8111,18 @@ class OpsSecurityEvidenceFreshnessResponse(BaseModel):
     timestamp: str
 
 
+class OpsSecurityEvidenceGateResponse(BaseModel):
+    ok: bool
+    attest_ok: bool
+    freshness_ok: bool
+    attest_reason_code: str | None = None
+    freshness_reason_code: Literal["FRESH", "STALE", "EVIDENCE_MISSING"]
+    artifact_dir: str
+    report_age_seconds: int | None = None
+    max_age_seconds: int
+    timestamp: str
+
+
 def _attest_security_evidence_payload(report: dict[str, Any] | None, signature_obj: dict[str, Any] | None) -> dict[str, Any]:
     if not report:
         return {
@@ -8328,6 +8340,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/security-evidence/attest": "1.0",
         "/api/ops/security-evidence/attest/latest": "1.0",
         "/api/ops/security-evidence/freshness": "1.0",
+        "/api/ops/security-evidence/gate": "1.0",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -8370,6 +8383,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/security-evidence/attest": "1.0",
                             "/api/ops/security-evidence/attest/latest": "1.0",
                             "/api/ops/security-evidence/freshness": "1.0",
+                            "/api/ops/security-evidence/gate": "1.0",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
@@ -8548,6 +8562,30 @@ def ops_security_evidence_freshness(max_age_seconds: int = 86400, _role: str = D
         "max_age_seconds": max_age_seconds,
         "stale": stale,
         "reason_code": "STALE" if stale else "FRESH",
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
+@app.get(
+    "/api/ops/security-evidence/gate",
+    response_model=OpsSecurityEvidenceGateResponse,
+)
+def ops_security_evidence_gate(max_age_seconds: int = 86400, _role: str = Depends(require_viewer)):
+    max_age_seconds = max(60, int(max_age_seconds))
+    attest = ops_security_evidence_attest_latest(_role=_role)
+    freshness = ops_security_evidence_freshness(max_age_seconds=max_age_seconds, _role=_role)
+
+    attest_ok = bool(attest.get("ok", False))
+    freshness_ok = bool(freshness.get("ok", False))
+    return {
+        "ok": attest_ok and freshness_ok,
+        "attest_ok": attest_ok,
+        "freshness_ok": freshness_ok,
+        "attest_reason_code": attest.get("reason_code"),
+        "freshness_reason_code": freshness.get("reason_code", "EVIDENCE_MISSING"),
+        "artifact_dir": str(freshness.get("artifact_dir") or ""),
+        "report_age_seconds": freshness.get("report_age_seconds"),
+        "max_age_seconds": int(freshness.get("max_age_seconds") or max_age_seconds),
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
 

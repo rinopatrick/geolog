@@ -1507,6 +1507,14 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert stale.get("ok") is False
             assert stale.get("stale") is True
             assert stale.get("reason_code") == "STALE"
+
+            rg = client.get("/api/ops/security-evidence/gate?max_age_seconds=60", headers=_h("viewer"))
+            assert rg.status_code == 200
+            gate = rg.json()
+            assert gate.get("ok") is False
+            assert gate.get("attest_ok") is True
+            assert gate.get("freshness_ok") is False
+            assert gate.get("freshness_reason_code") == "STALE"
         finally:
             if old_dir is None:
                 os.environ.pop("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR", None)
@@ -1719,6 +1727,7 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/security-evidence/attest" in endpoints
     assert "/api/ops/security-evidence/attest/latest" in endpoints
     assert "/api/ops/security-evidence/freshness" in endpoints
+    assert "/api/ops/security-evidence/gate" in endpoints
     assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
@@ -1846,6 +1855,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     security_evidence_attest_post = paths.get("/api/ops/security-evidence/attest", {}).get("post", {})
     security_evidence_attest_latest_get = paths.get("/api/ops/security-evidence/attest/latest", {}).get("get", {})
     security_evidence_freshness_get = paths.get("/api/ops/security-evidence/freshness", {}).get("get", {})
+    security_evidence_gate_get = paths.get("/api/ops/security-evidence/gate", {}).get("get", {})
     contracts_get = paths.get("/api/ops/contracts", {}).get("get", {})
     contracts_verify_path = paths.get("/api/ops/contracts/verify-signature", {})
     contracts_verify_get = contracts_verify_path.get("get", {})
@@ -1869,6 +1879,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert security_evidence_attest_post.get("operationId")
     assert security_evidence_attest_latest_get.get("operationId")
     assert security_evidence_freshness_get.get("operationId")
+    assert security_evidence_gate_get.get("operationId")
     assert contracts_get.get("operationId")
     assert contracts_verify_get.get("operationId")
     assert contracts_verify_post.get("operationId")
@@ -1895,6 +1906,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsSecurityEvidenceAttestRequest" in schemas
     assert "OpsSecurityEvidenceAttestResponse" in schemas
     assert "OpsSecurityEvidenceFreshnessResponse" in schemas
+    assert "OpsSecurityEvidenceGateResponse" in schemas
     assert "OpsContractsResponse" in schemas
     assert "OpsRunbookResponse" in schemas
 
