@@ -74,11 +74,13 @@ try:
     from models import Project, Well, LogRun, CurveData, FormationTop, Annotation, DSTTest, RFTPoint, CompletionData, ProductionData, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
     from las_parser import LASParser, CURVE_TRACKS
     from dlis_lis_parser import parse_dlis_content, parse_lis_content
+    from security import AuthConfig, resolve_auth_context, require_min_role, role_from_request, ROLE_RANK
 except ImportError:
     from backend.database import engine, Base, get_db, SessionLocal
     from backend.models import Project, Well, LogRun, CurveData, FormationTop, Annotation, DSTTest, RFTPoint, CompletionData, ProductionData, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
     from backend.las_parser import LASParser, CURVE_TRACKS
     from backend.dlis_lis_parser import parse_dlis_content, parse_lis_content
+    from backend.security import AuthConfig, resolve_auth_context, require_min_role, role_from_request, ROLE_RANK
 
 # Create tables
 # Configure logging
@@ -371,25 +373,27 @@ def _list_jobs():
     with JOBS_LOCK:
         return [dict(j) for j in JOBS.values()]
 
-ROLE_RANK = {"viewer": 1, "interpreter": 2, "admin": 3}
-
-def _require_role(min_role: str, x_user_role: str = Header(default="viewer")):
-    role = (x_user_role or "viewer").strip().lower()
-    if ROLE_RANK.get(role, 0) < ROLE_RANK.get(min_role, 99):
-        raise HTTPException(status_code=403, detail=f"{min_role} role required")
-    return role
+AUTH_CONFIG = AuthConfig.from_env()
+if AUTH_CONFIG.mode == "header":
+    logger.warning("AUTH_MODE=header (compat mode). Set AUTH_MODE=jwt for server-verified bearer auth.")
 
 
-def require_viewer(x_user_role: str = Header(default="viewer")):
-    return _require_role("viewer", x_user_role)
+def _require_role(min_role: str, request: Request):
+    current = role_from_request(request)
+    require_min_role(min_role, current)
+    return current
 
 
-def require_interpreter(x_user_role: str = Header(default="viewer")):
-    return _require_role("interpreter", x_user_role)
+def require_viewer(request: Request):
+    return _require_role("viewer", request)
 
 
-def require_admin(x_user_role: str = Header(default="viewer")):
-    return _require_role("admin", x_user_role)
+def require_interpreter(request: Request):
+    return _require_role("interpreter", request)
+
+
+def require_admin(request: Request):
+    return _require_role("admin", request)
 
 app.add_middleware(
     CORSMiddleware,
@@ -486,12 +490,25 @@ def _lttb_indices(x: np.ndarray, y: np.ndarray, threshold: int):
     return np.unique(np.clip(sampled, 0, n - 1))
 
 
+class AuthContextMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        try:
+            auth_ctx = resolve_auth_context(request, AUTH_CONFIG)
+        except HTTPException as e:
+            return SafeJSONResponse(status_code=e.status_code, content={"detail": e.detail})
+        request.state.user_role = auth_ctx.role
+        request.state.auth_subject = auth_ctx.subject
+        request.state.auth_source = auth_ctx.source
+        request.state.auth_claims = auth_ctx.claims
+        return await call_next(request)
+
+
 class RBACWriteGuardMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         method = request.method.upper()
         path = request.url.path
         if method in {"POST", "PUT", "DELETE"} and path.startswith("/api/"):
-            role = (request.headers.get("X-User-Role") or "viewer").strip().lower()
+            role = role_from_request(request)
 
             # POST endpoints that are read/query-only (safe for viewer)
             viewer_safe = {
@@ -563,6 +580,7 @@ class ErrorLoggingMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(RBACWriteGuardMiddleware)
 app.add_middleware(ErrorLoggingMiddleware)
+app.add_middleware(AuthContextMiddleware)
 
 
 # ─── Auto-seed demo data on first startup ───────────────────

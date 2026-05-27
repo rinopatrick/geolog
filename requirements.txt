@@ -5,3 +5,4 @@ pydantic==2.9.2
 python-multipart==0.0.12
 numpy==1.26.4
 reportlab==4.5.1
+PyJWT==2.9.0
