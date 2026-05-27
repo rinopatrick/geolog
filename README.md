@@ -170,6 +170,37 @@ Interactive OpenAPI docs are available when server is running:
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
 
+### Audit Signature Verification Contract (Compliance)
+
+Export endpoint:
+- `GET /api/audit-log/verify/export?sign=true&kid=<optional>`
+- returns: `payload`, `signature`, `signature_alg`, `signature_kid`
+
+Verify endpoints:
+- `GET /api/audit-log/verify/signature` (query params: `payload`, `signature`, `kid`)
+- `POST /api/audit-log/verify/signature` (JSON body: `payload`, `signature`, `kid`) — requires `interpreter` role
+
+Verifier response fields:
+- `ok`: boolean
+- `reason`: human-readable detail
+- `reason_code`: stable enum for machine integration
+- `signature_alg`: currently `hmac-sha256`
+- `signature_kid`: key-id used during verification
+
+`reason_code` values:
+- `SIGNATURE_VALID`
+- `SIGNATURE_MISMATCH`
+- `UNKNOWN_KID`
+- `INVALID_KEYRING_JSON`
+- `ACTIVE_KID_MISSING`
+- `KEY_NOT_CONFIGURED`
+- `KEY_RESOLUTION_ERROR` (fallback)
+
+Signing key env config:
+- `AUDIT_EXPORT_HMAC_KEYS_JSON='{"k1":"secret1","k2":"secret2"}'`
+- `AUDIT_EXPORT_HMAC_ACTIVE_KID='k2'`
+- legacy fallback: `AUDIT_EXPORT_HMAC_KEY`
+
 ---
 
 ## Keyboard Shortcuts
