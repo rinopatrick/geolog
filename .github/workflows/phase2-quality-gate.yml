@@ -1,0 +1,27 @@
+name: phase2-quality-gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  phase2-critical-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest coverage
+
+      - name: Run critical-path coverage gate (>=80%)
+        run: bash scripts/phase2_critical_coverage_gate.sh

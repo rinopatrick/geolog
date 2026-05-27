@@ -327,6 +327,16 @@ cd /home/patrick/geolog-app
 pytest -q tests/test_parser.py
 ```
 
+### Phase 2 critical-path coverage gate (target >=80%)
+```bash
+cd /home/patrick/geolog-app
+bash scripts/phase2_critical_coverage_gate.sh
+```
+
+Gate scope (Phase 2 reliability/governance critical path):
+- `backend/security.py`
+- `backend/routers/reports.py`
+
 Notes:
 - Parser tests run without server.
 - API tests in `test_parser.py` require GeoLog running at `http://localhost:8000`.
