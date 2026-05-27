@@ -871,3 +871,15 @@ def test_ops_alerts_can_report_breach_with_strict_env_thresholds():
             os.environ.pop("OPS_SLO_ERROR_RATE", None)
         else:
             os.environ["OPS_SLO_ERROR_RATE"] = old_err
+
+
+def test_ops_metrics_prometheus_exposition_shape():
+    _ = client.get("/api/wells", headers=_h("viewer"))
+    r = client.get("/api/ops/metrics/prometheus", headers=_h("viewer"))
+    assert r.status_code == 200
+    text = r.text
+    assert "# HELP geolog_requests_total" in text
+    assert "# TYPE geolog_requests_total counter" in text
+    assert "geolog_requests_total" in text
+    assert "geolog_request_latency_ms_sum" in text
+    assert "geolog_request_latency_ms_count" in text

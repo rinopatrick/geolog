@@ -7110,6 +7110,45 @@ def ops_alerts(_role: str = Depends(require_viewer)):
     }
 
 
+@app.get("/api/ops/metrics/prometheus")
+def ops_metrics_prometheus(_role: str = Depends(require_viewer)):
+    """Prometheus text exposition for lightweight ops metrics."""
+    with OBS_METRICS_LOCK:
+        total = int(OBS_METRICS.get("requests_total", 0))
+        by_method = dict(OBS_METRICS.get("requests_by_method", {}))
+        by_status = dict(OBS_METRICS.get("requests_by_status", {}))
+        lat_sum = float(OBS_METRICS.get("latency_ms_sum", 0.0))
+        lat_count = int(OBS_METRICS.get("latency_ms_count", 0))
+
+    lines = [
+        "# HELP geolog_requests_total Total HTTP requests observed",
+        "# TYPE geolog_requests_total counter",
+        f"geolog_requests_total {total}",
+        "# HELP geolog_requests_by_method_total HTTP requests by method",
+        "# TYPE geolog_requests_by_method_total counter",
+    ]
+    for method, count in sorted(by_method.items()):
+        lines.append(f'geolog_requests_by_method_total{{method="{method}"}} {int(count)}')
+
+    lines += [
+        "# HELP geolog_requests_by_status_total HTTP requests by response status",
+        "# TYPE geolog_requests_by_status_total counter",
+    ]
+    for status, count in sorted(by_status.items()):
+        lines.append(f'geolog_requests_by_status_total{{status="{status}"}} {int(count)}')
+
+    lines += [
+        "# HELP geolog_request_latency_ms_sum Sum of request latency in milliseconds",
+        "# TYPE geolog_request_latency_ms_sum counter",
+        f"geolog_request_latency_ms_sum {lat_sum}",
+        "# HELP geolog_request_latency_ms_count Count of request latency samples",
+        "# TYPE geolog_request_latency_ms_count counter",
+        f"geolog_request_latency_ms_count {lat_count}",
+        "",
+    ]
+    return StreamingResponse(iter(["\n".join(lines)]), media_type="text/plain; version=0.0.4")
+
+
 @app.post("/api/wells/{wid}/electrofacies-async", status_code=202)
 def electrofacies_async(wid: int, data: dict, _role: str = Depends(require_interpreter)):
     """Queue electrofacies clustering in background job."""
