@@ -7478,6 +7478,13 @@ class OpsRunbookResponse(BaseModel):
     timestamp: str
 
 
+class OpsContractsResponse(BaseModel):
+    api_group: str
+    contract_version: str
+    endpoints: dict[str, str]
+    timestamp: str
+
+
 class OpsSummaryStatus(BaseModel):
     db_ok: bool
     slo_ok: bool
@@ -7581,6 +7588,57 @@ def ops_summary(db: Session = Depends(get_db), _role: str = Depends(require_view
             "targets": dict(slo.get("targets", {})),
             "current": dict(slo.get("current", {})),
             "checks": dict(slo.get("checks", {})),
+        },
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
+@app.get(
+    "/api/ops/contracts",
+    response_model=OpsContractsResponse,
+    responses={
+        200: {
+            "description": "Contract registry for ops/audit endpoints",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "api_group": "ops-audit",
+                        "contract_version": "2.0",
+                        "endpoints": {
+                            "/api/audit-log/verify/export": "1.2",
+                            "/api/audit-log/verify/signature": "1.1",
+                            "/api/ops/metrics": "1.0",
+                            "/api/ops/metrics/recent": "1.1",
+                            "/api/ops/metrics/prometheus": "1.0",
+                            "/api/ops/slo-status": "1.1",
+                            "/api/ops/alerts": "1.2",
+                            "/api/ops/health": "1.0",
+                            "/api/ops/runbook": "1.0",
+                            "/api/ops/summary": "1.1",
+                        },
+                        "timestamp": "2026-01-01T00:00:00Z",
+                    }
+                }
+            },
+        }
+    },
+)
+def ops_contracts(_role: str = Depends(require_viewer)):
+    """Machine-readable contract/version registry for ops and audit APIs."""
+    return {
+        "api_group": "ops-audit",
+        "contract_version": "2.0",
+        "endpoints": {
+            "/api/audit-log/verify/export": "1.2",
+            "/api/audit-log/verify/signature": "1.1",
+            "/api/ops/metrics": "1.0",
+            "/api/ops/metrics/recent": "1.1",
+            "/api/ops/metrics/prometheus": "1.0",
+            "/api/ops/slo-status": "1.1",
+            "/api/ops/alerts": "1.2",
+            "/api/ops/health": "1.0",
+            "/api/ops/runbook": "1.0",
+            "/api/ops/summary": "1.1",
         },
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }

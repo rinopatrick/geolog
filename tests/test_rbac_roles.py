@@ -1019,6 +1019,25 @@ def test_ops_summary_unknown_role_allowed_as_viewer_floor():
     assert r.status_code == 200
 
 
+def test_ops_contracts_shape_and_access():
+    r = client.get("/api/ops/contracts", headers=_h("viewer"))
+    assert r.status_code == 200
+    data = r.json()
+
+    assert data.get("api_group") == "ops-audit"
+    assert "contract_version" in data
+    endpoints = data.get("endpoints", {})
+    assert isinstance(endpoints, dict)
+    assert "/api/ops/summary" in endpoints
+    assert "/api/ops/alerts" in endpoints
+    assert "/api/audit-log/verify/signature" in endpoints
+
+
+def test_ops_contracts_unknown_role_allowed_as_viewer_floor():
+    r = client.get("/api/ops/contracts", headers=_h("unknown"))
+    assert r.status_code == 200
+
+
 def test_ops_summary_openapi_contract_present():
     r = client.get("/openapi.json")
     assert r.status_code == 200
@@ -1049,6 +1068,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     slo_get = paths.get("/api/ops/slo-status", {}).get("get", {})
     alerts_get = paths.get("/api/ops/alerts", {}).get("get", {})
     health_get = paths.get("/api/ops/health", {}).get("get", {})
+    contracts_get = paths.get("/api/ops/contracts", {}).get("get", {})
     runbook_get = paths.get("/api/ops/runbook", {}).get("get", {})
     assert metrics_get.get("operationId")
     assert metrics_recent_get.get("operationId")
@@ -1056,6 +1076,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert slo_get.get("operationId")
     assert alerts_get.get("operationId")
     assert health_get.get("operationId")
+    assert contracts_get.get("operationId")
     assert runbook_get.get("operationId")
 
     prom_200 = metrics_prom_get.get("responses", {}).get("200", {})
@@ -1068,6 +1089,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsSloStatusResponse" in schemas
     assert "OpsAlertsResponse" in schemas
     assert "OpsHealthResponse" in schemas
+    assert "OpsContractsResponse" in schemas
     assert "OpsRunbookResponse" in schemas
 
 
