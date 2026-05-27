@@ -1118,6 +1118,44 @@ def test_ops_otel_status_shape_and_env_signals():
             os.environ["OTEL_RESOURCE_ATTRIBUTES"] = old_attrs
 
 
+def test_ops_evidence_status_shape_and_acceptance_gate():
+    import os
+
+    keys = ["OPS_DASHBOARD_URL", "OPS_ALERT_TARGET", "OPS_TRACE_BACKEND_URL"]
+    old = {k: os.environ.get(k) for k in keys}
+
+    os.environ["OPS_DASHBOARD_URL"] = "http://grafana.local/d/geolog"
+    os.environ["OPS_ALERT_TARGET"] = "slack:#ops-alerts"
+    os.environ["OPS_TRACE_BACKEND_URL"] = "http://jaeger.local:16686"
+
+    try:
+        r = client.get("/api/ops/evidence-status", headers=_h("viewer"))
+        assert r.status_code == 200
+        data = r.json()
+        assert data.get("ok") is True
+        assert data.get("dashboard_configured") is True
+        assert data.get("alert_delivery_configured") is True
+        assert data.get("trace_backend_configured") is True
+        assert data.get("ready_for_phase2_acceptance") is True
+        assert data.get("dashboard_url") == "http://grafana.local/d/geolog"
+        assert data.get("alert_delivery_target") == "slack:#ops-alerts"
+        assert data.get("trace_backend_url") == "http://jaeger.local:16686"
+        assert "timestamp" in data
+
+        os.environ.pop("OPS_TRACE_BACKEND_URL", None)
+        r2 = client.get("/api/ops/evidence-status", headers=_h("viewer"))
+        assert r2.status_code == 200
+        data2 = r2.json()
+        assert data2.get("trace_backend_configured") is False
+        assert data2.get("ready_for_phase2_acceptance") is False
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 def test_ops_health_unknown_role_allowed_as_viewer_floor():
     r = client.get("/api/ops/health", headers=_h("unknown"))
     assert r.status_code == 200
@@ -1184,6 +1222,7 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/summary" in endpoints
     assert "/api/ops/observability-status" in endpoints
     assert "/api/ops/otel-status" in endpoints
+    assert "/api/ops/evidence-status" in endpoints
     assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
@@ -1301,6 +1340,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     health_get = paths.get("/api/ops/health", {}).get("get", {})
     obs_status_get = paths.get("/api/ops/observability-status", {}).get("get", {})
     otel_status_get = paths.get("/api/ops/otel-status", {}).get("get", {})
+    evidence_status_get = paths.get("/api/ops/evidence-status", {}).get("get", {})
     contracts_get = paths.get("/api/ops/contracts", {}).get("get", {})
     contracts_verify_path = paths.get("/api/ops/contracts/verify-signature", {})
     contracts_verify_get = contracts_verify_path.get("get", {})
@@ -1315,6 +1355,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert health_get.get("operationId")
     assert obs_status_get.get("operationId")
     assert otel_status_get.get("operationId")
+    assert evidence_status_get.get("operationId")
     assert contracts_get.get("operationId")
     assert contracts_verify_get.get("operationId")
     assert contracts_verify_post.get("operationId")
@@ -1333,6 +1374,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsHealthResponse" in schemas
     assert "OpsObservabilityStatusResponse" in schemas
     assert "OpsOtelStatusResponse" in schemas
+    assert "OpsEvidenceStatusResponse" in schemas
     assert "OpsContractsResponse" in schemas
     assert "OpsRunbookResponse" in schemas
 
@@ -1346,6 +1388,13 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "enabled" in otel_props
     assert "exporter_otlp_endpoint_set" in otel_props
     assert "service_name" in otel_props
+
+    evidence_schema = schemas.get("OpsEvidenceStatusResponse", {})
+    evidence_props = evidence_schema.get("properties", {})
+    assert "dashboard_configured" in evidence_props
+    assert "alert_delivery_configured" in evidence_props
+    assert "trace_backend_configured" in evidence_props
+    assert "ready_for_phase2_acceptance" in evidence_props
 
     alert_rules_schema = schemas.get("OpsAlertRulesResponse", {})
     alert_rules_props = alert_rules_schema.get("properties", {})

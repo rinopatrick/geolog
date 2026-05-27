@@ -7588,6 +7588,18 @@ class OpsOtelStatusResponse(BaseModel):
     timestamp: str
 
 
+class OpsEvidenceStatusResponse(BaseModel):
+    ok: bool
+    dashboard_configured: bool
+    dashboard_url: str | None = None
+    alert_delivery_configured: bool
+    alert_delivery_target: str | None = None
+    trace_backend_configured: bool
+    trace_backend_url: str | None = None
+    ready_for_phase2_acceptance: bool
+    timestamp: str
+
+
 @app.get(
     "/api/ops/health",
     response_model=OpsHealthResponse,
@@ -7662,6 +7674,30 @@ def ops_otel_status(_role: str = Depends(require_viewer)):
         "exporter_otlp_endpoint_set": bool(endpoint),
         "service_name": service_name,
         "resource_attributes_set": bool(resource_attrs),
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
+@app.get("/api/ops/evidence-status", response_model=OpsEvidenceStatusResponse)
+def ops_evidence_status(_role: str = Depends(require_viewer)):
+    dashboard_url = (os.getenv("OPS_DASHBOARD_URL") or "").strip()
+    alert_target = (os.getenv("OPS_ALERT_TARGET") or "").strip()
+    trace_backend_url = (os.getenv("OPS_TRACE_BACKEND_URL") or "").strip()
+
+    dashboard_configured = bool(dashboard_url)
+    alert_delivery_configured = bool(alert_target)
+    trace_backend_configured = bool(trace_backend_url)
+    ready = bool(dashboard_configured and alert_delivery_configured and trace_backend_configured)
+
+    return {
+        "ok": True,
+        "dashboard_configured": dashboard_configured,
+        "dashboard_url": dashboard_url or None,
+        "alert_delivery_configured": alert_delivery_configured,
+        "alert_delivery_target": alert_target or None,
+        "trace_backend_configured": trace_backend_configured,
+        "trace_backend_url": trace_backend_url or None,
+        "ready_for_phase2_acceptance": ready,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
 
@@ -7812,6 +7848,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/health": "1.0",
         "/api/ops/observability-status": "1.1",
         "/api/ops/otel-status": "1.0",
+        "/api/ops/evidence-status": "1.0",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -7846,6 +7883,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/health": "1.0",
                             "/api/ops/observability-status": "1.1",
                             "/api/ops/otel-status": "1.0",
+                            "/api/ops/evidence-status": "1.0",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
