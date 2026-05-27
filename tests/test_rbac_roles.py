@@ -1137,17 +1137,30 @@ def test_ops_evidence_status_shape_and_acceptance_gate():
         assert data.get("alert_delivery_configured") is True
         assert data.get("trace_backend_configured") is True
         assert data.get("ready_for_phase2_acceptance") is True
+        assert data.get("probes_enabled") is False
+        assert data.get("dashboard_reachable") is None
+        assert data.get("trace_backend_reachable") is None
         assert data.get("dashboard_url") == "http://grafana.local/d/geolog"
         assert data.get("alert_delivery_target") == "slack:#ops-alerts"
         assert data.get("trace_backend_url") == "http://jaeger.local:16686"
         assert "timestamp" in data
 
-        os.environ.pop("OPS_TRACE_BACKEND_URL", None)
-        r2 = client.get("/api/ops/evidence-status", headers=_h("viewer"))
+        os.environ["OPS_DASHBOARD_URL"] = "http://127.0.0.1:9/unreachable"
+        os.environ["OPS_TRACE_BACKEND_URL"] = "http://127.0.0.1:9/unreachable"
+        r2 = client.get("/api/ops/evidence-status?probe=true", headers=_h("viewer"))
         assert r2.status_code == 200
         data2 = r2.json()
-        assert data2.get("trace_backend_configured") is False
+        assert data2.get("probes_enabled") is True
+        assert data2.get("dashboard_reachable") is False
+        assert data2.get("trace_backend_reachable") is False
         assert data2.get("ready_for_phase2_acceptance") is False
+
+        os.environ.pop("OPS_TRACE_BACKEND_URL", None)
+        r3 = client.get("/api/ops/evidence-status", headers=_h("viewer"))
+        assert r3.status_code == 200
+        data3 = r3.json()
+        assert data3.get("trace_backend_configured") is False
+        assert data3.get("ready_for_phase2_acceptance") is False
     finally:
         for k, v in old.items():
             if v is None:
@@ -1392,8 +1405,11 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     evidence_schema = schemas.get("OpsEvidenceStatusResponse", {})
     evidence_props = evidence_schema.get("properties", {})
     assert "dashboard_configured" in evidence_props
+    assert "dashboard_reachable" in evidence_props
     assert "alert_delivery_configured" in evidence_props
     assert "trace_backend_configured" in evidence_props
+    assert "trace_backend_reachable" in evidence_props
+    assert "probes_enabled" in evidence_props
     assert "ready_for_phase2_acceptance" in evidence_props
 
     alert_rules_schema = schemas.get("OpsAlertRulesResponse", {})

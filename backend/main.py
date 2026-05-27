@@ -73,6 +73,8 @@ from threading import Lock
 import uuid
 import hashlib
 import hmac
+import urllib.request
+import urllib.error
 from email.utils import format_datetime, parsedate_to_datetime
 
 try:
@@ -7592,10 +7594,13 @@ class OpsEvidenceStatusResponse(BaseModel):
     ok: bool
     dashboard_configured: bool
     dashboard_url: str | None = None
+    dashboard_reachable: bool | None = None
     alert_delivery_configured: bool
     alert_delivery_target: str | None = None
     trace_backend_configured: bool
     trace_backend_url: str | None = None
+    trace_backend_reachable: bool | None = None
+    probes_enabled: bool
     ready_for_phase2_acceptance: bool
     timestamp: str
 
@@ -7679,7 +7684,10 @@ def ops_otel_status(_role: str = Depends(require_viewer)):
 
 
 @app.get("/api/ops/evidence-status", response_model=OpsEvidenceStatusResponse)
-def ops_evidence_status(_role: str = Depends(require_viewer)):
+def ops_evidence_status(
+    probe: bool = Query(default=False, description="When true, perform live HTTP reachability probes for dashboard/trace URLs"),
+    _role: str = Depends(require_viewer),
+):
     dashboard_url = (os.getenv("OPS_DASHBOARD_URL") or "").strip()
     alert_target = (os.getenv("OPS_ALERT_TARGET") or "").strip()
     trace_backend_url = (os.getenv("OPS_TRACE_BACKEND_URL") or "").strip()
@@ -7687,16 +7695,43 @@ def ops_evidence_status(_role: str = Depends(require_viewer)):
     dashboard_configured = bool(dashboard_url)
     alert_delivery_configured = bool(alert_target)
     trace_backend_configured = bool(trace_backend_url)
-    ready = bool(dashboard_configured and alert_delivery_configured and trace_backend_configured)
+
+    def _probe_http(url: str) -> bool | None:
+        u = (url or "").strip().lower()
+        if not u:
+            return None
+        if not (u.startswith("http://") or u.startswith("https://")):
+            return None
+        req = urllib.request.Request(url, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
+                return int(getattr(resp, "status", 0) or 0) < 500
+        except urllib.error.HTTPError as e:
+            return int(getattr(e, "code", 0) or 0) < 500
+        except Exception:
+            return False
+
+    dashboard_reachable = _probe_http(dashboard_url) if probe and dashboard_configured else None
+    trace_backend_reachable = _probe_http(trace_backend_url) if probe and trace_backend_configured else None
+
+    infra_ready = bool(dashboard_configured and alert_delivery_configured and trace_backend_configured)
+    if probe:
+        probe_ready = bool((dashboard_reachable is True) and (trace_backend_reachable is True))
+        ready = bool(infra_ready and probe_ready)
+    else:
+        ready = infra_ready
 
     return {
         "ok": True,
         "dashboard_configured": dashboard_configured,
         "dashboard_url": dashboard_url or None,
+        "dashboard_reachable": dashboard_reachable,
         "alert_delivery_configured": alert_delivery_configured,
         "alert_delivery_target": alert_target or None,
         "trace_backend_configured": trace_backend_configured,
         "trace_backend_url": trace_backend_url or None,
+        "trace_backend_reachable": trace_backend_reachable,
+        "probes_enabled": bool(probe),
         "ready_for_phase2_acceptance": ready,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
