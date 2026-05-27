@@ -977,6 +977,40 @@ def test_ops_health_unknown_role_allowed_as_viewer_floor():
     assert r.status_code == 200
 
 
+def test_ops_summary_shape_and_access():
+    _ = client.get("/api/wells", headers=_h("viewer"))
+    r = client.get("/api/ops/summary", headers=_h("viewer"))
+    assert r.status_code == 200
+    data = r.json()
+
+    assert "ok" in data
+    assert "status" in data
+    assert "alerts" in data
+    assert "traffic" in data
+
+    status = data["status"]
+    alerts = data["alerts"]
+    traffic = data["traffic"]
+
+    assert "db_ok" in status
+    assert "slo_ok" in status
+    assert "alerts_ok" in status
+
+    assert "count" in alerts
+    assert "highest_severity" in alerts
+    assert "severity_counts" in alerts
+    assert "code_counts" in alerts
+
+    assert "requests_total" in traffic
+    assert "latency_ms_avg" in traffic
+    assert "error_rate" in traffic
+
+
+def test_ops_summary_unknown_role_allowed_as_viewer_floor():
+    r = client.get("/api/ops/summary", headers=_h("unknown"))
+    assert r.status_code == 200
+
+
 def test_ops_runbook_shape_and_alert_entries():
     r = client.get("/api/ops/runbook", headers=_h("viewer"))
     assert r.status_code == 200

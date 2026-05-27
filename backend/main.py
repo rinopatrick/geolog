@@ -7275,6 +7275,36 @@ def ops_health(db: Session = Depends(get_db), _role: str = Depends(require_viewe
     }
 
 
+@app.get("/api/ops/summary")
+def ops_summary(db: Session = Depends(get_db), _role: str = Depends(require_viewer)):
+    """One-shot ops summary for dashboards and external monitors."""
+    health = ops_health(db, _role)
+    slo = ops_slo_status(_role)
+    alerts = ops_alerts(_role)
+    metrics = ops_metrics(_role)
+
+    return {
+        "ok": bool(health.get("ok", False)),
+        "status": {
+            "db_ok": bool(health.get("db_ok", False)),
+            "slo_ok": bool(slo.get("ok", False)),
+            "alerts_ok": bool(alerts.get("ok", False)),
+        },
+        "alerts": {
+            "count": int(alerts.get("count", 0)),
+            "highest_severity": str(alerts.get("highest_severity", "none")),
+            "severity_counts": dict(alerts.get("severity_counts", {})),
+            "code_counts": dict(alerts.get("code_counts", {})),
+        },
+        "traffic": {
+            "requests_total": int(metrics.get("requests_total", 0)),
+            "latency_ms_avg": float(metrics.get("latency_ms_avg", 0.0)),
+            "error_rate": float(slo.get("current", {}).get("error_rate", 0.0)),
+        },
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
 @app.get("/api/ops/runbook")
 def ops_runbook(_role: str = Depends(require_viewer)):
     """Machine-readable operator runbook for current alert codes."""
