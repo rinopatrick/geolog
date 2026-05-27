@@ -1027,6 +1027,9 @@ def test_ops_contracts_shape_and_access():
     assert data.get("api_group") == "ops-audit"
     assert "contract_version" in data
     assert "digest_sha256" in data
+    assert data.get("signature") is None
+    assert data.get("signature_alg") is None
+    assert data.get("signature_kid") is None
     digest = str(data.get("digest_sha256", ""))
     assert len(digest) == 64
     assert all(c in "0123456789abcdef" for c in digest.lower())
@@ -1035,6 +1038,40 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/summary" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
+
+
+def test_ops_contracts_sign_hmac_with_requested_kid(monkeypatch):
+    import os
+
+    old_ring = os.environ.get("AUDIT_EXPORT_HMAC_KEYS_JSON")
+    old_active = os.environ.get("AUDIT_EXPORT_HMAC_ACTIVE_KID")
+    old_legacy = os.environ.get("AUDIT_EXPORT_HMAC_KEY")
+
+    os.environ["AUDIT_EXPORT_HMAC_KEYS_JSON"] = '{"k1":"secret-one","k2":"secret-two"}'
+    os.environ["AUDIT_EXPORT_HMAC_ACTIVE_KID"] = "k2"
+    os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
+
+    try:
+        r = client.get("/api/ops/contracts?sign=true&kid=k1", headers=_h("viewer"))
+        assert r.status_code == 200
+        data = r.json()
+        sig = str(data.get("signature") or "")
+        assert len(sig) == 64
+        assert data.get("signature_alg") == "hmac-sha256"
+        assert data.get("signature_kid") == "k1"
+    finally:
+        if old_ring is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_KEYS_JSON", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_KEYS_JSON"] = old_ring
+        if old_active is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_ACTIVE_KID", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_ACTIVE_KID"] = old_active
+        if old_legacy is None:
+            os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
+        else:
+            os.environ["AUDIT_EXPORT_HMAC_KEY"] = old_legacy
 
 
 def test_ops_contracts_unknown_role_allowed_as_viewer_floor():
@@ -1099,6 +1136,9 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     contracts_schema = schemas.get("OpsContractsResponse", {})
     contracts_props = contracts_schema.get("properties", {})
     assert "digest_sha256" in contracts_props
+    assert "signature" in contracts_props
+    assert "signature_alg" in contracts_props
+    assert "signature_kid" in contracts_props
 
 
 def test_ops_runbook_shape_and_alert_entries():

@@ -7483,6 +7483,9 @@ class OpsContractsResponse(BaseModel):
     contract_version: str
     endpoints: dict[str, str]
     digest_sha256: str
+    signature: str | None = None
+    signature_alg: str | None = None
+    signature_kid: str | None = None
     timestamp: str
 
 
@@ -7618,6 +7621,9 @@ def ops_summary(db: Session = Depends(get_db), _role: str = Depends(require_view
                             "/api/ops/summary": "1.1",
                         },
                         "digest_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                        "signature": None,
+                        "signature_alg": None,
+                        "signature_kid": None,
                         "timestamp": "2026-01-01T00:00:00Z",
                     }
                 }
@@ -7625,7 +7631,11 @@ def ops_summary(db: Session = Depends(get_db), _role: str = Depends(require_view
         }
     },
 )
-def ops_contracts(_role: str = Depends(require_viewer)):
+def ops_contracts(
+    sign: bool = False,
+    kid: str | None = None,
+    _role: str = Depends(require_viewer),
+):
     """Machine-readable contract/version registry for ops and audit APIs."""
     endpoints = {
         "/api/audit-log/verify/export": "1.2",
@@ -7647,13 +7657,25 @@ def ops_contracts(_role: str = Depends(require_viewer)):
     canonical = json.dumps(digest_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
-    return {
+    out = {
         "api_group": "ops-audit",
         "contract_version": "2.0",
         "endpoints": endpoints,
         "digest_sha256": digest,
+        "signature": None,
+        "signature_alg": None,
+        "signature_kid": None,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
+
+    if sign:
+        resolved_kid, key_raw = _resolve_audit_export_signing_key(kid)
+        sig = hmac.new(key_raw.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+        out["signature"] = sig
+        out["signature_alg"] = "hmac-sha256"
+        out["signature_kid"] = resolved_kid
+
+    return out
 
 
 @app.get(
