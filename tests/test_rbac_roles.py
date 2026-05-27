@@ -945,6 +945,51 @@ def test_ops_alerts_shape_and_access():
     assert "critical" in data["severity_counts"]
 
 
+def test_ops_alert_rules_shape_and_env_thresholds():
+    import os
+
+    old_avg = os.environ.get("OPS_SLO_AVG_MS")
+    old_p95 = os.environ.get("OPS_SLO_P95_MS")
+    old_err = os.environ.get("OPS_SLO_ERROR_RATE")
+
+    os.environ["OPS_SLO_AVG_MS"] = "321"
+    os.environ["OPS_SLO_P95_MS"] = "654"
+    os.environ["OPS_SLO_ERROR_RATE"] = "0.123"
+
+    try:
+        r = client.get("/api/ops/alert-rules", headers=_h("viewer"))
+        assert r.status_code == 200
+        data = r.json()
+        assert data.get("version") == "1.0"
+        rules = data.get("rules", [])
+        assert isinstance(rules, list)
+        assert len(rules) == 3
+
+        by_code = {str(x.get("code")): x for x in rules if isinstance(x, dict)}
+        assert "LATENCY_AVG_SLO_BREACH" in by_code
+        assert "LATENCY_P95_SLO_BREACH" in by_code
+        assert "ERROR_RATE_SLO_BREACH" in by_code
+
+        assert float(by_code["LATENCY_AVG_SLO_BREACH"].get("threshold")) == 321.0
+        assert float(by_code["LATENCY_P95_SLO_BREACH"].get("threshold")) == 654.0
+        assert float(by_code["ERROR_RATE_SLO_BREACH"].get("threshold")) == 0.123
+        assert str(by_code["ERROR_RATE_SLO_BREACH"].get("severity")) == "critical"
+        assert "timestamp" in data
+    finally:
+        if old_avg is None:
+            os.environ.pop("OPS_SLO_AVG_MS", None)
+        else:
+            os.environ["OPS_SLO_AVG_MS"] = old_avg
+        if old_p95 is None:
+            os.environ.pop("OPS_SLO_P95_MS", None)
+        else:
+            os.environ["OPS_SLO_P95_MS"] = old_p95
+        if old_err is None:
+            os.environ.pop("OPS_SLO_ERROR_RATE", None)
+        else:
+            os.environ["OPS_SLO_ERROR_RATE"] = old_err
+
+
 def test_ops_alerts_can_report_breach_with_strict_env_thresholds():
     import os
 
@@ -1139,6 +1184,7 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/summary" in endpoints
     assert "/api/ops/observability-status" in endpoints
     assert "/api/ops/otel-status" in endpoints
+    assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
     assert "/api/audit-log/immutability-status" in endpoints
@@ -1251,6 +1297,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     metrics_prom_get = paths.get("/api/ops/metrics/prometheus", {}).get("get", {})
     slo_get = paths.get("/api/ops/slo-status", {}).get("get", {})
     alerts_get = paths.get("/api/ops/alerts", {}).get("get", {})
+    alert_rules_get = paths.get("/api/ops/alert-rules", {}).get("get", {})
     health_get = paths.get("/api/ops/health", {}).get("get", {})
     obs_status_get = paths.get("/api/ops/observability-status", {}).get("get", {})
     otel_status_get = paths.get("/api/ops/otel-status", {}).get("get", {})
@@ -1264,6 +1311,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert metrics_prom_get.get("operationId")
     assert slo_get.get("operationId")
     assert alerts_get.get("operationId")
+    assert alert_rules_get.get("operationId")
     assert health_get.get("operationId")
     assert obs_status_get.get("operationId")
     assert otel_status_get.get("operationId")
@@ -1281,6 +1329,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "OpsMetricsRecentResponse" in schemas
     assert "OpsSloStatusResponse" in schemas
     assert "OpsAlertsResponse" in schemas
+    assert "OpsAlertRulesResponse" in schemas
     assert "OpsHealthResponse" in schemas
     assert "OpsObservabilityStatusResponse" in schemas
     assert "OpsOtelStatusResponse" in schemas
@@ -1297,6 +1346,11 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "enabled" in otel_props
     assert "exporter_otlp_endpoint_set" in otel_props
     assert "service_name" in otel_props
+
+    alert_rules_schema = schemas.get("OpsAlertRulesResponse", {})
+    alert_rules_props = alert_rules_schema.get("properties", {})
+    assert "version" in alert_rules_props
+    assert "rules" in alert_rules_props
 
     contracts_schema = schemas.get("OpsContractsResponse", {})
     contracts_props = contracts_schema.get("properties", {})

@@ -7261,6 +7261,21 @@ class OpsAlertsResponse(BaseModel):
     timestamp: str
 
 
+class OpsAlertRule(BaseModel):
+    code: str
+    severity: Literal["warning", "critical"]
+    metric: str
+    threshold: float
+    operator: Literal[">"]
+    env_key: str
+
+
+class OpsAlertRulesResponse(BaseModel):
+    version: str
+    rules: list[OpsAlertRule]
+    timestamp: str
+
+
 @app.get(
     "/api/ops/slo-status",
     response_model=OpsSloStatusResponse,
@@ -7425,6 +7440,70 @@ def ops_alerts(_role: str = Depends(require_viewer)):
         "severity_counts": severity_counts,
         "code_counts": code_counts,
         "highest_severity": highest_severity,
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
+@app.get(
+    "/api/ops/alert-rules",
+    response_model=OpsAlertRulesResponse,
+    responses={
+        200: {
+            "description": "Configured SLO alert rules and threshold source",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "version": "1.0",
+                        "rules": [
+                            {
+                                "code": "LATENCY_AVG_SLO_BREACH",
+                                "severity": "warning",
+                                "metric": "latency_ms_avg",
+                                "threshold": 500.0,
+                                "operator": ">",
+                                "env_key": "OPS_SLO_AVG_MS",
+                            }
+                        ],
+                        "timestamp": "2026-01-01T00:00:00Z",
+                    }
+                }
+            },
+        }
+    },
+)
+def ops_alert_rules(_role: str = Depends(require_viewer)):
+    """Alert-rule contract for runtime SLO thresholds (env-backed)."""
+    avg = float(os.getenv("OPS_SLO_AVG_MS", "500") or 500)
+    p95 = float(os.getenv("OPS_SLO_P95_MS", "800") or 800)
+    err = float(os.getenv("OPS_SLO_ERROR_RATE", "0.01") or 0.01)
+    return {
+        "version": "1.0",
+        "rules": [
+            {
+                "code": "LATENCY_AVG_SLO_BREACH",
+                "severity": "warning",
+                "metric": "latency_ms_avg",
+                "threshold": avg,
+                "operator": ">",
+                "env_key": "OPS_SLO_AVG_MS",
+            },
+            {
+                "code": "LATENCY_P95_SLO_BREACH",
+                "severity": "warning",
+                "metric": "latency_ms_p95",
+                "threshold": p95,
+                "operator": ">",
+                "env_key": "OPS_SLO_P95_MS",
+            },
+            {
+                "code": "ERROR_RATE_SLO_BREACH",
+                "severity": "critical",
+                "metric": "error_rate",
+                "threshold": err,
+                "operator": ">",
+                "env_key": "OPS_SLO_ERROR_RATE",
+            },
+        ],
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }
 
@@ -7729,6 +7808,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/metrics/prometheus": "1.0",
         "/api/ops/slo-status": "1.1",
         "/api/ops/alerts": "1.2",
+        "/api/ops/alert-rules": "1.0",
         "/api/ops/health": "1.0",
         "/api/ops/observability-status": "1.1",
         "/api/ops/otel-status": "1.0",
@@ -7762,6 +7842,7 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/metrics/prometheus": "1.0",
                             "/api/ops/slo-status": "1.1",
                             "/api/ops/alerts": "1.2",
+                            "/api/ops/alert-rules": "1.0",
                             "/api/ops/health": "1.0",
                             "/api/ops/observability-status": "1.1",
                             "/api/ops/otel-status": "1.0",
