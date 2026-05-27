@@ -739,6 +739,19 @@ def test_audit_verify_signature_post_requires_interpreter():
     assert r.status_code == 403
 
 
+def test_audit_verify_signature_get_rejects_non_hex_signature():
+    r = client.get(
+        "/api/audit-log/verify/signature",
+        headers=_h("viewer"),
+        params={
+            "payload": "{}",
+            "signature": "z" * 64,
+        },
+    )
+    assert r.status_code == 400
+    assert "64-char hex" in str(r.json().get("detail", ""))
+
+
 def test_audit_verify_signature_post_interpreter_ok_and_mismatch():
     import os
 
@@ -1095,6 +1108,22 @@ def test_ops_contracts_sign_hmac_with_requested_kid(monkeypatch):
             os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
         else:
             os.environ["AUDIT_EXPORT_HMAC_KEY"] = old_legacy
+
+
+def test_ops_contracts_verify_signature_rejects_non_hex_signature_formats():
+    rg = client.get(
+        "/api/ops/contracts/verify-signature",
+        headers=_h("viewer"),
+        params={"kid": "k1", "signature": "z" * 64},
+    )
+    assert rg.status_code == 400
+
+    rp = client.post(
+        "/api/ops/contracts/verify-signature",
+        headers=_h("interpreter"),
+        json={"payload": {"ignored": True}, "signature": "z" * 64, "kid": "k1"},
+    )
+    assert rp.status_code == 422
 
 
 def test_ops_contracts_unknown_role_allowed_as_viewer_floor():

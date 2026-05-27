@@ -5531,7 +5531,7 @@ AuditReasonCode = Literal[
 
 class AuditSignatureVerifyRequest(BaseModel):
     payload: dict[str, Any]
-    signature: str = Field(..., min_length=64, max_length=64)
+    signature: str = Field(..., min_length=64, max_length=64, pattern="^[0-9a-fA-F]{64}$")
     kid: str | None = None
 
 
@@ -5546,7 +5546,11 @@ class AuditSignatureVerifyResponse(BaseModel):
 def _verify_audit_export_signature_payload(payload_obj: dict, signature: str, kid: str | None = None):
     if not isinstance(payload_obj, dict):
         raise HTTPException(status_code=400, detail="payload JSON must be an object")
-    if not isinstance(signature, str) or len(signature) != 64:
+    if (
+        not isinstance(signature, str)
+        or len(signature) != 64
+        or any(ch not in "0123456789abcdefABCDEF" for ch in signature)
+    ):
         raise HTTPException(status_code=400, detail="signature must be a 64-char hex string")
 
     canonical = json.dumps(payload_obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
