@@ -7363,7 +7363,19 @@ def ops_alerts(_role: str = Depends(require_viewer)):
     }
 
 
-@app.get("/api/ops/metrics/prometheus")
+@app.get(
+    "/api/ops/metrics/prometheus",
+    responses={
+        200: {
+            "description": "Prometheus text exposition format",
+            "content": {
+                "text/plain": {
+                    "example": "# HELP geolog_requests_total Total HTTP requests observed\n# TYPE geolog_requests_total counter\ngeolog_requests_total 123"
+                }
+            },
+        }
+    },
+)
 def ops_metrics_prometheus(_role: str = Depends(require_viewer)):
     """Prometheus text exposition for lightweight ops metrics."""
     with OBS_METRICS_LOCK:
