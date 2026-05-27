@@ -1520,6 +1520,7 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert attest_only.get("failed_checks") == []
             assert attest_only.get("requested_checks") == ["attest"]
             assert attest_only.get("ignored_checks") == []
+            assert attest_only.get("defaulted_checks") is False
 
             rk_with_invalid = client.post(
                 "/api/ops/security-evidence/gate/check?max_age_seconds=86400&min_retention_days=31&required_checks=attest,foo,attest",
@@ -1531,6 +1532,15 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert with_invalid.get("ignored_checks") == ["foo"]
             assert with_invalid.get("duplicate_checks") == ["attest"]
             assert with_invalid.get("strict_required_checks") is False
+
+            rk_defaulted = client.post(
+                "/api/ops/security-evidence/gate/check?max_age_seconds=86400&min_retention_days=31&required_checks=foo",
+                headers=_h("interpreter"),
+            )
+            assert rk_defaulted.status_code == 200
+            defaulted = rk_defaulted.json()
+            assert defaulted.get("defaulted_checks") is True
+            assert defaulted.get("evaluated_checks") == ["attest", "freshness", "retention"]
 
             rk_with_invalid_strict = client.post(
                 "/api/ops/security-evidence/gate/check?max_age_seconds=86400&min_retention_days=31&required_checks=attest,foo,attest&strict_required_checks=true",
@@ -1809,10 +1819,10 @@ def test_ops_contracts_shape_and_access():
     assert "/api/ops/security-evidence/gate/enforce" in endpoints
     assert "/api/ops/security-evidence/gate/assert" in endpoints
     assert "/api/ops/security-evidence/gate/check" in endpoints
-    assert endpoints.get("/api/ops/security-evidence/gate") == "1.5"
-    assert endpoints.get("/api/ops/security-evidence/gate/enforce") == "1.5"
-    assert endpoints.get("/api/ops/security-evidence/gate/assert") == "1.5"
-    assert endpoints.get("/api/ops/security-evidence/gate/check") == "1.5"
+    assert endpoints.get("/api/ops/security-evidence/gate") == "1.6"
+    assert endpoints.get("/api/ops/security-evidence/gate/enforce") == "1.6"
+    assert endpoints.get("/api/ops/security-evidence/gate/assert") == "1.6"
+    assert endpoints.get("/api/ops/security-evidence/gate/check") == "1.6"
     assert "/api/ops/alert-rules" in endpoints
     assert "/api/ops/alerts" in endpoints
     assert "/api/audit-log/verify/signature" in endpoints
@@ -2011,6 +2021,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "evaluated_checks" in gate_error_detail_props
     assert "failed_checks" in gate_error_detail_props
     assert "strict_required_checks" in gate_error_detail_props
+    assert "defaulted_checks" in gate_error_detail_props
     assert "requested_checks" in gate_error_detail_props
     assert "ignored_checks" in gate_error_detail_props
     assert "duplicate_checks" in gate_error_detail_props
@@ -2023,6 +2034,7 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "evaluated_checks" in gate_props
     assert "failed_checks" in gate_props
     assert "strict_required_checks" in gate_props
+    assert "defaulted_checks" in gate_props
     assert "requested_checks" in gate_props
     assert "ignored_checks" in gate_props
     assert "duplicate_checks" in gate_props

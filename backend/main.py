@@ -8117,6 +8117,7 @@ class OpsSecurityEvidenceGateResponse(BaseModel):
     freshness_ok: bool
     retention_ok: bool
     strict_required_checks: bool
+    defaulted_checks: bool
     requested_checks: list[str]
     ignored_checks: list[str]
     duplicate_checks: list[str]
@@ -8136,6 +8137,7 @@ class OpsSecurityEvidenceGateResponse(BaseModel):
 class OpsSecurityEvidenceGateErrorDetail(BaseModel):
     error: str
     strict_required_checks: bool
+    defaulted_checks: bool
     requested_checks: list[str]
     ignored_checks: list[str]
     duplicate_checks: list[str]
@@ -8372,10 +8374,10 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/security-evidence/attest": "1.0",
         "/api/ops/security-evidence/attest/latest": "1.0",
         "/api/ops/security-evidence/freshness": "1.0",
-        "/api/ops/security-evidence/gate": "1.5",
-        "/api/ops/security-evidence/gate/enforce": "1.5",
-        "/api/ops/security-evidence/gate/assert": "1.5",
-        "/api/ops/security-evidence/gate/check": "1.5",
+        "/api/ops/security-evidence/gate": "1.6",
+        "/api/ops/security-evidence/gate/enforce": "1.6",
+        "/api/ops/security-evidence/gate/assert": "1.6",
+        "/api/ops/security-evidence/gate/check": "1.6",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -8418,10 +8420,10 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/security-evidence/attest": "1.0",
                             "/api/ops/security-evidence/attest/latest": "1.0",
                             "/api/ops/security-evidence/freshness": "1.0",
-                            "/api/ops/security-evidence/gate": "1.5",
-                            "/api/ops/security-evidence/gate/enforce": "1.5",
-                            "/api/ops/security-evidence/gate/assert": "1.5",
-                            "/api/ops/security-evidence/gate/check": "1.5",
+                            "/api/ops/security-evidence/gate": "1.6",
+                            "/api/ops/security-evidence/gate/enforce": "1.6",
+                            "/api/ops/security-evidence/gate/assert": "1.6",
+                            "/api/ops/security-evidence/gate/check": "1.6",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
@@ -8646,7 +8648,8 @@ def ops_security_evidence_gate(
             },
         )
 
-    if not evaluated_checks:
+    defaulted_checks = len(evaluated_checks) == 0
+    if defaulted_checks:
         evaluated_checks = ["attest", "freshness", "retention"]
 
     attest = ops_security_evidence_attest_latest(_role=_role)
@@ -8673,6 +8676,7 @@ def ops_security_evidence_gate(
         "freshness_ok": freshness_ok,
         "retention_ok": retention_ok,
         "strict_required_checks": bool(strict_required_checks),
+        "defaulted_checks": bool(defaulted_checks),
         "requested_checks": parsed_checks,
         "ignored_checks": ignored_checks,
         "duplicate_checks": duplicate_checks,
@@ -8694,6 +8698,7 @@ def _security_evidence_gate_failure_detail(gate: dict[str, Any]) -> dict[str, An
     return {
         "error": "security evidence gate failed",
         "strict_required_checks": bool(gate.get("strict_required_checks", False)),
+        "defaulted_checks": bool(gate.get("defaulted_checks", False)),
         "requested_checks": gate.get("requested_checks", []),
         "ignored_checks": gate.get("ignored_checks", []),
         "duplicate_checks": gate.get("duplicate_checks", []),
