@@ -378,12 +378,12 @@ Ops status endpoints:
 - `/api/ops/security-evidence/attest` (POST, interpreter+)
 - `/api/ops/security-evidence/attest/latest` (GET, viewer+)
 - `/api/ops/security-evidence/freshness` (GET, viewer+)
-- `/api/ops/security-evidence/gate` (GET, viewer+, supports `max_age_seconds` + `min_retention_days` + `required_checks` + `strict_required_checks`; includes `gate_reason_code` + `gate_failed_count` + `gate_passed_count` + `gate_total_count` + `gate_pass_ratio` + `gate_fail_ratio` + `strict_required_checks` + `defaulted_checks` + `requested_checks` + `ignored_checks` + `duplicate_checks` + `evaluated_checks` + `failed_checks` for automation)
+- `/api/ops/security-evidence/gate` (GET, viewer+, supports `max_age_seconds` + `min_retention_days` + `required_checks` + `strict_required_checks`; includes `gate_reason_code` + `gate_failed_count` + `gate_passed_count` + `gate_total_count` + `gate_pass_ratio` + `gate_fail_ratio` + `gate_consistency_ok` + `strict_required_checks` + `defaulted_checks` + `requested_checks` + `ignored_checks` + `duplicate_checks` + `evaluated_checks` + `failed_checks` for automation)
 - `/api/ops/security-evidence/gate/enforce` (GET, viewer+, returns 503 when gate fails, supports `max_age_seconds` + `min_retention_days` + `required_checks` + `strict_required_checks`)
 - `/api/ops/security-evidence/gate/assert` (POST, interpreter+, returns 503 when gate fails, supports `max_age_seconds` + `min_retention_days` + `required_checks` + `strict_required_checks`)
-- `503` gate failure response is schema-based (`OpsSecurityEvidenceGateErrorResponse`) and includes `gate_reason_code` + `gate_failed_count` + `gate_passed_count` + `gate_total_count` + `gate_pass_ratio` + `gate_fail_ratio` + `strict_required_checks` + `defaulted_checks` + `requested_checks` + `ignored_checks` + `duplicate_checks` + `evaluated_checks` + `failed_checks`
+- `503` gate failure response is schema-based (`OpsSecurityEvidenceGateErrorResponse`) and includes `gate_reason_code` + `gate_failed_count` + `gate_passed_count` + `gate_total_count` + `gate_pass_ratio` + `gate_fail_ratio` + `gate_consistency_ok` + `strict_required_checks` + `defaulted_checks` + `requested_checks` + `ignored_checks` + `duplicate_checks` + `evaluated_checks` + `failed_checks`
 - `/api/ops/security-evidence/gate/check` (POST, interpreter+, always 200 with gate payload, supports `max_age_seconds` + `min_retention_days` + `required_checks` + `strict_required_checks`)
-- Contracts registry version for gate family is now `1.12`
+- Contracts registry version for gate family is now `1.13`
 - `/api/ops/evidence-status?probe=true`
 
 Security governance docs:

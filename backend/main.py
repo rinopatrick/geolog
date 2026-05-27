@@ -8119,6 +8119,7 @@ class OpsSecurityEvidenceGateResponse(BaseModel):
     gate_total_count: int
     gate_pass_ratio: float
     gate_fail_ratio: float
+    gate_consistency_ok: bool
     attest_ok: bool
     freshness_ok: bool
     retention_ok: bool
@@ -8148,6 +8149,7 @@ class OpsSecurityEvidenceGateErrorDetail(BaseModel):
     gate_total_count: int
     gate_pass_ratio: float
     gate_fail_ratio: float
+    gate_consistency_ok: bool
     strict_required_checks: bool
     defaulted_checks: bool
     requested_checks: list[str]
@@ -8386,10 +8388,10 @@ def _ops_contracts_payload() -> dict[str, Any]:
         "/api/ops/security-evidence/attest": "1.0",
         "/api/ops/security-evidence/attest/latest": "1.0",
         "/api/ops/security-evidence/freshness": "1.0",
-        "/api/ops/security-evidence/gate": "1.12",
-        "/api/ops/security-evidence/gate/enforce": "1.12",
-        "/api/ops/security-evidence/gate/assert": "1.12",
-        "/api/ops/security-evidence/gate/check": "1.12",
+        "/api/ops/security-evidence/gate": "1.13",
+        "/api/ops/security-evidence/gate/enforce": "1.13",
+        "/api/ops/security-evidence/gate/assert": "1.13",
+        "/api/ops/security-evidence/gate/check": "1.13",
         "/api/ops/runbook": "1.0",
         "/api/ops/summary": "1.1",
     }
@@ -8432,10 +8434,10 @@ def _ops_contracts_payload() -> dict[str, Any]:
                             "/api/ops/security-evidence/attest": "1.0",
                             "/api/ops/security-evidence/attest/latest": "1.0",
                             "/api/ops/security-evidence/freshness": "1.0",
-                            "/api/ops/security-evidence/gate": "1.12",
-                            "/api/ops/security-evidence/gate/enforce": "1.12",
-                            "/api/ops/security-evidence/gate/assert": "1.12",
-                            "/api/ops/security-evidence/gate/check": "1.12",
+                            "/api/ops/security-evidence/gate": "1.13",
+                            "/api/ops/security-evidence/gate/enforce": "1.13",
+                            "/api/ops/security-evidence/gate/assert": "1.13",
+                            "/api/ops/security-evidence/gate/check": "1.13",
                             "/api/ops/runbook": "1.0",
                             "/api/ops/summary": "1.1",
                         },
@@ -8686,6 +8688,10 @@ def ops_security_evidence_gate(
     gate_total_count = int(len(evaluated_checks))
     gate_pass_ratio = float(gate_passed_count / gate_total_count) if gate_total_count > 0 else 0.0
     gate_fail_ratio = float(gate_failed_count / gate_total_count) if gate_total_count > 0 else 0.0
+    gate_consistency_ok = bool(
+        (gate_failed_count + gate_passed_count == gate_total_count)
+        and abs((gate_pass_ratio + gate_fail_ratio) - 1.0) <= 1e-9 if gate_total_count > 0 else True
+    )
 
     return {
         "ok": gate_failed_count == 0,
@@ -8695,6 +8701,7 @@ def ops_security_evidence_gate(
         "gate_total_count": gate_total_count,
         "gate_pass_ratio": gate_pass_ratio,
         "gate_fail_ratio": gate_fail_ratio,
+        "gate_consistency_ok": gate_consistency_ok,
         "attest_ok": attest_ok,
         "freshness_ok": freshness_ok,
         "retention_ok": retention_ok,
@@ -8731,6 +8738,13 @@ def _security_evidence_gate_failure_detail(gate: dict[str, Any]) -> dict[str, An
         "gate_fail_ratio": float(
             len(gate.get("failed_checks") or [])
             / max(1, len(gate.get("evaluated_checks") or []))
+        ),
+        "gate_consistency_ok": bool(
+            (
+                int(len(gate.get("failed_checks") or []))
+                + int(max(0, len(gate.get("evaluated_checks") or []) - len(gate.get("failed_checks") or [])))
+            )
+            == int(len(gate.get("evaluated_checks") or []))
         ),
         "strict_required_checks": bool(gate.get("strict_required_checks", False)),
         "defaulted_checks": bool(gate.get("defaulted_checks", False)),
