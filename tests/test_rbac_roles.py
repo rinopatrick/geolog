@@ -99,3 +99,36 @@ def test_report_pdf_endpoint_success_content_type():
     )
     assert r.status_code == 200
     assert "application/pdf" in (r.headers.get("content-type") or "")
+
+
+def test_zone_stats_contract_shape():
+    wells = client.get("/api/wells", headers=_h("viewer"))
+    assert wells.status_code == 200
+    data = wells.json()
+    assert isinstance(data, list) and len(data) > 0
+    wid = data[0]["id"]
+
+    r = client.get(f"/api/wells/{wid}/zone-stats", headers=_h("viewer"))
+    assert r.status_code == 200
+    payload = r.json()
+    assert "zones" in payload
+    assert "cutoffs" in payload
+    assert isinstance(payload["zones"], list)
+    assert isinstance(payload["cutoffs"], dict)
+    for key in ("vsh", "phie", "sw"):
+        assert key in payload["cutoffs"]
+
+
+def test_zonation_report_csv_contract():
+    wells = client.get("/api/wells", headers=_h("viewer"))
+    assert wells.status_code == 200
+    data = wells.json()
+    assert isinstance(data, list) and len(data) > 0
+    wid = data[0]["id"]
+
+    r = client.get(f"/api/wells/{wid}/zonation-report", headers=_h("viewer"))
+    assert r.status_code == 200
+    assert "text/csv" in (r.headers.get("content-type") or "")
+    body = r.text
+    assert "# ZONATION REPORT" in body
+    assert "# SUMMARY" in body

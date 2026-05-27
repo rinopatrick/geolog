@@ -3,13 +3,14 @@ from sqlalchemy.orm import Session
 
 try:
     from database import get_db
-    from models import Well, FormationTop, LogRun, CurveData, PetroParams
+    from models import Well, FormationTop, LogRun, CurveData, PetroParams, Zone
 except ImportError:
     from backend.database import get_db
-    from backend.models import Well, FormationTop, LogRun, CurveData, PetroParams
+    from backend.models import Well, FormationTop, LogRun, CurveData, PetroParams, Zone
 
 import datetime
 import io
+import csv
 import numpy as np
 
 from reportlab.lib import colors
@@ -23,6 +24,221 @@ from reportlab.graphics import renderPDF
 from starlette.responses import StreamingResponse
 
 router = APIRouter(prefix="/api/wells/{wid}", tags=["reports"])
+
+
+@router.get("/zone-stats")
+def zone_stats(wid: int, db: Session = Depends(get_db)):
+    """Compute petrophysics statistics per persisted zone for the latest log run."""
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+
+    zones = (
+        db.query(Zone)
+        .filter(Zone.well_id == wid)
+        .order_by(Zone.sort_order.asc(), Zone.id.asc())
+        .all()
+    )
+    if not zones:
+        return {
+            "zones": [],
+            "cutoffs": {"vsh": 0.35, "phie": 0.10, "sw": 0.60},
+        }
+
+    lr = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.id.desc()).first()
+    if not lr:
+        raise HTTPException(404, "No log run")
+
+    depth_cd = db.query(CurveData).filter(
+        CurveData.log_run_id == lr.id,
+        CurveData.mnemonic.in_(["DEPT", "DEPTH", "MD", "TVD"]),
+    ).first()
+    if not depth_cd:
+        raise HTTPException(404, "Depth curve not found")
+
+    depth = np.frombuffer(depth_cd.data_binary, dtype=np.float64).copy()
+
+    curve_map = {}
+    for mnem in ["PHIE", "SW", "VSH", "K"]:
+        cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == mnem).first()
+        if cd:
+            arr = np.frombuffer(cd.data_binary, dtype=np.float64).copy()
+            if len(arr) == len(depth):
+                curve_map[mnem] = arr
+
+    pp = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
+    vsh_cut = float(pp.vsh_cutoff) if pp and pp.vsh_cutoff is not None else 0.35
+    phie_cut = float(pp.phie_cutoff) if pp and pp.phie_cutoff is not None else 0.10
+    sw_cut = float(pp.sw_cutoff) if pp and pp.sw_cutoff is not None else 0.60
+
+    def _safe_stat(vals: np.ndarray, fn):
+        valid = vals[~np.isnan(vals)]
+        if len(valid) == 0:
+            return None
+        return round(float(fn(valid)), 6)
+
+    out_zones = []
+    for z in zones:
+        if z.top_depth is None or z.bottom_depth is None:
+            continue
+        top = float(z.top_depth)
+        bottom = float(z.bottom_depth)
+        if bottom <= top:
+            continue
+
+        zone_mask = (~np.isnan(depth)) & (depth >= top) & (depth <= bottom)
+        points = int(np.count_nonzero(zone_mask))
+        if points == 0:
+            continue
+
+        d_zone = depth[zone_mask]
+        if len(d_zone) > 1:
+            d_step = np.diff(d_zone)
+            d_step = d_step[np.isfinite(d_step)]
+            md_step = float(np.median(np.abs(d_step))) if len(d_step) else 0.0
+        else:
+            md_step = 0.0
+
+        zone_item = {
+            "name": z.name,
+            "top_depth": round(top, 6),
+            "bottom_depth": round(bottom, 6),
+            "gross_ft": round(bottom - top, 6),
+            "net_pay_ft": 0.0,
+            "ntg": 0.0,
+            "points": points,
+        }
+
+        for mnem in ["PHIE", "SW", "VSH", "K"]:
+            vals = curve_map.get(mnem)
+            if vals is None:
+                zone_item[f"avg_{mnem.lower()}"] = None
+                zone_item[f"min_{mnem.lower()}"] = None
+                zone_item[f"max_{mnem.lower()}"] = None
+                zone_item[f"std_{mnem.lower()}"] = None
+                continue
+            zvals = vals[zone_mask]
+            zone_item[f"avg_{mnem.lower()}"] = _safe_stat(zvals, np.mean)
+            zone_item[f"min_{mnem.lower()}"] = _safe_stat(zvals, np.min)
+            zone_item[f"max_{mnem.lower()}"] = _safe_stat(zvals, np.max)
+            zone_item[f"std_{mnem.lower()}"] = _safe_stat(zvals, np.std)
+
+        phie_vals = curve_map.get("PHIE")
+        sw_vals = curve_map.get("SW")
+        vsh_vals = curve_map.get("VSH")
+        if phie_vals is not None and sw_vals is not None and vsh_vals is not None and md_step > 0:
+            phie_z = phie_vals[zone_mask]
+            sw_z = sw_vals[zone_mask]
+            vsh_z = vsh_vals[zone_mask]
+            pay_mask = (
+                (~np.isnan(phie_z))
+                & (~np.isnan(sw_z))
+                & (~np.isnan(vsh_z))
+                & (vsh_z < vsh_cut)
+                & (phie_z > phie_cut)
+                & (sw_z < sw_cut)
+            )
+            net_pay_ft = float(np.count_nonzero(pay_mask)) * md_step
+            gross_ft = float(zone_item["gross_ft"])
+            zone_item["net_pay_ft"] = round(net_pay_ft, 6)
+            zone_item["ntg"] = round((net_pay_ft / gross_ft), 6) if gross_ft > 0 else 0.0
+
+        out_zones.append(zone_item)
+
+    return {
+        "zones": out_zones,
+        "cutoffs": {"vsh": vsh_cut, "phie": phie_cut, "sw": sw_cut},
+    }
+
+
+
+@router.get("/zonation-report")
+def zonation_report(wid: int, db: Session = Depends(get_db)):
+    """Generate full zonation report as downloadable CSV."""
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+
+    # Reuse zone-stats logic
+    zones_resp = zone_stats(wid, db)
+    zones = zones_resp.get("zones", [])
+    cutoffs = zones_resp.get("cutoffs", {})
+
+    # Compute totals
+    total_gross = sum(z.get("gross_ft", 0) for z in zones)
+    total_net = sum(z.get("net_pay_ft", 0) for z in zones)
+    total_ntg = (total_net / total_gross) if total_gross > 0 else 0
+
+    # Weighted averages
+    def weighted_avg(key):
+        vals = [(z.get(key, 0) or 0, z.get("net_pay_ft", 0)) for z in zones if z.get(key) is not None]
+        if not vals or sum(v[1] for v in vals) == 0:
+            return None
+        return sum(v[0] * v[1] for v in vals) / sum(v[1] for v in vals)
+
+    out = io.StringIO()
+    writer = csv.writer(out)
+
+    # Header section
+    writer.writerow(["# ZONATION REPORT"])
+    writer.writerow(["# Well", well.name])
+    writer.writerow(["# UWI", well.uwi or ""])
+    writer.writerow(["# Operator", well.operator or ""])
+    writer.writerow(["# Field", well.field_name or ""])
+    writer.writerow(["# Generated", datetime.datetime.now().strftime("%Y-%m-%d %H:%M")])
+    writer.writerow([])
+    writer.writerow(["# CUTOFFS"])
+    writer.writerow(["# Vsh_max", cutoffs.get("vsh", "")])
+    writer.writerow(["# PHIE_min", cutoffs.get("phie", "")])
+    writer.writerow(["# Sw_max", cutoffs.get("sw", "")])
+    writer.writerow([])
+
+    # Summary
+    writer.writerow(["# SUMMARY"])
+    writer.writerow(["# Total Gross (ft)", f"{total_gross:.1f}"])
+    writer.writerow(["# Total Net Pay (ft)", f"{total_net:.1f}"])
+    writer.writerow(["# Total NTG", f"{total_ntg:.3f}"])
+    wa_phie = weighted_avg("avg_phie")
+    wa_sw = weighted_avg("avg_sw")
+    wa_vsh = weighted_avg("avg_vsh")
+    if wa_phie is not None:
+        writer.writerow(["# Wtd Avg PHIE", f"{wa_phie:.4f}"])
+    if wa_sw is not None:
+        writer.writerow(["# Wtd Avg Sw", f"{wa_sw:.4f}"])
+    if wa_vsh is not None:
+        writer.writerow(["# Wtd Avg Vsh", f"{wa_vsh:.4f}"])
+    writer.writerow([])
+
+    # Zone table
+    headers = ["Zone", "Top (ft)", "Base (ft)", "Gross (ft)", "Net Pay (ft)",
+               "NTG", "Avg PHIE", "Avg Sw", "Avg Vsh", "Avg K", "Points"]
+    writer.writerow(headers)
+    for z in zones:
+        writer.writerow([
+            z.get("name", ""),
+            f"{z.get('top_depth', 0):.1f}",
+            f"{z.get('bottom_depth', 0):.1f}",
+            f"{z.get('gross_ft', 0):.1f}",
+            f"{z.get('net_pay_ft', 0):.1f}",
+            f"{z.get('ntg', 0):.3f}",
+            f"{z.get('avg_phie', 0):.4f}" if z.get('avg_phie') is not None else "",
+            f"{z.get('avg_sw', 0):.4f}" if z.get('avg_sw') is not None else "",
+            f"{z.get('avg_vsh', 0):.4f}" if z.get('avg_vsh') is not None else "",
+            f"{z.get('avg_k', 0):.2f}" if z.get('avg_k') is not None else "",
+            z.get("points", ""),
+        ])
+
+    # Totals row
+    writer.writerow([])
+    writer.writerow(["TOTAL", "", "", f"{total_gross:.1f}", f"{total_net:.1f}",
+                     f"{total_ntg:.3f}", "", "", "", "", len(zones)])
+
+    csv_text = out.getvalue()
+    out.close()
+    fname = f"{well.name or 'well'}_zonation_report.csv"
+    headers = {"Content-Disposition": f'attachment; filename="{fname}"'}
+    return StreamingResponse(iter([csv_text]), media_type="text/csv", headers=headers)
+
 
 
 @router.get("/report-pdf")
@@ -44,10 +260,6 @@ def generate_petrophysical_report_pdf(
         .order_by(FormationTop.depth.asc(), FormationTop.id.asc())
         .all()
     )
-    try:
-        from main import zone_stats
-    except ImportError:
-        from backend.main import zone_stats
     zones_resp = zone_stats(wid, db)
     zones = zones_resp.get("zones", [])
     cutoffs = zones_resp.get("cutoffs", {})
