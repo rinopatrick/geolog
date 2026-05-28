@@ -8730,28 +8730,28 @@ def ops_security_evidence_gate(
 
 
 def _security_evidence_gate_failure_detail(gate: dict[str, Any]) -> dict[str, Any]:
+    failed_count = int(len(gate.get("failed_checks") or []))
+    total_count = int(len(gate.get("evaluated_checks") or []))
+    passed_count = int(max(0, total_count - failed_count))
+    pass_ratio = float(passed_count / total_count) if total_count > 0 else 0.0
+    fail_ratio = float(failed_count / total_count) if total_count > 0 else 0.0
+    count_consistent = failed_count + passed_count == total_count
+    ratio_consistent = abs((pass_ratio + fail_ratio) - 1.0) <= 1e-9 if total_count > 0 else True
+    gate_consistency_ok = bool(count_consistent and ratio_consistent)
+    gate_consistency_reason = (
+        "CONSISTENT" if gate_consistency_ok else "COUNT_MISMATCH" if not count_consistent else "RATIO_MISMATCH"
+    )
+
     return {
         "error": "security evidence gate failed",
         "gate_reason_code": "GATE_FAIL",
-        "gate_failed_count": int(len(gate.get("failed_checks") or [])),
-        "gate_passed_count": int(max(0, len(gate.get("evaluated_checks") or []) - len(gate.get("failed_checks") or []))),
-        "gate_total_count": int(len(gate.get("evaluated_checks") or [])),
-        "gate_pass_ratio": float(
-            max(0, len(gate.get("evaluated_checks") or []) - len(gate.get("failed_checks") or []))
-            / max(1, len(gate.get("evaluated_checks") or []))
-        ),
-        "gate_fail_ratio": float(
-            len(gate.get("failed_checks") or [])
-            / max(1, len(gate.get("evaluated_checks") or []))
-        ),
-        "gate_consistency_ok": bool(
-            (
-                int(len(gate.get("failed_checks") or []))
-                + int(max(0, len(gate.get("evaluated_checks") or []) - len(gate.get("failed_checks") or [])))
-            )
-            == int(len(gate.get("evaluated_checks") or []))
-        ),
-        "gate_consistency_reason": "CONSISTENT",
+        "gate_failed_count": failed_count,
+        "gate_passed_count": passed_count,
+        "gate_total_count": total_count,
+        "gate_pass_ratio": pass_ratio,
+        "gate_fail_ratio": fail_ratio,
+        "gate_consistency_ok": gate_consistency_ok,
+        "gate_consistency_reason": gate_consistency_reason,
         "strict_required_checks": bool(gate.get("strict_required_checks", False)),
         "defaulted_checks": bool(gate.get("defaulted_checks", False)),
         "requested_checks": gate.get("requested_checks", []),

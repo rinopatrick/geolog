@@ -1613,6 +1613,8 @@ def test_ops_security_evidence_attest_latest_happy_path():
             detail = re.json().get("detail", {})
             assert detail.get("freshness_reason_code") == "STALE"
             assert "freshness" in (detail.get("failed_checks") or [])
+            assert detail.get("gate_consistency_ok") == gate.get("gate_consistency_ok")
+            assert detail.get("gate_consistency_reason") == gate.get("gate_consistency_reason")
 
             ra_forbidden = client.post("/api/ops/security-evidence/gate/assert?max_age_seconds=60", headers=_h("viewer"))
             assert ra_forbidden.status_code == 403
