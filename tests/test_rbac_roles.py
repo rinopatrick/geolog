@@ -9,6 +9,7 @@ if str(ROOT) not in sys.path:
 
 from backend.main import app
 from backend.main import SessionLocal, AuditLog
+from backend.main import _compute_gate_invariants
 
 
 client = TestClient(app)
@@ -2128,6 +2129,44 @@ def test_ops_slo_and_alerts_openapi_contract_present():
     assert "signature" in contracts_props
     assert "signature_alg" in contracts_props
     assert "signature_kid" in contracts_props
+
+
+def test_compute_gate_invariants_scenarios():
+    zero = _compute_gate_invariants([], [])
+    assert zero["gate_failed_count"] == 0
+    assert zero["gate_passed_count"] == 0
+    assert zero["gate_total_count"] == 0
+    assert zero["gate_pass_ratio"] == 0.0
+    assert zero["gate_fail_ratio"] == 0.0
+    assert zero["gate_consistency_ok"] is True
+    assert zero["gate_consistency_reason"] == "CONSISTENT"
+
+    one_fail = _compute_gate_invariants(["freshness"], ["freshness"])
+    assert one_fail["gate_failed_count"] == 1
+    assert one_fail["gate_passed_count"] == 0
+    assert one_fail["gate_total_count"] == 1
+    assert one_fail["gate_pass_ratio"] == 0.0
+    assert one_fail["gate_fail_ratio"] == 1.0
+    assert one_fail["gate_consistency_ok"] is True
+    assert one_fail["gate_consistency_reason"] == "CONSISTENT"
+
+    all_fail = _compute_gate_invariants(["attest", "freshness"], ["attest", "freshness"])
+    assert all_fail["gate_failed_count"] == 2
+    assert all_fail["gate_passed_count"] == 0
+    assert all_fail["gate_total_count"] == 2
+    assert all_fail["gate_pass_ratio"] == 0.0
+    assert all_fail["gate_fail_ratio"] == 1.0
+    assert all_fail["gate_consistency_ok"] is True
+    assert all_fail["gate_consistency_reason"] == "CONSISTENT"
+
+    mixed = _compute_gate_invariants(["freshness"], ["attest", "freshness", "retention"])
+    assert mixed["gate_failed_count"] == 1
+    assert mixed["gate_passed_count"] == 2
+    assert mixed["gate_total_count"] == 3
+    assert mixed["gate_pass_ratio"] == 2 / 3
+    assert mixed["gate_fail_ratio"] == 1 / 3
+    assert mixed["gate_consistency_ok"] is True
+    assert mixed["gate_consistency_reason"] == "CONSISTENT"
 
 
 def test_ops_runbook_shape_and_alert_entries():

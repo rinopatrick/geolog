@@ -8622,6 +8622,27 @@ def ops_security_evidence_freshness(max_age_seconds: int = 86400, _role: str = D
     }
 
 
+def _compute_gate_invariants(failed_checks: list[str], evaluated_checks: list[str]) -> dict[str, Any]:
+    failed_count = int(len(failed_checks or []))
+    total_count = int(len(evaluated_checks or []))
+    passed_count = int(max(0, total_count - failed_count))
+    pass_ratio = float(passed_count / total_count) if total_count > 0 else 0.0
+    fail_ratio = float(failed_count / total_count) if total_count > 0 else 0.0
+    count_consistent = failed_count + passed_count == total_count
+    ratio_consistent = abs((pass_ratio + fail_ratio) - 1.0) <= 1e-9 if total_count > 0 else True
+    consistency_ok = bool(count_consistent and ratio_consistent)
+    consistency_reason = "CONSISTENT" if consistency_ok else "COUNT_MISMATCH" if not count_consistent else "RATIO_MISMATCH"
+    return {
+        "gate_failed_count": failed_count,
+        "gate_passed_count": passed_count,
+        "gate_total_count": total_count,
+        "gate_pass_ratio": pass_ratio,
+        "gate_fail_ratio": fail_ratio,
+        "gate_consistency_ok": consistency_ok,
+        "gate_consistency_reason": consistency_reason,
+    }
+
+
 @app.get(
     "/api/ops/security-evidence/gate",
     response_model=OpsSecurityEvidenceGateResponse,
@@ -8685,28 +8706,18 @@ def ops_security_evidence_gate(
         "retention": retention_ok,
     }
     failed_checks: list[str] = [c for c in evaluated_checks if not bool(check_status.get(c, False))]
-    gate_failed_count = int(len(failed_checks))
-    gate_passed_count = int(max(0, len(evaluated_checks) - gate_failed_count))
-    gate_total_count = int(len(evaluated_checks))
-    gate_pass_ratio = float(gate_passed_count / gate_total_count) if gate_total_count > 0 else 0.0
-    gate_fail_ratio = float(gate_failed_count / gate_total_count) if gate_total_count > 0 else 0.0
-    count_consistent = gate_failed_count + gate_passed_count == gate_total_count
-    ratio_consistent = abs((gate_pass_ratio + gate_fail_ratio) - 1.0) <= 1e-9 if gate_total_count > 0 else True
-    gate_consistency_ok = bool(count_consistent and ratio_consistent)
-    gate_consistency_reason = (
-        "CONSISTENT" if gate_consistency_ok else "COUNT_MISMATCH" if not count_consistent else "RATIO_MISMATCH"
-    )
+    invariants = _compute_gate_invariants(failed_checks, evaluated_checks)
 
     return {
-        "ok": gate_failed_count == 0,
-        "gate_reason_code": "GATE_PASS" if gate_failed_count == 0 else "GATE_FAIL",
-        "gate_failed_count": gate_failed_count,
-        "gate_passed_count": gate_passed_count,
-        "gate_total_count": gate_total_count,
-        "gate_pass_ratio": gate_pass_ratio,
-        "gate_fail_ratio": gate_fail_ratio,
-        "gate_consistency_ok": gate_consistency_ok,
-        "gate_consistency_reason": gate_consistency_reason,
+        "ok": invariants["gate_failed_count"] == 0,
+        "gate_reason_code": "GATE_PASS" if invariants["gate_failed_count"] == 0 else "GATE_FAIL",
+        "gate_failed_count": invariants["gate_failed_count"],
+        "gate_passed_count": invariants["gate_passed_count"],
+        "gate_total_count": invariants["gate_total_count"],
+        "gate_pass_ratio": invariants["gate_pass_ratio"],
+        "gate_fail_ratio": invariants["gate_fail_ratio"],
+        "gate_consistency_ok": invariants["gate_consistency_ok"],
+        "gate_consistency_reason": invariants["gate_consistency_reason"],
         "attest_ok": attest_ok,
         "freshness_ok": freshness_ok,
         "retention_ok": retention_ok,
@@ -8730,28 +8741,18 @@ def ops_security_evidence_gate(
 
 
 def _security_evidence_gate_failure_detail(gate: dict[str, Any]) -> dict[str, Any]:
-    failed_count = int(len(gate.get("failed_checks") or []))
-    total_count = int(len(gate.get("evaluated_checks") or []))
-    passed_count = int(max(0, total_count - failed_count))
-    pass_ratio = float(passed_count / total_count) if total_count > 0 else 0.0
-    fail_ratio = float(failed_count / total_count) if total_count > 0 else 0.0
-    count_consistent = failed_count + passed_count == total_count
-    ratio_consistent = abs((pass_ratio + fail_ratio) - 1.0) <= 1e-9 if total_count > 0 else True
-    gate_consistency_ok = bool(count_consistent and ratio_consistent)
-    gate_consistency_reason = (
-        "CONSISTENT" if gate_consistency_ok else "COUNT_MISMATCH" if not count_consistent else "RATIO_MISMATCH"
-    )
+    invariants = _compute_gate_invariants(gate.get("failed_checks") or [], gate.get("evaluated_checks") or [])
 
     return {
         "error": "security evidence gate failed",
         "gate_reason_code": "GATE_FAIL",
-        "gate_failed_count": failed_count,
-        "gate_passed_count": passed_count,
-        "gate_total_count": total_count,
-        "gate_pass_ratio": pass_ratio,
-        "gate_fail_ratio": fail_ratio,
-        "gate_consistency_ok": gate_consistency_ok,
-        "gate_consistency_reason": gate_consistency_reason,
+        "gate_failed_count": invariants["gate_failed_count"],
+        "gate_passed_count": invariants["gate_passed_count"],
+        "gate_total_count": invariants["gate_total_count"],
+        "gate_pass_ratio": invariants["gate_pass_ratio"],
+        "gate_fail_ratio": invariants["gate_fail_ratio"],
+        "gate_consistency_ok": invariants["gate_consistency_ok"],
+        "gate_consistency_reason": invariants["gate_consistency_reason"],
         "strict_required_checks": bool(gate.get("strict_required_checks", False)),
         "defaulted_checks": bool(gate.get("defaulted_checks", False)),
         "requested_checks": gate.get("requested_checks", []),
