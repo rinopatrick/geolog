@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import tempfile
 
 from fastapi.testclient import TestClient
 
@@ -7,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from backend import main as main_mod
 from backend.main import app
 from backend.main import SessionLocal, AuditLog
 from backend.main import _compute_gate_invariants
@@ -2167,6 +2169,58 @@ def test_compute_gate_invariants_scenarios():
     assert mixed["gate_fail_ratio"] == 1 / 3
     assert mixed["gate_consistency_ok"] is True
     assert mixed["gate_consistency_reason"] == "CONSISTENT"
+
+
+def test_snapshot_approval_optimistic_lock_and_history(monkeypatch):
+    with tempfile.TemporaryDirectory() as td:
+        monkeypatch.setattr(main_mod, "SNAPSHOT_DIR", td)
+        wells_resp = client.get("/api/wells/", headers=_h("viewer"))
+        assert wells_resp.status_code == 200
+        wells = wells_resp.json()
+        assert isinstance(wells, list) and wells
+        wid = int(wells[0]["id"])
+
+        r_create = client.post(f"/api/wells/{wid}/snapshots", headers=_h("interpreter"), json={"label": "v1"})
+        assert r_create.status_code == 201
+        snap = r_create.json()
+        sid = snap["snapshot_id"]
+        assert snap.get("snapshot_version") == 1
+        assert snap.get("approval_status") == "pending"
+        assert snap.get("approval_history") == []
+
+        r_conflict = client.post(
+            f"/api/wells/{wid}/snapshots/{sid}/approve",
+            headers=_h("interpreter"),
+            json={"expected_version": 999, "approved_by": "qa-a"},
+        )
+        assert r_conflict.status_code == 409
+        detail = r_conflict.json().get("detail", {})
+        assert detail.get("error") == "snapshot version conflict"
+        assert detail.get("current_version") == 1
+
+        r_ok = client.post(
+            f"/api/wells/{wid}/snapshots/{sid}/approve",
+            headers=_h("interpreter"),
+            json={"expected_version": 1, "approved_by": "qa-a"},
+        )
+        assert r_ok.status_code == 200
+        approved = r_ok.json()
+        assert approved.get("approved") is True
+        assert approved.get("approval_status") == "approved"
+        assert approved.get("approved_by") == "qa-a"
+        assert approved.get("snapshot_version") == 2
+        history = approved.get("approval_history") or []
+        assert len(history) == 1
+        assert history[0].get("action") == "approve"
+        assert history[0].get("from_version") == 1
+        assert history[0].get("to_version") == 2
+
+        r_conflict_2 = client.post(
+            f"/api/wells/{wid}/snapshots/{sid}/approve",
+            headers=_h("interpreter"),
+            json={"expected_version": 1, "approved_by": "qa-b"},
+        )
+        assert r_conflict_2.status_code == 409
 
 
 def test_ops_runbook_shape_and_alert_entries():

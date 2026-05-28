@@ -2016,9 +2016,12 @@ def create_snapshot(wid: int, data: dict = None, db: Session = Depends(get_db)):
         "well_name": well.name,
         "created_at": datetime.datetime.utcnow().isoformat() + "Z",
         "label": (data or {}).get("label", f"snapshot-{len(snapshots)+1}"),
+        "snapshot_version": 1,
         "approved": False,
         "approved_by": None,
         "approved_at": None,
+        "approval_status": "pending",
+        "approval_history": [],
         "tops": tops,
         "zones": zones,
         "petro_params": params_dict,
@@ -2110,14 +2113,50 @@ def get_snapshot(wid: int, snapshot_id: str):
 
 
 @app.post("/api/wells/{wid}/snapshots/{snapshot_id}/approve")
-def approve_snapshot(wid: int, snapshot_id: str, data: dict = None):
-    actor = (data or {}).get("approved_by", "interpreter")
+def approve_snapshot(
+    wid: int,
+    snapshot_id: str,
+    data: dict = None,
+    x_user_role: str = Header(default="viewer"),
+):
+    role = (x_user_role or "viewer").lower()
+    if role not in {"admin", "interpreter"}:
+        raise HTTPException(403, "interpreter/admin role required")
+
+    actor = (data or {}).get("approved_by", role)
+    expected_version = (data or {}).get("expected_version")
     snaps = _load_snapshots(wid)
     for s in snaps:
         if s.get("snapshot_id") == snapshot_id:
+            current_version = int(s.get("snapshot_version") or 1)
+            if expected_version is not None and int(expected_version) != current_version:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "snapshot version conflict",
+                        "expected_version": int(expected_version),
+                        "current_version": current_version,
+                        "snapshot_id": snapshot_id,
+                    },
+                )
+
+            approved_at = datetime.datetime.utcnow().isoformat() + "Z"
             s["approved"] = True
             s["approved_by"] = actor
-            s["approved_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+            s["approved_at"] = approved_at
+            s["approval_status"] = "approved"
+            s["snapshot_version"] = current_version + 1
+            history = s.get("approval_history") if isinstance(s.get("approval_history"), list) else []
+            history.append(
+                {
+                    "action": "approve",
+                    "actor": actor,
+                    "at": approved_at,
+                    "from_version": current_version,
+                    "to_version": current_version + 1,
+                }
+            )
+            s["approval_history"] = history
             _save_snapshots(wid, snaps)
             _set_well_lock(wid, True, actor=actor, snapshot_id=snapshot_id)
             return s
