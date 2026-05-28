@@ -390,6 +390,11 @@ Security governance docs:
 - `docs/BRANCH_PROTECTION_CHECKLIST.md`
 - `docs/SECURITY_EVIDENCE_TEMPLATE.md`
 
+Phase 3b performance/SLO gate:
+- `.github/workflows/perf-slo-gates.yml`
+- Script: `scripts/slo_load_gate.py`
+- Validates measured latency/error-rate and `/api/ops/slo-status` checks under concurrent load.
+
 Startup security policy (non-dev fail-fast):
 - `GEOLOG_ENV` (e.g. `prod`, `staging`, `dev`)
 - `GEOLOG_ENFORCE_SECRETS_SOURCE` (default `true`)
