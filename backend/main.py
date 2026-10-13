@@ -18,43 +18,25 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 try:
+    from deps import SafeJSONResponse, require_admin, require_interpreter, require_role, require_viewer
     from routers.qc import router as qc_router
     from routers.correlation import router as corr_router
     from routers.zonation import router as zonation_router
     from routers.units import router as units_router
     from routers.templates import router as templates_router
     from routers.reports import router as reports_router
+    from routers.users import router as users_router
 except ImportError:
+    from backend.deps import SafeJSONResponse, require_admin, require_interpreter, require_role, require_viewer
     from backend.routers.qc import router as qc_router
     from backend.routers.correlation import router as corr_router
     from backend.routers.zonation import router as zonation_router
     from backend.routers.units import router as units_router
     from backend.routers.templates import router as templates_router
     from backend.routers.reports import router as reports_router
+    from backend.routers.users import router as users_router
 
 
-class SafeJSONResponse(JSONResponse):
-    """JSONResponse that sanitizes NaN/Inf to null for JSON compliance."""
-    def render(self, content):
-        def _sanitize(obj):
-            if isinstance(obj, float):
-                if math.isnan(obj) or math.isinf(obj):
-                    return None
-                return obj
-            if isinstance(obj, dict):
-                return {k: _sanitize(v) for k, v in obj.items()}
-            if isinstance(obj, (list, tuple)):
-                return [_sanitize(v) for v in obj]
-            if isinstance(obj, np.floating):
-                v = float(obj)
-                return None if (math.isnan(v) or math.isinf(v)) else v
-            if isinstance(obj, np.integer):
-                return int(obj)
-            if isinstance(obj, np.ndarray):
-                return _sanitize(obj.tolist())
-            return obj
-        sanitized = _sanitize(content)
-        return super().render(sanitized)
 import datetime
 import csv
 import io
@@ -82,13 +64,13 @@ try:
     from models import Project, Well, LogRun, CurveData, FormationTop, Annotation, DSTTest, RFTPoint, CompletionData, ProductionData, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
     from las_parser import LASParser, CURVE_TRACKS
     from dlis_lis_parser import parse_dlis_content, parse_lis_content
-    from security import AuthConfig, resolve_auth_context, require_min_role, role_from_request, ROLE_RANK
+    from security import AuthConfig, current_env, resolve_auth_context, require_min_role, role_from_request, ROLE_RANK
 except ImportError:
     from backend.database import engine, Base, get_db, SessionLocal
     from backend.models import Project, Well, LogRun, CurveData, FormationTop, Annotation, DSTTest, RFTPoint, CompletionData, ProductionData, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
     from backend.las_parser import LASParser, CURVE_TRACKS
     from backend.dlis_lis_parser import parse_dlis_content, parse_lis_content
-    from backend.security import AuthConfig, resolve_auth_context, require_min_role, role_from_request, ROLE_RANK
+    from backend.security import AuthConfig, current_env, resolve_auth_context, require_min_role, role_from_request, ROLE_RANK
 
 # Create tables
 # Configure logging
@@ -391,6 +373,7 @@ app.include_router(zonation_router)
 app.include_router(units_router)
 app.include_router(templates_router)
 app.include_router(reports_router)
+app.include_router(users_router)
 
 JOB_EXECUTOR = ThreadPoolExecutor(max_workers=2)
 JOBS = {}
@@ -448,33 +431,28 @@ def _list_jobs():
 
 AUTH_CONFIG = AuthConfig.from_env()
 if AUTH_CONFIG.mode == "header":
-    logger.warning("AUTH_MODE=header (compat mode). Set AUTH_MODE=jwt for server-verified bearer auth.")
+    logger.warning(
+        "AUTH_MODE=header (trusted client header, GEOLOG_ENV=%s). "
+        "Use AUTH_MODE=jwt for any shared or public deployment.",
+        current_env(),
+    )
 
 
-def _require_role(min_role: str, request: Request):
-    current = role_from_request(request)
-    require_min_role(min_role, current)
-    return current
+# Kept as an alias: existing call sites in this module use the private name.
+_require_role = require_role
 
-
-def require_viewer(request: Request):
-    return _require_role("viewer", request)
-
-
-def require_interpreter(request: Request):
-    return _require_role("interpreter", request)
-
-
-def require_admin(request: Request):
-    return _require_role("admin", request)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS is opt-in. The bundled frontend is served from this same origin, so it
+# needs none. A wildcard origin combined with credentials would let any site a
+# logged-in user visits read the whole database.
+_cors_origins = [o.strip() for o in (os.getenv("GEOLOG_CORS_ORIGINS") or "").split(",") if o.strip()]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
@@ -502,7 +480,8 @@ def _parse_if_modified_since(value: str):
 
 def _build_curve_cache_headers(lr_id: int, mnemonics, start, stop, step, max_points=None):
     key = f"{lr_id}|{','.join(sorted([str(m) for m in (mnemonics or [])]))}|{start}|{stop}|{step}|{max_points}"
-    etag = f'W/"{hashlib.sha1(key.encode("utf-8")).hexdigest()}"'
+    # Cache-busting only — not a security primitive, hence usedforsecurity=False.
+    etag = f'W/"{hashlib.sha1(key.encode("utf-8"), usedforsecurity=False).hexdigest()}"'
     return {
         "ETag": etag,
         "Cache-Control": "private, max-age=60",
@@ -823,16 +802,18 @@ def _startup_security_guards():
     _enforce_secrets_source_policy()
 
 
-# ─── Auto-seed demo data on first startup ───────────────────
-@app.on_event("startup")
-def _auto_seed():
-    """Seed demo data if database is empty. Gate behind GEOLOG_ENABLE_DEMO_SEED=true."""
-    if os.environ.get("GEOLOG_ENABLE_DEMO_SEED", "false").lower() != "true":
-        return
-    db = SessionLocal()
+# ─── Demo seed (startup + tests) ────────────────────────────
+def seed_demo_data(db: Session = None) -> bool:
+    """Seed demo data when the database is empty. Returns True if it seeded.
+
+    Output is ASCII-only on purpose: this runs during startup and the Windows
+    console codepage (cp1252) cannot encode emoji, which aborted startup.
+    """
+    owns_session = db is None
+    db = db if db is not None else SessionLocal()
     try:
         if db.query(Project).count() > 0:
-            return  # Already seeded
+            return False  # Already seeded
 
         # Find demo LAS file (try multiple paths for Docker compat)
         _here = os.path.dirname(os.path.abspath(__file__))
@@ -843,8 +824,8 @@ def _auto_seed():
         ]
         demo_las = next((p for p in demo_paths if os.path.isfile(p)), None)
         if not demo_las:
-            print("⚠️ No demo LAS found, skipping auto-seed")
-            return
+            print("[seed] no demo LAS found, skipping")
+            return False
 
         las = LASParser.parse_file(demo_las)
         fname = os.path.basename(demo_las)
@@ -913,12 +894,26 @@ def _auto_seed():
         )
 
         db.commit()
-        print(f"✅ Auto-seeded: {w1.name} ({nc1} curves, {np1} pts), {w2.name} ({nc2} curves, {np2} pts), {nt1} tops each")
+        print(
+            f"[seed] Auto-seeded: {w1.name} ({nc1} curves, {np1} pts), "
+            f"{w2.name} ({nc2} curves, {np2} pts), {nt1} tops each"
+        )
+        return True
     except Exception as e:
         db.rollback()
-        print(f"⚠️ Auto-seed failed: {e}")
+        print(f"[seed] Auto-seed failed: {e}")
+        return False
     finally:
-        db.close()
+        if owns_session:
+            db.close()
+
+
+@app.on_event("startup")
+def _auto_seed():
+    """Seed demo data if database is empty. Gate behind GEOLOG_ENABLE_DEMO_SEED=true."""
+    if os.environ.get("GEOLOG_ENABLE_DEMO_SEED", "false").lower() != "true":
+        return
+    seed_demo_data()
 
 
 # ─── Health ───────────────────────────────────────────────────
@@ -1863,9 +1858,13 @@ def export_package(wid: int, db: Session = Depends(get_db)):
 
 
 # ─── Interpretation Auditability + Delivery Bundle ───────────
-SNAPSHOT_DIR = os.path.join(os.path.dirname(__file__), "artifacts", "snapshots")
+# Snapshots and locks live on disk, not in the database. GEOLOG_ARTIFACT_DIR
+# redirects them — tests point it at a temp dir so they cannot leave a well
+# locked for the next run or for the running app.
+ARTIFACT_DIR = os.environ.get("GEOLOG_ARTIFACT_DIR") or os.path.join(os.path.dirname(__file__), "artifacts")
+SNAPSHOT_DIR = os.path.join(ARTIFACT_DIR, "snapshots")
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
-LOCK_FILE = os.path.join(os.path.dirname(__file__), "artifacts", "locks.json")
+LOCK_FILE = os.path.join(ARTIFACT_DIR, "locks.json")
 
 
 def _load_locks() -> dict:
@@ -2247,9 +2246,8 @@ def get_curve_config():
 
 
 
-@app.get("/api/templates")
-def list_templates():
-    return {"templates": PETRO_TEMPLATES}
+# GET /api/templates is served by backend/routers/templates.py. A second handler
+# used to be registered here and was silently shadowed by the router's.
 
 
 @app.post("/api/wells/{wid}/apply-template")
@@ -6947,52 +6945,7 @@ _orig_upload = app.routes[:]
 
 
 # ─── Sprint 28: Multi-User Roles ─────────────────────────────
-
-
-@app.get("/api/users")
-def list_users(db: Session = Depends(get_db), _role: str = Depends(require_viewer)):
-    users = db.query(User).all()
-    return [{"id": u.id, "username": u.username, "display_name": u.display_name,
-             "role": u.role, "created_at": u.created_at.isoformat() if u.created_at else ""} for u in users]
-
-
-@app.post("/api/users", status_code=201)
-def create_user(data: dict, db: Session = Depends(get_db), _role: str = Depends(require_admin)):
-    import hashlib, time
-    username = data.get("username", "")
-    if not username:
-        raise HTTPException(400, "username required")
-    existing = db.query(User).filter(User.username == username).first()
-    if existing:
-        raise HTTPException(409, "Username already exists")
-    token = hashlib.sha256(f"{username}{time.time()}".encode()).hexdigest()[:32]
-    u = User(username=username, display_name=data.get("display_name", username),
-             role=data.get("role", "interpreter"), token=token)
-    db.add(u)
-    db.commit()
-    db.refresh(u)
-    return {"id": u.id, "username": u.username, "role": u.role, "token": token}
-
-
-@app.put("/api/users/{uid}")
-def update_user(uid: int, data: dict, db: Session = Depends(get_db), _role: str = Depends(require_admin)):
-    u = db.query(User).filter(User.id == uid).first()
-    if not u:
-        raise HTTPException(404, "User not found")
-    for field in ("display_name", "role"):
-        if field in data:
-            setattr(u, field, data[field])
-    db.commit()
-    return {"id": u.id, "username": u.username, "role": u.role}
-
-
-@app.delete("/api/users/{uid}", status_code=204)
-def delete_user(uid: int, db: Session = Depends(get_db), _role: str = Depends(require_admin)):
-    u = db.query(User).filter(User.id == uid).first()
-    if not u:
-        raise HTTPException(404, "User not found")
-    db.delete(u)
-    db.commit()
+# /api/users routes moved to backend/routers/users.py
 
 
 # ─── Sprint 28: Synthetic Seismogram ─────────────────────────

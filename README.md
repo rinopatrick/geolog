@@ -16,9 +16,11 @@ Comprehensive, production-style subsurface interpretation platform for oil & gas
 GeoLog currently includes **35+ analysis views/panels** and **100+ API capabilities** spanning ingestion, interpretation, QC, analytics, collaboration, and export.
 
 ### 1) Data Ingest
-- LAS **2.0/3.0** parser with robust field-file handling
+- LAS **2.0** parser with robust field-file handling (LAS 3.0 headers are read for `DLM`/`WRAP`, but 3.0 multi-section files are treated as 2.0)
 - Supports whitespace and **comma-delimited** LAS variants
 - Vendor mnemonic normalization/fallback (e.g., DEPTH/DEPT/MD, ILD/RESD/RT families)
+- Never drops a `~C` definition: `~A` columns are positional, so duplicate canonical names are kept under their vendor mnemonic instead of shifting every later curve
+- Reports `~C`/`~A` column-count disagreements as parse warnings instead of truncating silently
 - Multi-run per well upload and management
 - **Bulk import wizard** for multi-file ingestion with progress feedback
 - CSV upload utilities for selected workflows (e.g., tops/RFT)
@@ -395,10 +397,26 @@ Phase 3b performance/SLO gate:
 - Script: `scripts/slo_load_gate.py`
 - Validates measured latency/error-rate and `/api/ops/slo-status` checks under concurrent load.
 
-Startup security policy (non-dev fail-fast):
-- `GEOLOG_ENV` (e.g. `prod`, `staging`, `dev`)
-- `GEOLOG_ENFORCE_SECRETS_SOURCE` (default `true`)
-- `GEOLOG_SECRETS_SOURCE` (required when env is non-dev)
+Configuration reference:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GEOLOG_ENV` | `dev` | `dev`/`local`/`test`/`ci` allow the trusted-header auth shim; anything else is treated as a real deployment |
+| `AUTH_MODE` | `header` in dev, `jwt` elsewhere | `header` trusts the `X-User-Role` request header. `jwt` requires a verified bearer token. `header` is refused when `GEOLOG_ENV` is non-dev |
+| `AUTH_JWT_SECRET` | — | HMAC secret for `AUTH_MODE=jwt` |
+| `AUTH_JWT_ISSUER` / `AUTH_JWT_AUDIENCE` | — | Optional JWT claim checks (OIDC-ready) |
+| `AUTH_JWT_ALGORITHMS` | `HS256` | Comma-separated allowed algorithms |
+| `GEOLOG_CORS_ORIGINS` | unset | Comma-separated allowed origins. Unset disables CORS entirely; the bundled frontend is same-origin and needs none |
+| `GEOLOG_DB_PATH` | `backend/geolog.db` | SQLite file location |
+| `GEOLOG_ARTIFACT_DIR` | `backend/artifacts` | Interpretation snapshots and well locks |
+| `GEOLOG_ENABLE_DEMO_SEED` | `false` | Seed demo wells on first startup |
+| `GEOLOG_ENFORCE_SECRETS_SOURCE` | `true` | Require `GEOLOG_SECRETS_SOURCE` in non-dev |
+| `GEOLOG_SECRETS_SOURCE` | — | Required when `GEOLOG_ENV` is non-dev |
+| `AUDIT_EXPORT_HMAC_KEYS_JSON` / `AUDIT_EXPORT_HMAC_ACTIVE_KID` | — | Audit/evidence signing key rotation |
+| `AUDIT_EXPORT_HMAC_KEY` | — | Legacy single signing key (`kid='legacy'`) |
+
+Header auth takes the caller's role from a request header, so anyone who can reach
+the port can be an admin. It is a development convenience only.
 
 Notes:
 - Parser tests run without server.
@@ -424,7 +442,8 @@ If this project helps you, support ongoing development:
 Current state: **engineering sample / pre-production**.
 
 Recommended next steps:
-1. Add CI checks (tests + lint) on every push/PR
-2. Add release/versioning policy
-3. Add deployment/runtime hardening docs
-4. Add monitoring and operational runbook
+1. Split `backend/main.py` (single file, ~9.6k lines) into the routers that already exist for six domains
+2. Introduce schema migrations (Alembic) — schema changes are currently applied by ad-hoc `_ensure_*` helpers at import time
+3. Raise coverage on the petrophysics paths (`backend/main.py` is the least covered module)
+4. Add a release/versioning policy and tag releases
+5. Add monitoring and an operational runbook

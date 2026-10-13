@@ -1,8 +1,3 @@
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
-sqlalchemy==2.0.35
-pydantic==2.9.2
-python-multipart==0.0.12
-numpy==1.26.4
-reportlab==4.5.1
-PyJWT==2.9.0
+# Single source of truth for runtime dependencies — backend/requirements.txt.
+# Both the CI workflows and the Dockerfile install from this file.
+-r backend/requirements.txt

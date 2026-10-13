@@ -64,10 +64,12 @@ jobs:
       BACKUP_DRILL_SIGNING_KEY: ci-backup-drill-key
       BACKUP_DRILL_SIGNING_KID: backup-drill
       BACKUP_DRILL_RETENTION_DAYS: "30"
-      AUDIT_EXPORT_SIGNING_KEY: ci-audit-signing-key
-      AUDIT_EXPORT_SIGNING_KID: ci-audit-signing-kid
+      # Names must match _resolve_audit_export_signing_key() in backend/main.py.
+      AUDIT_EXPORT_HMAC_KEYS_JSON: '{"ci-audit-signing-kid":"ci-audit-signing-key"}'
+      AUDIT_EXPORT_HMAC_ACTIVE_KID: ci-audit-signing-kid
       GEOLOG_ENV: ci
       GEOLOG_ENFORCE_SECRETS_SOURCE: "false"
+      GEOLOG_ENABLE_DEMO_SEED: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -82,18 +84,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Backup/restore drill smoke
-        run: |
-          set -euo pipefail
-          bash scripts/backup_restore_drill.sh backend/geolog.db
-
+      # The database file is gitignored, so start the API first: it creates the
+      # schema and seeds demo rows, which is what the drill then copies.
       - name: Start API server
         run: |
           set -euo pipefail
           nohup python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 > /tmp/geolog-api.log 2>&1 &
           echo $! > /tmp/geolog-api.pid
-          for i in {1..30}; do
-            if curl -sf http://127.0.0.1:8000/docs >/dev/null; then
+          for i in {1..40}; do
+            if curl -sf http://127.0.0.1:8000/api/health >/dev/null; then
               echo "API ready"
               exit 0
             fi
@@ -102,6 +101,9 @@ jobs:
           echo "API failed to start"
           cat /tmp/geolog-api.log || true
           exit 1
+
+      - name: Backup/restore drill smoke
+        run: bash scripts/backup_restore_drill.sh backend/geolog.db
 
       - name: API attestation gate
         run: python scripts/security_evidence_attest.py --base-url http://127.0.0.1:8000 --artifact-dir artifacts/backup-drill

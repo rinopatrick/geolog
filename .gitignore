@@ -10,7 +10,13 @@ build/
 # Virtual environments
 venv/
 .venv/
+.venv*/
 env/
+
+# Test/coverage artifacts
+.coverage
+coverage.xml
+htmlcov/
 
 # Database
 *.db

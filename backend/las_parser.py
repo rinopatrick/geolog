@@ -32,15 +32,16 @@ CURVE_ALIASES = {
     'RILD': 'RILD',
     'RILM': 'RILM',
     'RES': 'RT',
-    'CILD': 'RT',       # KGS: Conductivity converted
-    'CILM': 'RILM',     # KGS: Medium conductivity
+    # KGS CILD/CILM are conductivity (MMHO-M), not resistivity (OHM-M). Mapping
+    # them onto RT/RILM would need the R=1000/C conversion, so they keep their
+    # own mnemonics rather than being plotted as ohms.
     'RLL3': 'RLL3',
     'RXORT': 'RXO',
 
     # Sonic family
     'DTP': 'DT',
     'DT35': 'DT',       # KGS: DT variant
-    'SPOR': 'DT',       # KGS: Sonic porosity (proxy)
+    # KGS SPOR is sonic porosity (PU), not acoustic transit time (USEC/FT).
 
     # Density family
     'DEN': 'RHOB',      # KGS: Density
@@ -52,14 +53,14 @@ CURVE_ALIASES = {
 
     # SP family
     'SPCG': 'SP',       # KGS: SP corrected
-    'SPRL': 'SP',       # KGS: SP
+    'SPRL': 'SPOR',     # KGS: limestone SONIC porosity (PERC), not SP (MV)
 
     # Misc
     'CLDC': 'CAL',      # KGS: Caliper
     'DCOR': 'DRHO',     # KGS: Density correction
     'PDPE': 'PE',       # KGS: Photoelectric
-    'DPRL': 'NPHI',     # KGS: Density porosity (neutron proxy)
-    'FEFE': 'PE',       # KGS: Iron/PE
+    'DPRL': 'DPOR',     # KGS: limestone DENSITY porosity (PERC), not neutron
+    # KGS FEFE is "Shallow FE" in OHMM (a shallow resistivity), not photoelectric.
 
     # Common no-op canonical mnemonics (explicit for readability)
     'GR': 'GR',
@@ -86,7 +87,16 @@ EXTRA_CURVE_TRACKS = {
     'DGA':  {'track': 3, 'color': '#e67e22', 'scale': (1.95, 2.95), 'unit': 'GM/CC', 'name': 'Gamma-Gamma Density'},
     'RLL3': {'track': 2, 'color': '#f39c12', 'scale': (0.2, 2000), 'log': True, 'unit': 'OHMM', 'name': 'Laterolog 3'},
     'RILM': {'track': 2, 'color': '#e67e22', 'scale': (0.2, 2000), 'log': True, 'unit': 'OHMM', 'name': 'Medium Induction'},
+    'SPOR': {'track': 3, 'color': '#8e44ad', 'scale': (0.45, -0.15), 'unit': 'V/V', 'name': 'Sonic Porosity'},
+    'CILD': {'track': 2, 'color': '#c0392b', 'scale': (0.2, 2000), 'log': True, 'unit': 'MMHO/M', 'name': 'Deep Conductivity'},
+    'CILM': {'track': 2, 'color': '#e67e22', 'scale': (0.2, 2000), 'log': True, 'unit': 'MMHO/M', 'name': 'Medium Conductivity'},
+    'FEFE': {'track': 2, 'color': '#f1c40f', 'scale': (0.2, 2000), 'log': True, 'unit': 'OHMM', 'name': 'Shallow FE'},
 }
+
+# Curves the rest of the app treats as fractions (V/V). A vendor unit of PERC on
+# one of these means the column is in percent and must be divided by 100.
+FRACTION_CURVES = {"NPHI", "DPOR", "SPOR", "PHIE", "PHIT", "SW", "SWT", "BVW", "VSH", "VCL"}
+PERCENT_UNITS = {"PERC", "%", "PCT", "PERCENT", "P.U."}
 
 DEPTH_CANDIDATES = ('DEPT', 'DEPTH', 'MD', 'TVD')
 
@@ -143,6 +153,7 @@ class LASFile:
     parameters: List[LASParameter] = field(default_factory=list)
     data: Dict[str, np.ndarray] = field(default_factory=dict)
     depth_key: str = ""     # mnemonic of the depth/index curve
+    warnings: List[str] = field(default_factory=list)   # non-fatal parse problems
 
     @property
     def depth(self) -> np.ndarray:
@@ -190,6 +201,7 @@ class LASFile:
             ],
             "depth_key": self.depth_key,
             "num_points": len(self.depth),
+            "warnings": list(self.warnings),
         }
 
 
@@ -285,7 +297,8 @@ class LASParser:
             elif current_section in ('version', 'well', 'curves', 'parameters'):
                 match = LASParser.LINE_RE.match(stripped)
                 if match:
-                    mnemonic = LASParser._canonical_mnemonic(match.group('mnemonic'))
+                    raw_mnemonic = (match.group('mnemonic') or '').strip().upper()
+                    mnemonic = LASParser._canonical_mnemonic(raw_mnemonic)
                     unit = (match.group('unit') or '').strip()
                     value = (match.group('value') or '').strip()
                     description = (match.group('description') or '').strip()
@@ -311,15 +324,24 @@ class LASParser:
                         # must start with a letter (not numeric-only)
                         mnem_upper = mnemonic.upper()
                         if mnem_upper and mnem_upper[0].isalpha():
-                            # Deduplicate: skip if canonical name already exists
-                            existing = [c.mnemonic for c in result.curves]
-                            if mnem_upper not in existing:
-                                result.curves.append(LASCurve(
-                                    mnemonic=mnem_upper,
-                                    unit=unit,
-                                    value=value,
-                                    description=description,
-                                ))
+                            # ~A columns are positional, so every ~C line must keep
+                            # its own entry. Dropping a definition here would shift
+                            # every later curve into the previous column's data.
+                            name = mnem_upper
+                            if any(c.mnemonic == name for c in result.curves):
+                                # Canonical name taken: keep the file's own mnemonic
+                                # so the extra curve stays addressable.
+                                name = raw_mnemonic or mnem_upper
+                                n = 2
+                                while any(c.mnemonic == name for c in result.curves):
+                                    name = f"{raw_mnemonic or mnem_upper}_{n}"
+                                    n += 1
+                            result.curves.append(LASCurve(
+                                mnemonic=name,
+                                unit=unit,
+                                value=value,
+                                description=description,
+                            ))
 
                     elif current_section == 'parameters':
                         result.parameters.append(LASParameter(
@@ -394,10 +416,17 @@ class LASParser:
                     current_row = current_row[num_curves:]
         else:
             all_values = []
+            widest = 0
             for line in data_lines:
                 values = split_line(line)
+                widest = max(widest, len(values))
                 if len(values) >= num_curves:
                     all_values.append(values[:num_curves])
+            if widest != num_curves:
+                # Report rather than silently truncate/pad.
+                las.warnings.append(
+                    f"~C declares {num_curves} curves but ~A rows carry {widest} columns"
+                )
 
         if not all_values:
             return
@@ -415,6 +444,10 @@ class LASParser:
                 # Replace null sentinels with NaN (supports exact and float-noise matches)
                 if np.isfinite(las.well.null):
                     arr[np.isclose(arr, las.well.null, rtol=0.0, atol=1e-9)] = np.nan
+                # Vendors report porosity/saturation in percent as often as in
+                # fractions; normalise when the unit says so.
+                if (curve.unit or '').strip().upper() in PERCENT_UNITS and curve.mnemonic in FRACTION_CURVES:
+                    arr = arr / 100.0
                 las.data[curve.mnemonic] = arr
             except Exception:
                 las.data[curve.mnemonic] = np.full(len(all_values), np.nan)
