@@ -42,7 +42,10 @@ def create_user(data: dict, db: Session = Depends(get_db), _role: str = Depends(
         raise HTTPException(400, "username required")
     if db.query(User).filter(User.username == username).first():
         raise HTTPException(409, "Username already exists")
-    token = hashlib.sha256(f"{username}{time.time()}".encode()).hexdigest()[:32]
+    # When creating user, if client specifies an initial token/secret, preserve it; otherwise auto-generate
+    token = (data.get("token") or "").strip()
+    if not token:
+        token = hashlib.sha256(f"{username}{time.time()}".encode()).hexdigest()[:32]
     u = User(
         username=username,
         display_name=data.get("display_name", username),

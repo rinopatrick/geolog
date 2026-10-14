@@ -126,6 +126,24 @@ def resolve_auth_context(request: Request, cfg: AuthConfig) -> AuthContext:
             source="jwt",
         )
 
+    # In header/compat mode: if a Bearer token is present and secret is configured, decode it;
+    # otherwise fall back to trusted header.
+    token = _extract_bearer_token(request)
+    if token and cfg.jwt_secret:
+        try:
+            claims = _decode_jwt(token, cfg)
+            role = claims.get("role")
+            if not role and isinstance(claims.get("roles"), list) and claims["roles"]:
+                role = claims["roles"][0]
+            return AuthContext(
+                role=_normalize_role(role),
+                subject=(claims.get("sub") or claims.get("user_id") or None),
+                claims=claims,
+                source="jwt",
+            )
+        except Exception:
+            pass
+
     # compatibility mode
     role = request.headers.get(cfg.header_role_name, "viewer")
     return AuthContext(role=_normalize_role(role), source="header")
