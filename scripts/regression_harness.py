@@ -26,6 +26,7 @@ import json
 import os
 import pathlib
 import sys
+import time
 
 import requests
 
@@ -35,7 +36,10 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-BASE = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
+# 127.0.0.1 rather than localhost: on a dual-stack host `localhost` resolves to
+# ::1 first, and if a server is bound only to 127.0.0.1 the request can land on a
+# different process — which produced a confusing 404 from a stale instance.
+BASE = os.environ.get("BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 HEADERS = {"X-User-Role": "interpreter", "Content-Type": "application/json"}
 
 failures: list[tuple] = []
@@ -49,6 +53,30 @@ def _get(path: str, **kw):
 
 def _post(path: str, body=None):
     return requests.post(BASE + path, headers=HEADERS, json=body or {}, timeout=120)
+
+
+def _request(label: str, fn, *args, **kwargs):
+    """Run a request, turning a transport error into a recorded failure.
+
+    A dropped connection is a result the harness should report, not a crash: the
+    first version let `requests.ConnectionError` escape and took the whole run
+    down with a traceback, hiding every check after it.
+
+    Retries once on a connection error, because a keep-alive connection can be
+    closed by the server between requests and requests will not reopen it.
+    """
+    for attempt in (1, 2):
+        try:
+            return fn(*args, **kwargs)
+        except requests.ConnectionError as exc:
+            if attempt == 2:
+                check(f"{label} [transport]", False, f"{type(exc).__name__}: {exc}")
+                return None
+            time.sleep(0.5)
+        except requests.RequestException as exc:
+            check(f"{label} [transport]", False, f"{type(exc).__name__}: {exc}")
+            return None
+    return None
 
 
 def check(label, condition, detail=""):
@@ -69,8 +97,10 @@ def expect_ok(label, response, *, keys=()):
 
     Returns None if anything failed, so a caller's `if data:` guard skips the
     value checks instead of raising KeyError on a key it already reported as
-    missing.
+    missing. A None response means the transport failed, already recorded.
     """
+    if response is None:
+        return None
     if not check(label, response.status_code == 200,
                  f"status {response.status_code}: {response.text[:160]}"):
         return None
@@ -88,7 +118,7 @@ def expect_ok(label, response, *, keys=()):
 
 
 def get_well_id() -> int:
-    response = _get("/api/wells/")
+    response = _request("wells list", _get, "/api/wells/")
     if response.status_code != 200 or not response.json():
         raise RuntimeError(f"no wells available (status {response.status_code})")
     return response.json()[0]["id"]
@@ -98,13 +128,13 @@ def run() -> int:
     wid = get_well_id()
 
     # ─── Health ─────────────────────────────────────────────────
-    data = expect_ok("health", _get("/api/health"), keys=("status", "app", "version"))
+    data = expect_ok("health", _request("health", _get, "/api/health"), keys=("status", "app", "version"))
     if data:
         check("health [status ok]", data["status"] == "ok", str(data.get("status")))
         check("health [app name]", data["app"] == "GeoLog", str(data.get("app")))
 
     # ─── Reads that must return usable structures ───────────────
-    wells = expect_ok("wells list", _get("/api/wells/"))
+    wells = expect_ok("wells list", _request("wells list", _get, "/api/wells/"))
     if wells is not None:
         check("wells list [non-empty]", len(wells) > 0, "no wells returned")
         if wells:
@@ -113,13 +143,13 @@ def run() -> int:
                 check(f"wells list [item.{key}]", key in first, str(list(first)[:10]))
 
     # GET /api/wells/{wid} returns the well object directly.
-    well = expect_ok("well detail", _get(f"/api/wells/{wid}"), keys=("id", "name"))
+    well = expect_ok("well detail", _request("well detail", _get, f"/api/wells/{wid}"), keys=("id", "name"))
     if well:
         check("well detail [id matches request]", well.get("id") == wid,
               f"asked for {wid}, got {well.get('id')}")
         check("well detail [has a name]", bool(well.get("name")), "empty name")
 
-    runs = expect_ok("log runs", _get(f"/api/wells/{wid}/log-runs"))
+    runs = expect_ok("log runs", _request("log runs", _get, f"/api/wells/{wid}/log-runs"))
     if runs is not None:
         check("log runs [non-empty]", len(runs) > 0, "no log runs")
         if runs:
@@ -137,7 +167,7 @@ def run() -> int:
     if runs:
         run_id = runs[0].get("id")
         curves = expect_ok(f"curves for run {run_id}",
-                           _get(f"/api/log-runs/{run_id}/curves"))
+                           _request("curves", _get, f"/api/log-runs/{run_id}/curves"))
         if curves:
             check("curves [non-empty]", len(curves) > 0, "no curves returned")
             findings = audit_curves({
@@ -157,10 +187,10 @@ def run() -> int:
         ("tops", f"/api/wells/{wid}/tops"),
         ("zones", f"/api/wells/{wid}/zones"),
     ]:
-        expect_ok(label, _get(path))
+        expect_ok(label, _request(label, _get, path))
 
     # data-table returns {columns, rows, total_points, shown_points}.
-    table = expect_ok("data table", _get(f"/api/wells/{wid}/data-table"),
+    table = expect_ok("data table", _request("data table", _get, f"/api/wells/{wid}/data-table"),
                       keys=("columns", "rows", "total_points"))
     if table:
         columns = table["columns"]
@@ -176,9 +206,9 @@ def run() -> int:
               f"columns={len(columns)} but row widths={sorted(widths)}")
 
     # ─── Petrophysics: values, not just status ──────────────────
-    sw = _post(f"/api/wells/{wid}/compute-sw",
-               {"model": "archie", "a": 1.0, "m": 2.0, "n": 2.0, "rw": 0.1,
-                "gr_clean": 20.0, "gr_shale": 120.0})
+    sw = _request("compute-sw", _post, f"/api/wells/{wid}/compute-sw",
+                  {"model": "archie", "a": 1.0, "m": 2.0, "n": 2.0, "rw": 0.1,
+                   "gr_clean": 20.0, "gr_shale": 120.0})
     data = expect_ok("compute-sw", sw, keys=("sw", "vsh", "phie", "model", "stats"))
     if data:
         check("compute-sw [echoes model]", data["model"] == "archie", str(data["model"]))
@@ -211,7 +241,7 @@ def run() -> int:
         ("electrofacies", f"/api/wells/{wid}/electrofacies", {"n_clusters": 3}, ()),
         ("sensitivity", f"/api/wells/{wid}/sensitivity", {}, ()),
     ]:
-        response = _post(path, body)
+        response = _request(label, _post, path, body)
         # A 400 is acceptable when the demo well lacks a required curve; a 5xx is not.
         if response.status_code == 400:
             warn(label, f"skipped: {response.text[:110]}")
@@ -219,7 +249,7 @@ def run() -> int:
         expect_ok(label, response, keys=keys)
 
     # ─── Zone statistics ────────────────────────────────────────
-    zones = expect_ok("zone-stats", _get(f"/api/wells/{wid}/zone-stats"),
+    zones = expect_ok("zone-stats", _request("zone-stats", _get, f"/api/wells/{wid}/zone-stats"),
                       keys=("zones", "cutoffs"))
     if zones:
         for key in ("vsh", "phie", "sw"):
@@ -237,10 +267,10 @@ def run() -> int:
                       gross > 0, f"gross_ft={gross}")
 
     # ─── Reports and exports ────────────────────────────────────
-    report = _get(f"/api/wells/{wid}/report")
+    report = _request("report", _get, f"/api/wells/{wid}/report")
     expect_ok("report", report)
 
-    pdf = _get(f"/api/wells/{wid}/report-pdf")
+    pdf = _request("report-pdf", _get, f"/api/wells/{wid}/report-pdf")
     if check("report-pdf [status]", pdf.status_code == 200,
              f"status {pdf.status_code}: {pdf.text[:120]}"):
         check("report-pdf [content-type]",
@@ -251,14 +281,14 @@ def run() -> int:
         check("report-pdf [non-trivial size]", len(pdf.content) > 2000,
               f"{len(pdf.content)} bytes")
 
-    las = _get(f"/api/wells/{wid}/export-las")
+    las = _request("export-las", _get, f"/api/wells/{wid}/export-las")
     if check("export-las [status]", las.status_code == 200, str(las.status_code)):
         body = las.text
         for token in ("~Version", "~Well", "~Curve", "~Ascii"):
             check(f"export-las [{token}]", token in body,
                   f"{token} missing from the LAS header")
 
-    bundle = _get(f"/api/wells/{wid}/export-bundle")
+    bundle = _request("export-bundle", _get, f"/api/wells/{wid}/export-bundle")
     if check("export-bundle [status]", bundle.status_code == 200,
              f"status {bundle.status_code}: {bundle.text[:120]}"):
         check("export-bundle [zip magic bytes]",
@@ -267,17 +297,17 @@ def run() -> int:
               f"{len(bundle.content)} bytes")
 
     # ─── Audit and ops ──────────────────────────────────────────
-    audit = expect_ok("audit-log", _get("/api/audit-log"))
+    audit = expect_ok("audit-log", _request("audit-log", _get, "/api/audit-log"))
     if audit is not None:
         check("audit-log [is list]", isinstance(audit, list), type(audit).__name__)
 
-    chain = expect_ok("audit chain verify", _get("/api/audit-log/verify"),
+    chain = expect_ok("audit chain verify", _request("audit chain verify", _get, "/api/audit-log/verify"),
                       keys=("ok", "verified_entries"))
     if chain:
         check("audit chain [intact]", chain["ok"] is True,
               f"chain issues: {str(chain.get('issues'))[:200]}")
 
-    metrics = expect_ok("ops metrics", _get("/api/ops/metrics"), keys=("requests_total",))
+    metrics = expect_ok("ops metrics", _request("ops metrics", _get, "/api/ops/metrics"), keys=("requests_total",))
     if metrics:
         # The harness itself has made many requests by now.
         check("ops metrics [counts our own requests]",
@@ -294,7 +324,7 @@ def run() -> int:
         ("templates", "/api/templates", ("templates",)),
         ("projects", "/api/projects/", ()),
     ]:
-        expect_ok(label, _get(path), keys=keys)
+        expect_ok(label, _request(label, _get, path), keys=keys)
 
     # ─── Summary ────────────────────────────────────────────────
     print(json.dumps({

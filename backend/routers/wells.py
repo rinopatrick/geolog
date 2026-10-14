@@ -76,6 +76,7 @@ try:
     from validation import (
         optional_float,
         optional_str,
+        pick_typed,
         require_float,
         require_int,
         require_str,
@@ -128,6 +129,7 @@ except ImportError:
     from backend.validation import (
         optional_float,
         optional_str,
+        pick_typed,
         require_float,
         require_int,
         require_str,
@@ -205,56 +207,8 @@ def _extract_las_coordinates(las):
     return lat, lon
 
 
-PETRO_TEMPLATES = [
-    {
-        "name": "Sandstone Standard",
-        "description": "Balanced clean-sand default for conventional clastics.",
-        "params": {"saturation_model": "archie", "a": 1.0, "m": 2.0, "n": 2.0, "rw": 0.08},
-        "recommended_cutoffs": {"vsh_cutoff": 0.4, "phie_cutoff": 0.1, "sw_cutoff": 0.6, "gr_min": 0, "gr_max": 150},
-        "suggested_rw": 0.08,
-        "log_track_layout": ["GR", "RT", "NPHI", "RHOB", "DT", "VSH", "PHIE", "SW"],
-    },
-    {
-        "name": "Carbonate",
-        "description": "Conservative carbonate interpretation with tighter shale screening.",
-        "params": {"saturation_model": "archie", "a": 1.0, "m": 2.0, "n": 2.0, "rw": 0.05},
-        "recommended_cutoffs": {"vsh_cutoff": 0.3, "phie_cutoff": 0.05, "sw_cutoff": 0.5, "gr_min": 0, "gr_max": 100},
-        "suggested_rw": 0.05,
-        "log_track_layout": ["GR", "PEF", "RHOB", "NPHI", "RT", "PHIE", "SW"],
-    },
-    {
-        "name": "Shale Gas",
-        "description": "Lower-porosity unconventional shale gas workflow baseline.",
-        "params": {"saturation_model": "simandoux", "a": 1.0, "m": 1.8, "n": 1.8, "rw": 0.12},
-        "recommended_cutoffs": {"vsh_cutoff": 0.6, "phie_cutoff": 0.02, "sw_cutoff": 0.4, "gr_min": 0, "gr_max": 200},
-        "suggested_rw": 0.12,
-        "log_track_layout": ["GR", "RT", "RHOB", "NPHI", "DT", "TOC_PROXY", "SW"],
-    },
-    {
-        "name": "Deepwater Turbidite",
-        "description": "Deepwater clastic setting tuned for variable lamination and pay continuity.",
-        "params": {"saturation_model": "archie", "a": 0.8, "m": 2.2, "n": 2.2, "rw": 0.09},
-        "recommended_cutoffs": {"vsh_cutoff": 0.35, "phie_cutoff": 0.08, "sw_cutoff": 0.65, "gr_min": 0, "gr_max": 180},
-        "suggested_rw": 0.09,
-        "log_track_layout": ["GR", "RT", "NPHI", "RHOB", "DT", "VSH", "PHIE", "SW"],
-    },
-    {
-        "name": "Tight Gas Sand",
-        "description": "Tight-gas sand screening with stricter porosity and water saturation limits.",
-        "params": {"saturation_model": "archie", "a": 1.0, "m": 2.5, "n": 2.0, "rw": 0.07},
-        "recommended_cutoffs": {"vsh_cutoff": 0.25, "phie_cutoff": 0.03, "sw_cutoff": 0.45, "gr_min": 0, "gr_max": 120},
-        "suggested_rw": 0.07,
-        "log_track_layout": ["GR", "RT", "NPHI", "RHOB", "DT", "PHIE", "SW"],
-    },
-]
 
 
-def _find_template(template_name: str):
-    target = (template_name or "").strip().lower()
-    for tpl in PETRO_TEMPLATES:
-        if tpl["name"].lower() == target:
-            return tpl
-    return None
 
 
 def _build_petro_summary(wid: int, params: dict, db: Session):
@@ -594,9 +548,16 @@ def update_well(wid: int, data: dict, db: Session = Depends(get_db)):
     w = db.query(Well).filter(Well.id == wid).first()
     if not w:
         raise HTTPException(404, "Well not found")
-    for field in ("name", "uwi", "api_number", "operator", "field_name", "latitude", "longitude", "elevation", "depth_unit", "spud_date"):
-        if field in data:
-            setattr(w, field, data[field])
+    # Was a bare setattr loop: {"name": null} hit the NOT NULL constraint and
+    # surfaced as a 500.
+    for field, value in pick_typed(
+        data,
+        strings=("name", "uwi", "api_number", "operator", "field_name",
+                 "depth_unit", "spud_date"),
+        floats=("latitude", "longitude", "elevation", "total_depth"),
+        nullable=("latitude", "longitude", "elevation", "total_depth"),
+    ).items():
+        setattr(w, field, value)
     db.commit()
     db.refresh(w)
     return {c.name: getattr(w, c.name) for c in Well.__table__.columns}
@@ -1088,69 +1049,6 @@ def delivery_bundle(wid: int, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/{wid}/apply-template")
-def apply_template_to_well(wid: int, data: dict, db: Session = Depends(get_db)):
-    well = db.query(Well).filter(Well.id == wid).first()
-    if not well:
-        raise HTTPException(404, "Well not found")
-
-    tlock = _get_template_lock(wid)
-    if tlock.get("locked"):
-        raise HTTPException(423, "Template is locked; unlock required before edits")
-
-    template_name = data.get("template_name") or data.get("name") or data.get("template")
-    template = _find_template(template_name) if template_name else None
-
-    if template is None and not data.get("custom_params"):
-        raise HTTPException(400, "Provide valid template_name or custom_params")
-
-    payload = template["params"].copy() if template else {}
-    cutoffs = template["recommended_cutoffs"].copy() if template else {}
-
-    custom = data.get("custom_params") or {}
-    for key in ("saturation_model", "a", "m", "n", "rw"):
-        if key in custom:
-            payload[key] = custom[key]
-    for key in ("vsh_cutoff", "phie_cutoff", "sw_cutoff"):
-        if key in custom:
-            cutoffs[key] = custom[key]
-
-    fields = {
-        "saturation_model": payload.get("saturation_model", "archie"),
-        "a": float(payload.get("a", 1.0)),
-        "m": float(payload.get("m", 2.0)),
-        "n": float(payload.get("n", 2.0)),
-        "rw": float(payload.get("rw", template.get("suggested_rw", 0.1) if template else 0.1)),
-        "vsh_cutoff": float(cutoffs.get("vsh_cutoff", 0.35)),
-        "phie_cutoff": float(cutoffs.get("phie_cutoff", 0.10)),
-        "sw_cutoff": float(cutoffs.get("sw_cutoff", 0.60)),
-        "template": template["name"] if template else "custom",
-    }
-
-    existing = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
-    if existing:
-        for k, v in fields.items():
-            setattr(existing, k, v)
-    else:
-        db.add(PetroParams(well_id=wid, **fields))
-    db.commit()
-
-    _, signature_after = _snapshot_template_signature(db, wid)
-    _log_audit(db, "apply_template", "well", entity_id=wid, well_id=wid,
-               details=f"template={fields['template']};sig={signature_after[:12]}")
-
-    summary = _build_petro_summary(wid, {
-        **fields,
-        "gr_min": cutoffs.get("gr_min"),
-        "gr_max": cutoffs.get("gr_max"),
-        "log_track_layout": template.get("log_track_layout", []) if template else data.get("log_track_layout", []),
-    }, db)
-
-    return {
-        "status": "ok",
-        "applied_template": template["name"] if template else "custom",
-        "summary": summary,
-    }
 
 
 @router.get("/{wid}/petro-params")

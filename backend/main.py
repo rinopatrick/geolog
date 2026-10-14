@@ -26,6 +26,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
@@ -49,6 +50,7 @@ try:
         require_role,
         require_viewer,
     )
+    from validation import pick_typed
     from jobs import (
         JOB_EXECUTOR,
         create_job as _create_job,
@@ -82,6 +84,7 @@ except ImportError:
         require_role,
         require_viewer,
     )
+    from backend.validation import pick_typed
     from backend.jobs import (
         JOB_EXECUTOR,
         create_job as _create_job,
@@ -212,6 +215,19 @@ app = FastAPI(
     redoc_url="/redoc",
     default_response_class=SafeJSONResponse,
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def _request_validation_error_handler(request: Request, exc: RequestValidationError):
+    """Return a JSON-safe 422.
+
+    FastAPI's default handler echoes the offending input, and Starlette serialises
+    responses with `allow_nan=False`. A client sending `{"x": Infinity}` therefore
+    turned a 422 into a 500, on every endpoint with a Pydantic body model.
+    """
+    return SafeJSONResponse(status_code=422, content={"detail": exc.errors()})
+
+
 app.include_router(qc_router)
 app.include_router(corr_router)
 app.include_router(zonation_router)
@@ -778,9 +794,15 @@ def update_top(tid: int, data: dict, db: Session = Depends(get_db)):
     t = db.query(FormationTop).filter(FormationTop.id == tid).first()
     if not t:
         raise HTTPException(404, "Formation top not found")
-    for field in ("formation_name", "depth", "top_depth", "base_depth", "color", "lithology", "notes", "depth_unit"):
-        if field in data:
-            setattr(t, field, data[field])
+    # Was a bare setattr loop: {"depth": "abc"} reached the FLOAT column and
+    # {"depth": null} hit its NOT NULL constraint, both surfacing as 500.
+    for field, value in pick_typed(
+        data,
+        strings=("formation_name", "color", "lithology", "notes", "depth_unit"),
+        floats=("depth", "top_depth", "base_depth"),
+        nullable=("top_depth", "base_depth"),
+    ).items():
+        setattr(t, field, value)
     db.commit()
     db.refresh(t)
     return {c.name: getattr(t, c.name) for c in FormationTop.__table__.columns}

@@ -210,3 +210,143 @@ def test_validation_helpers_raise_http_400():
     assert optional_str({}, "x", "d") == "d"
     with pytest.raises(HTTPException):
         optional_float({"x": "abc"}, "x")
+
+
+# ─── Fuzzing the write endpoints ────────────────────────────────
+#
+# Found by sending 13 malformed payloads to every write endpoint (1092 requests).
+# Four endpoints raised 500 where a 4xx was correct; these are the cases.
+
+
+def test_non_finite_float_is_422_not_500():
+    """`Infinity` in a body must not blow up the error response.
+
+    Python's json *parses* Infinity, so the value reaches FastAPI, which then
+    rejects the body. Its default 422 handler echoes the offending input, and
+    Starlette serialises responses with allow_nan=False — so building the 422
+    raised "Out of range float values are not JSON compliant" and the client got
+    a 500 instead. Every endpoint with a Pydantic body model was affected.
+    """
+    body = b'{"name": "ok", "depth": Infinity}'
+    for path in (
+        "/api/audit-log/verify/signature",
+        "/api/ops/contracts/verify-signature",
+        "/api/ops/security-evidence/attest",
+        "/api/ops/security-evidence/manifest/verify-signature",
+    ):
+        response = client.post(
+            path, content=body,
+            headers={**INTERPRETER, "Content-Type": "application/json"},
+        )
+        assert response.status_code < 500, (
+            f"POST {path} -> {response.status_code} {response.text[:200]}"
+        )
+        # And the response must itself be valid JSON.
+        response.json()
+
+
+def test_nan_and_infinity_in_nested_positions_are_handled():
+    body = b'{"payload": {"a": [NaN, Infinity, -Infinity]}, "signature": "' + b"0" * 64 + b'"}'
+    response = client.post(
+        "/api/audit-log/verify/signature", content=body,
+        headers={**INTERPRETER, "Content-Type": "application/json"},
+    )
+    assert response.status_code < 500, response.text[:200]
+    response.json()
+
+
+def test_partial_update_rejects_a_non_numeric_float_field():
+    """PUT used a bare setattr loop, so a string reached the FLOAT column."""
+    response = client.put(
+        "/api/tops/1", json={"depth": "abc"}, headers=INTERPRETER,
+    )
+    assert response.status_code == 400, response.text[:200]
+    assert "depth" in response.json()["detail"]
+
+
+def test_partial_update_rejects_null_for_a_not_null_column():
+    response = client.put(
+        "/api/tops/1", json={"depth": None}, headers=INTERPRETER,
+    )
+    assert response.status_code == 400, response.text[:200]
+    assert "depth" in response.json()["detail"]
+
+
+def test_partial_update_rejects_null_name_on_a_well():
+    response = client.put(
+        "/api/wells/1", json={"name": None}, headers=INTERPRETER,
+    )
+    assert response.status_code == 400, response.text[:200]
+
+
+def test_partial_update_allows_null_for_nullable_columns():
+    """latitude/longitude/elevation/total_depth are nullable, so null is valid."""
+    response = client.put(
+        "/api/wells/1", json={"latitude": None, "longitude": None},
+        headers=INTERPRETER,
+    )
+    assert response.status_code == 200, response.text[:200]
+
+
+def test_partial_update_accepts_valid_values():
+    response = client.put(
+        "/api/wells/1", json={"name": "Renamed", "total_depth": 1234.5},
+        headers=INTERPRETER,
+    )
+    assert response.status_code == 200, response.text[:200]
+    assert response.json()["name"] == "Renamed"
+    assert response.json()["total_depth"] == 1234.5
+
+
+def test_empty_partial_update_is_a_no_op_not_an_error():
+    response = client.put("/api/wells/1", json={}, headers=INTERPRETER)
+    assert response.status_code == 200, response.text[:200]
+
+
+def test_apply_template_with_a_non_string_name_is_400_not_500():
+    """_find_template called .strip() on whatever the body supplied."""
+    for bad in (12345, {"nested": 1}, [1, 2]):
+        response = client.post(
+            "/api/wells/1/apply-template", json={"name": bad}, headers=INTERPRETER,
+        )
+        assert response.status_code == 400, (
+            f"apply-template with name={bad!r} -> {response.status_code} "
+            f"{response.text[:150]}"
+        )
+
+
+def test_canonical_json_rejects_non_finite_values():
+    from fastapi import HTTPException
+
+    from backend.validation import canonical_json
+
+    assert canonical_json({"a": 1, "b": "x"}) == '{"a":1,"b":"x"}'
+    for bad in ({"x": float("inf")}, {"x": float("nan")}, {"x": float("-inf")}):
+        with pytest.raises(HTTPException) as exc:
+            canonical_json(bad)
+        assert exc.value.status_code == 400
+
+
+def test_pick_typed_only_returns_present_fields():
+    from backend.validation import pick_typed
+
+    assert pick_typed({"name": "a"}, strings=("name", "uwi")) == {"name": "a"}
+    assert pick_typed({}, strings=("name",)) == {}
+    assert pick_typed({"lat": None}, floats=("lat",), nullable=("lat",)) == {"lat": None}
+    assert pick_typed({"lat": "1.5"}, floats=("lat",)) == {"lat": 1.5}
+    assert pick_typed({"n": "3"}, ints=("n",)) == {"n": 3}
+
+
+def test_pick_typed_rejects_bad_types():
+    from fastapi import HTTPException
+
+    from backend.validation import pick_typed
+
+    with pytest.raises(HTTPException):
+        pick_typed({"name": None}, strings=("name",))
+    with pytest.raises(HTTPException):
+        pick_typed({"d": "abc"}, floats=("d",))
+    with pytest.raises(HTTPException):
+        pick_typed({"n": "abc"}, ints=("n",))
+    with pytest.raises(HTTPException):
+        pick_typed({"name": {"nested": 1}}, strings=("name",))

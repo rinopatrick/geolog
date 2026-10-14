@@ -226,3 +226,89 @@ def test_route_inventory_is_unchanged():
     assert not missing, f"endpoints disappeared: {missing}"
     assert not added, f"unexpected new endpoints: {added}"
     assert actual == EXPECTED_ROUTES
+
+
+# ─── Duplicate route registration ───────────────────────────────
+#
+# Starlette matches the FIRST route registered for a path, so a second handler for
+# the same method+path is dead code — it registers, appears in the OpenAPI schema,
+# and never runs. Two have been found this way:
+#
+#   GET  /api/templates                      main.py vs routers/templates.py
+#   POST /api/wells/{wid}/apply-template     routers/wells.py vs routers/templates.py
+#
+# The second was subtle: the dead copy had been fixed while the live one still
+# failed, so a fix appeared not to work. Both were also fixed with different
+# template lists and different lock files, so which one answered depended on
+# registration order.
+
+
+def _all_routes() -> dict[tuple[str, str], list[tuple[str, str]]]:
+    """Every (method, path) with the handlers claiming it, across all modules."""
+    import importlib
+    import pathlib
+
+    import backend.routers as routers_pkg
+    from backend.main import app
+
+    found: dict[tuple[str, str], list[tuple[str, str]]] = {}
+
+    def add(method: str, path: str, handler: str, source: str):
+        if method in ("HEAD", "OPTIONS"):
+            return
+        found.setdefault((method, path), []).append((handler, source))
+
+    for route in app.routes:
+        path = getattr(route, "path", "")
+        methods = getattr(route, "methods", None)
+        if methods and path.startswith("/api"):
+            for method in methods:
+                add(method, path, getattr(route, "name", "?"), "main.py")
+
+    for file in sorted(pathlib.Path(routers_pkg.__file__).parent.glob("*.py")):
+        if file.stem == "__init__":
+            continue
+        module = importlib.import_module(f"backend.routers.{file.stem}")
+        router = getattr(module, "router", None)
+        if router is None:
+            continue
+        for route in router.routes:
+            methods = getattr(route, "methods", None)
+            if not methods:
+                continue
+            for method in methods:
+                # route.path is already prefix-qualified.
+                add(method, getattr(route, "path", ""), getattr(route, "name", "?"), file.stem)
+
+    return found
+
+
+def test_no_duplicate_route_registrations():
+    duplicates = {
+        key: handlers
+        for key, handlers in _all_routes().items()
+        if len(handlers) > 1
+    }
+    assert duplicates == {}, (
+        "more than one handler is registered for the same method and path; the "
+        f"later one is dead code: {duplicates}"
+    )
+
+
+def test_the_expansion_actually_finds_the_routers():
+    """Guards the check above: if it saw nothing, it would pass vacuously."""
+    routes = _all_routes()
+    assert len(routes) >= 180, f"only found {len(routes)} routes"
+    sources = {source for handlers in routes.values() for _, source in handlers}
+    for expected in ("main.py", "wells", "ops", "audit", "log_runs", "projects", "templates"):
+        assert expected in sources, f"{expected} contributed no routes"
+
+
+def test_apply_template_is_served_by_the_templates_router():
+    """The duplicate resolution kept routers/templates.py's handler."""
+    from backend.routers import templates, wells
+
+    template_paths = {r.path for r in templates.router.routes}
+    well_paths = {r.path for r in wells.router.routes}
+    assert "/api/wells/{wid}/apply-template" in template_paths
+    assert "/api/wells/{wid}/apply-template" not in well_paths

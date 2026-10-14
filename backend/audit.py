@@ -29,8 +29,10 @@ from sqlalchemy.orm import Session
 
 try:
     from models import AuditLog
+    from validation import canonical_json
 except ImportError:
     from backend.models import AuditLog
+    from backend.validation import canonical_json
 
 # Serialises the read-previous-hash / insert pair. Without it two concurrent
 # writes can both chain onto the same predecessor, producing two rows claiming
@@ -242,7 +244,7 @@ def verify_audit_export_signature_payload(payload_obj: dict, signature: str, kid
     ):
         raise HTTPException(status_code=400, detail="signature must be a 64-char hex string")
 
-    canonical = json.dumps(payload_obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    canonical = canonical_json(payload_obj)
 
     try:
         resolved_kid, key_raw = resolve_audit_export_signing_key(kid or None)

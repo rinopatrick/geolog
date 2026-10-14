@@ -35,6 +35,7 @@ try:
     from database import get_db
     from deps import require_interpreter, require_viewer
     from observability import OBS_METRICS, OBS_METRICS_LOCK
+    from validation import canonical_json
     # Reused response models, defined alongside the audit routes that share them.
     from routers.audit import AuditSignatureVerifyRequest, AuditSignatureVerifyResponse
 except ImportError:
@@ -42,6 +43,7 @@ except ImportError:
     from backend.database import get_db
     from backend.deps import require_interpreter, require_viewer
     from backend.observability import OBS_METRICS, OBS_METRICS_LOCK
+    from backend.validation import canonical_json
     from backend.routers.audit import AuditSignatureVerifyRequest, AuditSignatureVerifyResponse
 
 router = APIRouter(prefix="/api/ops", tags=["ops"])
@@ -397,7 +399,7 @@ def _attest_security_evidence_payload(report: dict[str, Any] | None, signature_o
             "timestamp": utcnow().isoformat() + "Z",
         }
 
-    report_bytes = json.dumps(report, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    report_bytes = canonical_json(report).encode("utf-8")
     report_sha = hashlib.sha256(report_bytes).hexdigest()
 
     declared_sha = str(signature_obj.get("report_sha256", "") or "").strip().lower()
