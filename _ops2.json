@@ -1,0 +1,466 @@
+{
+ "audit_routes": [
+  {
+   "start": 4241,
+   "end": 4256,
+   "path": "/api/audit-log",
+   "method": "GET",
+   "fn": "get_audit_log",
+   "text": "@app.get(\"/api/audit-log\")\ndef get_audit_log(project_id: int = None, well_id: int = None, limit: int = 100,\n                  db: Session = Depends(get_db)):\n    \"\"\"Return audit trail, optionally filtered by project or well.\"\"\"\n    q = db.query(AuditLog)\n    if project_id:\n        q = q.filter(AuditLog.project_id == project_id)\n    if well_id:\n        q = q.filter(AuditLog.well_id == well_id)\n    rows = q.order_by(AuditLog.created_at.desc()).limit(min(limit, 500)).all()\n    result = []\n    for r in rows:\n        d = {c.name: getattr(r, c.name) for c in AuditLog.__table__.columns}\n        d[\"created_at\"] = d[\"created_at\"].isoformat() if d[\"created_at\"] else \"\"\n        result.append(d)\n    return result"
+  },
+  {
+   "start": 4295,
+   "end": 4298,
+   "path": "/api/audit-log/verify",
+   "method": "GET",
+   "fn": "verify_audit_log_chain",
+   "text": "@app.get(\"/api/audit-log/verify\")\ndef verify_audit_log_chain(limit: int = 2000, db: Session = Depends(get_db)):\n    \"\"\"Recompute immutable audit chain and report tamper gaps.\"\"\"\n    return _compute_audit_chain_report(limit, db)"
+  },
+  {
+   "start": 4301,
+   "end": 4321,
+   "path": "/api/audit-log/immutability-status",
+   "method": "GET",
+   "fn": "audit_log_immutability_status",
+   "text": "@app.get(\"/api/audit-log/immutability-status\")\ndef audit_log_immutability_status(_role: str = Depends(require_viewer)):\n    \"\"\"Report whether append-only audit triggers are installed.\"\"\"\n    trigger_names = [\"trg_audit_log_no_update\", \"trg_audit_log_no_delete\"]\n    present: dict[str, bool] = {k: False for k in trigger_names}\n\n    with engine.connect() as conn:\n        rows = conn.execute(\n            text(\"SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('trg_audit_log_no_update','trg_audit_log_no_delete')\")\n        ).fetchall()\n\n    for row in rows:\n        n = str(row[0])\n        if n in present:\n            present[n] = True\n\n    return {\n        \"ok\": all(present.values()),\n        \"append_only_enforced\": all(present.values()),\n        \"triggers\": present,\n    }"
+  },
+  {
+   "start": 4365,
+   "end": 4406,
+   "path": "/api/audit-log/verify/export",
+   "method": "GET",
+   "fn": "export_audit_log_verification",
+   "text": "@app.get(\"/api/audit-log/verify/export\")\ndef export_audit_log_verification(\n    request: Request,\n    limit: int = 2000,\n    sign: bool = False,\n    kid: str | None = None,\n    db: Session = Depends(get_db),\n):\n    \"\"\"Export verification report with SHA256 digest and optional detached HMAC signature.\"\"\"\n    report = _compute_audit_chain_report(limit, db)\n    payload = {\n        \"generated_at\": datetime.datetime.utcnow().isoformat() + \"Z\",\n        \"report\": report,\n        \"trace\": {\n            \"request_id\": request.headers.get(\"X-Request-ID\") or \"\",\n            \"auth_subject\": str(getattr(request.state, \"auth_subject\", \"\") or \"\"),\n            \"auth_role\": str(getattr(request.state, \"user_role\", \"viewer\") or \"viewer\"),\n            \"input\": {\"limit\": int(limit)},\n            \"code_version\": (os.getenv(\"GEOLOG_CODE_VERSION\") or __version__).strip() or \"unknown\",\n        },\n    }\n    canonical = json.dumps(payload, sort_keys=True, separators=(\",\", \":\"), ensure_ascii=False)\n    digest = hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest()\n\n    out = {\n        \"digest_sha256\": digest,\n        \"payload\": payload,\n        \"signature\": None,\n        \"signature_alg\": None,\n        \"signature_detached\": True,\n        \"signature_kid\": None,\n    }\n\n    if sign:\n        resolved_kid, key_raw = _resolve_audit_export_signing_key(kid)\n        key = key_raw.encode(\"utf-8\")\n        sig = hmac.new(key, canonical.encode(\"utf-8\"), hashlib.sha256).hexdigest()\n        out[\"signature\"] = sig\n        out[\"signature_alg\"] = \"hmac-sha256\"\n        out[\"signature_kid\"] = resolved_kid\n\n    return out"
+  },
+  {
+   "start": 4479,
+   "end": 4527,
+   "path": "/api/audit-log/verify/signature",
+   "method": "GET",
+   "fn": "verify_audit_log_export_signature",
+   "text": "@app.get(\n    \"/api/audit-log/verify/signature\",\n    response_model=AuditSignatureVerifyResponse,\n    responses={\n        200: {\n            \"description\": \"Signature verification result\",\n            \"content\": {\n                \"application/json\": {\n                    \"examples\": {\n                        \"valid\": {\n                            \"summary\": \"Valid signature\",\n                            \"value\": {\n                                \"ok\": True,\n                                \"reason\": \"signature_valid\",\n                                \"reason_code\": \"SIGNATURE_VALID\",\n                                \"signature_alg\": \"hmac-sha256\",\n                                \"signature_kid\": \"k1\",\n                            },\n                        },\n                        \"mismatch\": {\n                            \"summary\": \"Signature mismatch\",\n                            \"value\": {\n                                \"ok\": False,\n                                \"reason\": \"signature_mismatch\",\n                                \"reason_code\": \"SIGNATURE_MISMATCH\",\n                                \"signature_alg\": \"hmac-sha256\",\n                                \"signature_kid\": \"k1\",\n                            },\n                        },\n                    }\n                }\n            },\n        }\n    },\n)\ndef verify_audit_log_export_signature(payload: str, signature: str, kid: str | None = None):\n    \"\"\"Verify detached HMAC signature for exported audit verification payload.\n\n    payload: canonical payload JSON string.\n    \"\"\"\n    if not isinstance(payload, str) or not payload.strip():\n        raise HTTPException(status_code=400, detail=\"payload must be a non-empty JSON string\")\n\n    try:\n        parsed_payload = json.loads(payload)\n    except Exception:\n        raise HTTPException(status_code=400, detail=\"payload must be valid JSON\")\n\n    return _verify_audit_export_signature_payload(parsed_payload, signature, kid)"
+  },
+  {
+   "start": 4530,
+   "end": 4539,
+   "path": "/api/audit-log/verify/signature",
+   "method": "POST",
+   "fn": "verify_audit_log_export_signature_post",
+   "text": "@app.post(\n    \"/api/audit-log/verify/signature\",\n    response_model=AuditSignatureVerifyResponse,\n)\ndef verify_audit_log_export_signature_post(\n    data: AuditSignatureVerifyRequest,\n    _role: str = Depends(require_interpreter),\n):\n    \"\"\"M2M verifier. Body: {payload: object, signature: hex64, kid?: string}.\"\"\"\n    return _verify_audit_export_signature_payload(data.payload, data.signature, data.kid)"
+  }
+ ],
+ "ops_routes": [
+  {
+   "start": 5838,
+   "end": 5874,
+   "path": "/api/ops/metrics",
+   "method": "GET",
+   "fn": "ops_metrics",
+   "text": "@app.get(\n    \"/api/ops/metrics\",\n    response_model=OpsMetricsResponse,\n    responses={\n        200: {\n            \"description\": \"In-process metrics snapshot\",\n            \"content\": {\n                \"application/json\": {\n                    \"example\": {\n                        \"requests_total\": 120,\n                        \"requests_by_method\": {\"GET\": 110, \"POST\": 10},\n                        \"requests_by_status\": {\"200\": 115, \"404\": 4, \"500\": 1},\n                        \"latency_ms_avg\": 35.7,\n                        \"latency_samples\": 120,\n                        \"recent_events_size\": 120,\n                        \"timestamp\": \"2026-01-01T00:00:00Z\",\n                    }\n                }\n            },\n        }\n    },\n)\ndef ops_metrics(_role: str = Depends(require_viewer)):\n    \"\"\"Lightweight in-process metrics snapshot (Phase 2 baseline).\"\"\"\n    with OBS_METRICS_LOCK:\n        total = int(OBS_METRICS.get(\"requests_total\", 0))\n        count = int(OBS_METRICS.get(\"latency_ms_count\", 0))\n        avg = (float(OBS_METRICS.get(\"latency_ms_sum\", 0.0)) / count) if count > 0 else 0.0\n        return {\n            \"requests_total\": total,\n            \"requests_by_method\": dict(OBS_METRICS.get(\"requests_by_method\", {})),\n            \"requests_by_status\": dict(OBS_METRICS.get(\"requests_by_status\", {})),\n            \"latency_ms_avg\": round(avg, 2),\n            \"latency_samples\": count,\n            \"recent_events_size\": len(OBS_METRICS.get(\"recent_events\", [])) if isinstance(OBS_METRICS.get(\"recent_events\"), list) else 0,\n            \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n        }"
+  },
+  {
+   "start": 5877,
+   "end": 5936,
+   "path": "/api/ops/metrics/recent",
+   "method": "GET",
+   "fn": "ops_metrics_recent",
+   "text": "@app.get(\n    \"/api/ops/metrics/recent\",\n    response_model=OpsMetricsRecentResponse,\n    responses={\n        200: {\n            \"description\": \"Recent request events with optional filters\",\n            \"content\": {\n                \"application/json\": {\n                    \"example\": {\n                        \"events\": [{\"ts\": \"2026-01-01T00:00:00Z\", \"method\": \"GET\", \"path\": \"/api/wells\", \"status\": 200, \"latency_ms\": 12.3}],\n                        \"count\": 1,\n                        \"limit\": 20,\n                        \"status_min\": 0,\n                        \"path_contains\": None,\n                        \"timestamp\": \"2026-01-01T00:00:01Z\",\n                    }\n                }\n            },\n        }\n    },\n)\ndef ops_metrics_recent(\n    limit: int = 20,\n    status_min: int = 0,\n    path_contains: str | None = None,\n    _role: str = Depends(require_viewer),\n):\n    \"\"\"Return recent request events captured by in-process metrics middleware.\"\"\"\n    limit = max(1, min(int(limit or 20), 200))\n    status_min = max(0, int(status_min or 0))\n    needle = (path_contains or \"\").strip().lower()\n\n    with OBS_METRICS_LOCK:\n        recent = OBS_METRICS.get(\"recent_events\")\n        if not isinstance(recent, list):\n            recent = []\n\n        filtered = []\n        for e in recent:\n            try:\n                st = int(e.get(\"status\", 0))\n            except Exception:\n                st = 0\n            p = str(e.get(\"path\", \"\"))\n            if st < status_min:\n                continue\n            if needle and needle not in p.lower():\n                continue\n            filtered.append(e)\n\n        out = filtered[-limit:]\n\n    return {\n        \"events\": out,\n        \"count\": len(out),\n        \"limit\": limit,\n        \"status_min\": status_min,\n        \"path_contains\": path_contains,\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }"
+  },
+  {
+   "start": 5993,
+   "end": 6075,
+   "path": "/api/ops/slo-status",
+   "method": "GET",
+   "fn": "ops_slo_status",
+   "text": "@app.get(\n    \"/api/ops/slo-status\",\n    response_model=OpsSloStatusResponse,\n    responses={\n        200: {\n            \"description\": \"SLO evaluation snapshot\",\n            \"content\": {\n                \"application/json\": {\n                    \"example\": {\n                        \"ok\": True,\n                        \"targets\": {\"latency_ms_avg_max\": 500.0, \"latency_ms_p95_max\": 800.0, \"error_rate_max\": 0.01},\n                        \"current\": {\"latency_ms_avg\": 42.1, \"latency_ms_p95\": 88.2, \"error_rate\": 0.0, \"requests_total\": 123, \"errors_5xx\": 0},\n                        \"checks\": {\"latency_ok\": True, \"latency_avg_ok\": True, \"latency_p95_ok\": True, \"error_rate_ok\": True},\n                        \"timestamp\": \"2026-01-01T00:00:00Z\",\n                    }\n                }\n            },\n        }\n    },\n)\ndef ops_slo_status(_role: str = Depends(require_viewer)):\n    \"\"\"Basic SLO evaluation snapshot from in-process counters.\"\"\"\n    target_latency_avg_ms = float(os.getenv(\"OPS_SLO_AVG_MS\", \"500\") or 500)\n    target_latency_p95_ms = float(os.getenv(\"OPS_SLO_P95_MS\", \"800\") or 800)\n    target_error_rate = float(os.getenv(\"OPS_SLO_ERROR_RATE\", \"0.01\") or 0.01)\n\n    with OBS_METRICS_LOCK:\n        total = int(OBS_METRICS.get(\"requests_total\", 0))\n        avg = 0.0\n        count = int(OBS_METRICS.get(\"latency_ms_count\", 0))\n        if count > 0:\n            avg = float(OBS_METRICS.get(\"latency_ms_sum\", 0.0)) / count\n        by_status = dict(OBS_METRICS.get(\"requests_by_status\", {}))\n        recent = OBS_METRICS.get(\"recent_events\")\n        if not isinstance(recent, list):\n            recent = []\n\n    error_count = 0\n    for k, v in by_status.items():\n        try:\n            if int(k) >= 500:\n                error_count += int(v)\n        except Exception:\n            continue\n\n    error_rate = (float(error_count) / total) if total > 0 else 0.0\n    error_ok = error_rate <= target_error_rate\n\n    # lightweight p95 from recent ring buffer latency values\n    latencies = [float(e.get(\"latency_ms\", 0.0)) for e in recent if isinstance(e, dict)]\n    latency_p95 = 0.0\n    if latencies:\n        try:\n            latency_p95 = float(np.percentile(np.array(latencies, dtype=np.float64), 95))\n        except Exception:\n            latency_p95 = 0.0\n\n    latency_avg_ok = avg <= target_latency_avg_ms\n    latency_p95_ok = latency_p95 <= target_latency_p95_ms\n    latency_ok = bool(latency_avg_ok and latency_p95_ok)\n\n    return {\n        \"ok\": bool(latency_ok and error_ok),\n        \"targets\": {\n            \"latency_ms_avg_max\": target_latency_avg_ms,\n            \"latency_ms_p95_max\": target_latency_p95_ms,\n            \"error_rate_max\": target_error_rate,\n        },\n        \"current\": {\n            \"latency_ms_avg\": round(avg, 2),\n            \"latency_ms_p95\": round(latency_p95, 2),\n            \"error_rate\": round(error_rate, 6),\n            \"requests_total\": total,\n            \"errors_5xx\": error_count,\n        },\n        \"checks\": {\n            \"latency_ok\": latency_ok,\n            \"latency_avg_ok\": latency_avg_ok,\n            \"latency_p95_ok\": latency_p95_ok,\n            \"error_rate_ok\": error_ok,\n        },\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }"
+  },
+  {
+   "start": 6078,
+   "end": 6158,
+   "path": "/api/ops/alerts",
+   "method": "GET",
+   "fn": "ops_alerts",
+   "text": "@app.get(\n    \"/api/ops/alerts\",\n    response_model=OpsAlertsResponse,\n    responses={\n        200: {\n            \"description\": \"SLO breach alerts\",\n            \"content\": {\n                \"application/json\": {\n                    \"example\": {\n                        \"ok\": False,\n                        \"alerts\": [\n                            {\"code\": \"LATENCY_P95_SLO_BREACH\", \"severity\": \"warning\", \"message\": \"latency_ms_p95 920.0 > target 800.0\"}\n                        ],\n                        \"count\": 1,\n                        \"severity_counts\": {\"warning\": 1, \"critical\": 0},\n                        \"code_counts\": {\"LATENCY_P95_SLO_BREACH\": 1},\n                        \"highest_severity\": \"warning\",\n                        \"timestamp\": \"2026-01-01T00:00:00Z\",\n                    }\n                }\n            },\n        }\n    },\n)\ndef ops_alerts(_role: str = Depends(require_viewer)):\n    \"\"\"Simple alert evaluation based on SLO snapshot.\"\"\"\n    slo = ops_slo_status(_role)\n    alerts = []\n\n    if not slo[\"checks\"][\"latency_avg_ok\"]:\n        alerts.append({\n            \"code\": \"LATENCY_AVG_SLO_BREACH\",\n            \"severity\": \"warning\",\n            \"message\": (\n                f\"latency_ms_avg {slo['current']['latency_ms_avg']} > target {slo['targets']['latency_ms_avg_max']}\"\n            ),\n        })\n\n    if not slo[\"checks\"][\"latency_p95_ok\"]:\n        alerts.append({\n            \"code\": \"LATENCY_P95_SLO_BREACH\",\n            \"severity\": \"warning\",\n            \"message\": (\n                f\"latency_ms_p95 {slo['current']['latency_ms_p95']} > target {slo['targets']['latency_ms_p95_max']}\"\n            ),\n        })\n\n    if not slo[\"checks\"][\"error_rate_ok\"]:\n        alerts.append({\n            \"code\": \"ERROR_RATE_SLO_BREACH\",\n            \"severity\": \"critical\",\n            \"message\": (\n                f\"error_rate {slo['current']['error_rate']} > target {slo['targets']['error_rate_max']}\"\n            ),\n        })\n\n    severity_counts = {\"warning\": 0, \"critical\": 0}\n    code_counts = {}\n    for a in alerts:\n        sev = str(a.get(\"severity\", \"\")).lower()\n        if sev in severity_counts:\n            severity_counts[sev] += 1\n        code = str(a.get(\"code\", \"\")).strip()\n        if code:\n            code_counts[code] = int(code_counts.get(code, 0)) + 1\n\n    highest_severity = \"none\"\n    if int(severity_counts.get(\"critical\", 0)) > 0:\n        highest_severity = \"critical\"\n    elif int(severity_counts.get(\"warning\", 0)) > 0:\n        highest_severity = \"warning\"\n\n    return {\n        \"ok\": len(alerts) == 0,\n        \"alerts\": alerts,\n        \"count\": len(alerts),\n        \"severity_counts\": severity_counts,\n        \"code_counts\": code_counts,\n        \"highest_severity\": highest_severity,\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }"
+  },
+  {
+   "start": 6161,
+   "end": 6222,
+   "path": "/api/ops/alert-rules",
+   "method": "GET",
+   "fn": "ops_alert_rules",
+   "text": "@app.get(\n    \"/api/ops/alert-rules\",\n    response_model=OpsAlertRulesResponse,\n    responses={\n        200: {\n            \"description\": \"Configured SLO alert rules and threshold source\",\n            \"content\": {\n                \"application/json\": {\n                    \"example\": {\n                        \"version\": \"1.0\",\n                        \"rules\": [\n                            {\n                                \"code\": \"LATENCY_AVG_SLO_BREACH\",\n                                \"severity\": \"warning\",\n                                \"metric\": \"latency_ms_avg\",\n                                \"threshold\": 500.0,\n                                \"operator\": \">\",\n                                \"env_key\": \"OPS_SLO_AVG_MS\",\n                            }\n                        ],\n                        \"timestamp\": \"2026-01-01T00:00:00Z\",\n                    }\n                }\n            },\n        }\n    },\n)\ndef ops_alert_rules(_role: str = Depends(require_viewer)):\n    \"\"\"Alert-rule contract for runtime SLO thresholds (env-backed).\"\"\"\n    avg = float(os.getenv(\"OPS_SLO_AVG_MS\", \"500\") or 500)\n    p95 = float(os.getenv(\"OPS_SLO_P95_MS\", \"800\") or 800)\n    err = float(os.getenv(\"OPS_SLO_ERROR_RATE\", \"0.01\") or 0.01)\n    return {\n        \"version\": \"1.0\",\n        \"rules\": [\n            {\n                \"code\": \"LATENCY_AVG_SLO_BREACH\",\n                \"severity\": \"warning\",\n                \"metric\": \"latency_ms_avg\",\n                \"threshold\": avg,\n                \"operator\": \">\",\n                \"env_key\": \"OPS_SLO_AVG_MS\",\n            },\n            {\n                \"code\": \"LATENCY_P95_SLO_BREACH\",\n                \"severity\": \"warning\",\n                \"metric\": \"latency_ms_p95\",\n                \"threshold\": p95,\n                \"operator\": \">\",\n                \"env_key\": \"OPS_SLO_P95_MS\",\n            },\n            {\n                \"code\": \"ERROR_RATE_SLO_BREACH\",\n                \"severity\": \"critical\",\n                \"metric\": \"error_rate\",\n                \"threshold\": err,\n                \"operator\": \">\",\n                \"env_key\": \"OPS_SLO_ERROR_RATE\",\n            },\n        ],\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }"
+  },
+  {
+   "start": 6225,
+   "end": 6273,
+   "path": "/api/ops/metrics/prometheus",
+   "method": "GET",
+   "fn": "ops_metrics_prometheus",
+   "text": "@app.get(\n    \"/api/ops/metrics/prometheus\",\n    responses={\n        200: {\n            \"description\": \"Prometheus text exposition format\",\n            \"content\": {\n                \"text/plain\": {\n                    \"example\": \"# HELP geolog_requests_total Total HTTP requests observed\\n# TYPE geolog_requests_total counter\\ngeolog_requests_total 123\"\n                }\n            },\n        }\n    },\n)\ndef ops_metrics_prometheus(_role: str = Depends(require_viewer)):\n    \"\"\"Prometheus text exposition for lightweight ops metrics.\"\"\"\n    with OBS_METRICS_LOCK:\n        total = int(OBS_METRICS.get(\"requests_total\", 0))\n        by_method = dict(OBS_METRICS.get(\"requests_by_method\", {}))\n        by_status = dict(OBS_METRICS.get(\"requests_by_status\", {}))\n        lat_sum = float(OBS_METRICS.get(\"latency_ms_sum\", 0.0))\n        lat_count = int(OBS_METRICS.get(\"latency_ms_count\", 0))\n\n    lines = [\n        \"# HELP geolog_requests_total Total HTTP requests observed\",\n        \"# TYPE geolog_requests_total counter\",\n        f\"geolog_requests_total {total}\",\n        \"# HELP geolog_requests_by_method_total HTTP requests by method\",\n        \"# TYPE geolog_requests_by_method_total counter\",\n    ]\n    for method, count in sorted(by_method.items()):\n        lines.append(f'geolog_requests_by_method_total{{method=\"{method}\"}} {int(count)}')\n\n    lines += [\n        \"# HELP geolog_requests_by_status_total HTTP requests by response status\",\n        \"# TYPE geolog_requests_by_status_total counter\",\n    ]\n    for status, count in sorted(by_status.items()):\n        lines.append(f'geolog_requests_by_status_total{{status=\"{status}\"}} {int(count)}')\n\n    lines += [\n        \"# HELP geolog_request_latency_ms_sum Sum of request latency in milliseconds\",\n        \"# TYPE geolog_request_latency_ms_sum counter\",\n        f\"geolog_request_latency_ms_sum {lat_sum}\",\n        \"# HELP geolog_request_latency_ms_count Count of request latency samples\",\n        \"# TYPE geolog_request_latency_ms_count counter\",\n        f\"geolog_request_latency_ms_count {lat_count}\",\n        \"\",\n    ]\n    return StreamingResponse(iter([\"\\n\".join(lines)]), media_type=\"text/plain; version=0.0.4\")"
+  },
+  {
+   "start": 6364,
+   "end": 6403,
+   "path": "/api/ops/health",
+   "method": "GET",
+   "fn": "ops_health",
+   "text": "@app.get(\n    \"/api/ops/health\",\n    response_model=OpsHealthResponse,\n    responses={\n        200: {\n            \"description\": \"Operational health snapshot\",\n            \"content\": {\n                \"application/json\": {\n                    \"example\": {\n                        \"ok\": True,\n                        \"db_ok\": True,\n                        \"slo_ok\": True,\n                        \"alerts_ok\": True,\n                        \"alert_count\": 0,\n                        \"timestamp\": \"2026-01-01T00:00:00Z\",\n                    }\n                }\n            },\n        }\n    },\n)\ndef ops_health(db: Session = Depends(get_db), _role: str = Depends(require_viewer)):\n    \"\"\"Operational health snapshot: db connectivity + SLO + alert summary.\"\"\"\n    db_ok = True\n    try:\n        db.execute(text(\"SELECT 1\"))\n    except Exception:\n        db_ok = False\n\n    slo = ops_slo_status(_role)\n    alerts = ops_alerts(_role)\n\n    return {\n        \"ok\": bool(db_ok and alerts.get(\"ok\", False)),\n        \"db_ok\": db_ok,\n        \"slo_ok\": bool(slo.get(\"ok\", False)),\n        \"alerts_ok\": bool(alerts.get(\"ok\", False)),\n        \"alert_count\": int(alerts.get(\"count\", 0)),\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }"
+  },
+  {
+   "start": 6406,
+   "end": 6423,
+   "path": "/api/ops/observability-status",
+   "method": "GET",
+   "fn": "ops_observability_status",
+   "text": "@app.get(\"/api/ops/observability-status\", response_model=OpsObservabilityStatusResponse)\ndef ops_observability_status(_role: str = Depends(require_viewer)):\n    \"\"\"Observability wiring status for Phase 2 verification.\"\"\"\n    with OBS_METRICS_LOCK:\n        recent = list(OBS_METRICS.get(\"recent_events\", []))\n    has_request_id = any(bool(str(e.get(\"request_id\", \"\")).strip()) for e in recent if isinstance(e, dict))\n    has_trace_id = any(bool(str(e.get(\"trace_id\", \"\")).strip()) for e in recent if isinstance(e, dict))\n    otel_enabled = bool((os.getenv(\"OTEL_EXPORTER_OTLP_ENDPOINT\") or \"\").strip())\n    return {\n        \"ok\": True,\n        \"request_id_propagation\": True,\n        \"trace_context_propagation\": True,\n        \"structured_logging\": True,\n        \"recent_events_include_request_id\": has_request_id,\n        \"recent_events_include_trace_id\": has_trace_id,\n        \"otel_enabled\": otel_enabled,\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }"
+  },
+  {
+   "start": 6426,
+   "end": 6439,
+   "path": "/api/ops/otel-status",
+   "method": "GET",
+   "fn": "ops_otel_status",
+   "text": "@app.get(\"/api/ops/otel-status\", response_model=OpsOtelStatusResponse)\ndef ops_otel_status(_role: str = Depends(require_viewer)):\n    endpoint = (os.getenv(\"OTEL_EXPORTER_OTLP_ENDPOINT\") or \"\").strip()\n    service_name = (os.getenv(\"OTEL_SERVICE_NAME\") or \"geolog-app\").strip() or \"geolog-app\"\n    resource_attrs = (os.getenv(\"OTEL_RESOURCE_ATTRIBUTES\") or \"\").strip()\n    enabled = bool(endpoint)\n    return {\n        \"ok\": True,\n        \"enabled\": enabled,\n        \"exporter_otlp_endpoint_set\": bool(endpoint),\n        \"service_name\": service_name,\n        \"resource_attributes_set\": bool(resource_attrs),\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }"
+  },
+  {
+   "start": 6442,
+   "end": 6493,
+   "path": "/api/ops/evidence-status",
+   "method": "GET",
+   "fn": "ops_evidence_status",
+   "text": "@app.get(\"/api/ops/evidence-status\", response_model=OpsEvidenceStatusResponse)\ndef ops_evidence_status(\n    probe: bool = Query(default=False, description=\"When true, perform live HTTP reachability probes for dashboard/trace URLs\"),\n    _role: str = Depends(require_viewer),\n):\n    dashboard_url = (os.getenv(\"OPS_DASHBOARD_URL\") or \"\").strip()\n    alert_target = (os.getenv(\"OPS_ALERT_TARGET\") or \"\").strip()\n    trace_backend_url = (os.getenv(\"OPS_TRACE_BACKEND_URL\") or \"\").strip()\n\n    dashboard_configured = bool(dashboard_url)\n    alert_delivery_configured = bool(alert_target)\n    trace_backend_configured = bool(trace_backend_url)\n\n    def _probe_http(url: str) -> bool | None:\n        u = (url or \"\").strip().lower()\n        if not u:\n            return None\n        if not (u.startswith(\"http://\") or u.startswith(\"https://\")):\n            return None\n        req = urllib.request.Request(url, method=\"GET\")\n        try:\n            with urllib.request.urlopen(req, timeout=2.5) as resp:\n                return int(getattr(resp, \"status\", 0) or 0) < 500\n        except urllib.error.HTTPError as e:\n            return int(getattr(e, \"code\", 0) or 0) < 500\n        except Exception:\n            return False\n\n    dashboard_reachable = _probe_http(dashboard_url) if probe and dashboard_configured else None\n    trace_backend_reachable = _probe_http(trace_backend_url) if probe and trace_backend_configured else None\n\n    infra_ready = bool(dashboard_configured and alert_delivery_configured and trace_backend_configured)\n    if probe:\n        probe_ready = bool((dashboard_reachable is True) and (trace_backend_reachable is True))\n        ready = bool(infra_ready and probe_ready)\n    else:\n        ready = infra_ready\n\n    return {\n        \"ok\": True,\n        \"dashboard_configured\": dashboard_configured,\n        \"dashboard_url\": dashboard_url or None,\n        \"dashboard_reachable\": dashboard_reachable,\n        \"alert_delivery_configured\": alert_delivery_configured,\n        \"alert_delivery_target\": alert_target or None,\n        \"trace_backend_configured\": trace_backend_configured,\n        \"trace_backend_url\": trace_backend_url or None,\n        \"trace_backend_reachable\": trace_backend_reachable,\n        \"probes_enabled\": bool(probe),\n        \"ready_for_phase2_acceptance\": ready,\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }"
+  },
+  {
+   "start": 6496,
+   "end": 6526,
+   "path": "/api/ops/security-posture-status",
+   "method": "GET",
+   "fn": "ops_security_posture_status",
+   "text": "@app.get(\"/api/ops/security-posture-status\", response_model=OpsSecurityPostureStatusResponse)\ndef ops_security_posture_status(_role: str = Depends(require_viewer)):\n    secrets_source = (os.getenv(\"GEOLOG_SECRETS_SOURCE\") or \"\").strip()\n    tls_required = (os.getenv(\"GEOLOG_REQUIRE_TLS\", \"true\") or \"true\").strip().lower() in {\"1\", \"true\", \"yes\", \"on\"}\n    ci_security_gates_enabled = os.path.exists(\".github/workflows/security-gates.yml\")\n    backup_drill_script_present = os.path.exists(\"scripts/backup_restore_drill.sh\")\n    branch_protection_checklist_present = os.path.exists(\"docs/BRANCH_PROTECTION_CHECKLIST.md\")\n    security_evidence_template_present = os.path.exists(\"docs/SECURITY_EVIDENCE_TEMPLATE.md\")\n    container_non_root = True\n\n    ok = bool(\n        container_non_root\n        and bool(secrets_source)\n        and tls_required\n        and ci_security_gates_enabled\n        and backup_drill_script_present\n        and branch_protection_checklist_present\n        and security_evidence_template_present\n    )\n\n    return {\n        \"ok\": ok,\n        \"container_non_root\": container_non_root,\n        \"secrets_source_configured\": bool(secrets_source),\n        \"tls_required\": tls_required,\n        \"ci_security_gates_enabled\": ci_security_gates_enabled,\n        \"backup_drill_script_present\": backup_drill_script_present,\n        \"branch_protection_checklist_present\": branch_protection_checklist_present,\n        \"security_evidence_template_present\": security_evidence_template_present,\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }"
+  },
+  {
+   "start": 6529,
+   "end": 6617,
+   "path": "/api/ops/security-evidence-status",
+   "method": "GET",
+   "fn": "ops_security_evidence_status",
+   "text": "@app.get(\"/api/ops/security-evidence-status\", response_model=OpsSecurityEvidenceStatusResponse)\ndef ops_security_evidence_status(_role: str = Depends(require_viewer)):\n    artifact_dir = (os.getenv(\"GEOLOG_BACKUP_DRILL_ARTIFACT_DIR\") or \"artifacts/backup-drill\").strip() or \"artifacts/backup-drill\"\n\n    def _resolve_paths(base_dir: str):\n        root_report = os.path.join(base_dir, \"report.json\")\n        root_sig = os.path.join(base_dir, \"report.signature.json\")\n        if os.path.exists(root_report) and os.path.exists(root_sig):\n            return root_report, root_sig\n\n        try:\n            candidates = []\n            for name in os.listdir(base_dir):\n                sub = os.path.join(base_dir, name)\n                rp = os.path.join(sub, \"report.json\")\n                sp = os.path.join(sub, \"report.signature.json\")\n                if os.path.isdir(sub) and os.path.exists(rp) and os.path.exists(sp):\n                    candidates.append((os.path.getmtime(rp), rp, sp))\n            if candidates:\n                candidates.sort(key=lambda x: x[0], reverse=True)\n                _, rp, sp = candidates[0]\n                return rp, sp\n        except Exception:\n            return root_report, root_sig\n        return root_report, root_sig\n\n    report_path, sig_path = _resolve_paths(artifact_dir)\n\n    report_present = os.path.exists(report_path)\n    signature_present = os.path.exists(sig_path)\n    report_sha256_matches_signature: bool | None = None\n    hmac_signature_valid: bool | None = None\n    signature_alg: str | None = None\n    signature_kid: str | None = None\n    retention_days: int | None = None\n\n    if report_present and signature_present:\n        try:\n            with open(report_path, \"rb\") as f:\n                report_bytes = f.read()\n            report_sha = hashlib.sha256(report_bytes).hexdigest()\n\n            with open(sig_path, \"r\", encoding=\"utf-8\") as f:\n                sig_obj = json.load(f)\n\n            declared_sha = str(sig_obj.get(\"report_sha256\", \"\") or \"\").strip().lower()\n            signature_alg = str(sig_obj.get(\"signature_alg\", \"\") or \"\").strip() or None\n            signature_kid = str(sig_obj.get(\"signature_kid\", \"\") or \"\").strip() or None\n\n            rd = sig_obj.get(\"retention_days\")\n            try:\n                retention_days = int(rd) if rd is not None else None\n            except Exception:\n                retention_days = None\n\n            report_sha256_matches_signature = bool(declared_sha and declared_sha == report_sha)\n\n            if signature_alg == \"hmac-sha256\":\n                key = (os.getenv(\"BACKUP_DRILL_SIGNING_KEY\") or \"\").strip()\n                sig = str(sig_obj.get(\"signature\", \"\") or \"\").strip().lower()\n                if key and sig and len(sig) == 64 and all(c in \"0123456789abcdef\" for c in sig):\n                    signed_value = (declared_sha or report_sha).encode(\"utf-8\")\n                    expected = hmac.new(key.encode(\"utf-8\"), signed_value, hashlib.sha256).hexdigest()\n                    hmac_signature_valid = hmac.compare_digest(expected, sig)\n                else:\n                    hmac_signature_valid = False\n        except Exception:\n            report_sha256_matches_signature = False\n            hmac_signature_valid = False\n\n    ok = bool(\n        report_present\n        and signature_present\n        and report_sha256_matches_signature is True\n        and (hmac_signature_valid is not False)\n    )\n\n    return {\n        \"ok\": ok,\n        \"artifact_dir\": artifact_dir,\n        \"report_present\": report_present,\n        \"signature_present\": signature_present,\n        \"report_sha256_matches_signature\": report_sha256_matches_signature,\n        \"signature_alg\": signature_alg,\n        \"signature_kid\": signature_kid,\n        \"hmac_signature_valid\": hmac_signature_valid,\n        \"retention_days\": retention_days,\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }"
+  },
+  {
+   "start": 6620,
+   "end": 6687,
+   "path": "/api/ops/security-evidence/manifest",
+   "method": "GET",
+   "fn": "ops_security_evidence_manifest",
+   "text": "@app.get(\"/api/ops/security-evidence/manifest\", response_model=OpsSecurityEvidenceManifestResponse)\ndef ops_security_evidence_manifest(sign: bool = False, kid: str | None = None, _role: str = Depends(require_viewer)):\n    artifact_dir = (os.getenv(\"GEOLOG_BACKUP_DRILL_ARTIFACT_DIR\") or \"artifacts/backup-drill\").strip() or \"artifacts/backup-drill\"\n\n    report_path = os.path.join(artifact_dir, \"report.json\")\n    sig_path = os.path.join(artifact_dir, \"report.signature.json\")\n    if not (os.path.exists(report_path) and os.path.exists(sig_path)):\n        try:\n            candidates = []\n            for name in os.listdir(artifact_dir):\n                sub = os.path.join(artifact_dir, name)\n                rp = os.path.join(sub, \"report.json\")\n                sp = os.path.join(sub, \"report.signature.json\")\n                if os.path.isdir(sub) and os.path.exists(rp) and os.path.exists(sp):\n                    candidates.append((os.path.getmtime(rp), rp, sp))\n            if candidates:\n                candidates.sort(key=lambda x: x[0], reverse=True)\n                _, report_path, sig_path = candidates[0]\n        except Exception:\n            pass\n\n    if not (os.path.exists(report_path) and os.path.exists(sig_path)):\n        return {\n            \"ok\": False,\n            \"artifact_dir\": artifact_dir,\n            \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n        }\n\n    with open(report_path, \"rb\") as f:\n        report_bytes = f.read()\n    with open(sig_path, \"rb\") as f:\n        sig_bytes = f.read()\n\n    report_sha = hashlib.sha256(report_bytes).hexdigest()\n    signature_sha = hashlib.sha256(sig_bytes).hexdigest()\n\n    payload = {\n        \"artifact_dir\": artifact_dir,\n        \"report_path\": report_path,\n        \"signature_path\": sig_path,\n        \"report_sha256\": report_sha,\n        \"signature_sha256\": signature_sha,\n    }\n    canonical = json.dumps(payload, sort_keys=True, separators=(\",\", \":\"), ensure_ascii=False)\n    bundle_digest = hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest()\n\n    out = {\n        \"ok\": True,\n        \"artifact_dir\": artifact_dir,\n        \"report_path\": report_path,\n        \"signature_path\": sig_path,\n        \"report_sha256\": report_sha,\n        \"signature_sha256\": signature_sha,\n        \"bundle_digest_sha256\": bundle_digest,\n        \"signature\": None,\n        \"signature_alg\": None,\n        \"signature_kid\": None,\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }\n\n    if sign:\n        resolved_kid, key_raw = _resolve_audit_export_signing_key(kid)\n        sig = hmac.new(key_raw.encode(\"utf-8\"), canonical.encode(\"utf-8\"), hashlib.sha256).hexdigest()\n        out[\"signature\"] = sig\n        out[\"signature_alg\"] = \"hmac-sha256\"\n        out[\"signature_kid\"] = resolved_kid\n\n    return out"
+  },
+  {
+   "start": 6690,
+   "end": 6715,
+   "path": "/api/ops/security-evidence/manifest/verify-signature",
+   "method": "GET",
+   "fn": "ops_security_evidence_manifest_verify_signature",
+   "text": "@app.get(\n    \"/api/ops/security-evidence/manifest/verify-signature\",\n    response_model=AuditSignatureVerifyResponse,\n)\ndef ops_security_evidence_manifest_verify_signature(\n    signature: str,\n    kid: str | None = None,\n    _role: str = Depends(require_viewer),\n):\n    payload = ops_security_evidence_manifest(sign=False, kid=None, _role=_role)\n    if not bool(payload.get(\"ok\", False)):\n        return {\n            \"ok\": False,\n            \"reason\": \"evidence manifest unavailable\",\n            \"reason_code\": \"KEY_RESOLUTION_ERROR\",\n            \"signature_alg\": \"hmac-sha256\",\n            \"signature_kid\": kid or None,\n        }\n    payload_obj = {\n        \"artifact_dir\": payload.get(\"artifact_dir\"),\n        \"report_path\": payload.get(\"report_path\"),\n        \"signature_path\": payload.get(\"signature_path\"),\n        \"report_sha256\": payload.get(\"report_sha256\"),\n        \"signature_sha256\": payload.get(\"signature_sha256\"),\n    }\n    return _verify_audit_export_signature_payload(payload_obj, signature, kid)"
+  },
+  {
+   "start": 6718,
+   "end": 6742,
+   "path": "/api/ops/security-evidence/manifest/verify-signature",
+   "method": "POST",
+   "fn": "ops_security_evidence_manifest_verify_signature_post",
+   "text": "@app.post(\n    \"/api/ops/security-evidence/manifest/verify-signature\",\n    response_model=AuditSignatureVerifyResponse,\n)\ndef ops_security_evidence_manifest_verify_signature_post(\n    body: OpsSecurityEvidenceManifestVerifyRequest,\n    _role: str = Depends(require_interpreter),\n):\n    payload = ops_security_evidence_manifest(sign=False, kid=None, _role=\"viewer\")\n    if not bool(payload.get(\"ok\", False)):\n        return {\n            \"ok\": False,\n            \"reason\": \"evidence manifest unavailable\",\n            \"reason_code\": \"KEY_RESOLUTION_ERROR\",\n            \"signature_alg\": \"hmac-sha256\",\n            \"signature_kid\": body.kid or None,\n        }\n    payload_obj = {\n        \"artifact_dir\": payload.get(\"artifact_dir\"),\n        \"report_path\": payload.get(\"report_path\"),\n        \"signature_path\": payload.get(\"signature_path\"),\n        \"report_sha256\": payload.get(\"report_sha256\"),\n        \"signature_sha256\": payload.get(\"signature_sha256\"),\n    }\n    return _verify_audit_export_signature_payload(payload_obj, body.signature, body.kid)"
+  },
+  {
+   "start": 6993,
+   "end": 7062,
+   "path": "/api/ops/summary",
+   "method": "GET",
+   "fn": "ops_summary",
+   "text": "@app.get(\n    \"/api/ops/summary\",\n    response_model=OpsSummaryResponse,\n    responses={\n        200: {\n            \"description\": \"Aggregated ops summary snapshot\",\n            \"content\": {\n                \"application/json\": {\n                    \"example\": {\n                        \"ok\": True,\n                        \"contract_version\": \"1.1\",\n                        \"status\": {\"db_ok\": True, \"slo_ok\": True, \"alerts_ok\": True},\n                        \"alerts\": {\n                            \"count\": 0,\n                            \"highest_severity\": \"none\",\n                            \"severity_counts\": {\"warning\": 0, \"critical\": 0},\n                            \"code_counts\": {},\n                        },\n                        \"traffic\": {\n                            \"requests_total\": 123,\n                            \"latency_ms_avg\": 42.1,\n                            \"error_rate\": 0.0,\n                            \"recent_events_size\": 50,\n                        },\n                        \"slo\": {\n                            \"targets\": {\"latency_ms_avg_max\": 500.0, \"latency_ms_p95_max\": 800.0, \"error_rate_max\": 0.01},\n                            \"current\": {\"latency_ms_avg\": 42.1, \"latency_ms_p95\": 88.2, \"error_rate\": 0.0, \"requests_total\": 123, \"errors_5xx\": 0},\n                            \"checks\": {\"latency_ok\": True, \"latency_avg_ok\": True, \"latency_p95_ok\": True, \"error_rate_ok\": True},\n                        },\n                        \"timestamp\": \"2026-01-01T00:00:00Z\",\n                    }\n                }\n            },\n        }\n    },\n)\ndef ops_summary(db: Session = Depends(get_db), _role: str = Depends(require_viewer)):\n    \"\"\"One-shot ops summary for dashboards and external monitors.\"\"\"\n    health = ops_health(db, _role)\n    slo = ops_slo_status(_role)\n    alerts = ops_alerts(_role)\n    metrics = ops_metrics(_role)\n\n    return {\n        \"ok\": bool(health.get(\"ok\", False)),\n        \"contract_version\": \"1.1\",\n        \"status\": {\n            \"db_ok\": bool(health.get(\"db_ok\", False)),\n            \"slo_ok\": bool(slo.get(\"ok\", False)),\n            \"alerts_ok\": bool(alerts.get(\"ok\", False)),\n        },\n        \"alerts\": {\n            \"count\": int(alerts.get(\"count\", 0)),\n            \"highest_severity\": str(alerts.get(\"highest_severity\", \"none\")),\n            \"severity_counts\": dict(alerts.get(\"severity_counts\", {})),\n            \"code_counts\": dict(alerts.get(\"code_counts\", {})),\n        },\n        \"traffic\": {\n            \"requests_total\": int(metrics.get(\"requests_total\", 0)),\n            \"latency_ms_avg\": float(metrics.get(\"latency_ms_avg\", 0.0)),\n            \"error_rate\": float(slo.get(\"current\", {}).get(\"error_rate\", 0.0)),\n            \"recent_events_size\": int(metrics.get(\"recent_events_size\", 0)),\n        },\n        \"slo\": {\n            \"targets\": dict(slo.get(\"targets\", {})),\n            \"current\": dict(slo.get(\"current\", {})),\n            \"checks\": dict(slo.get(\"checks\", {})),\n        },\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }"
+  },
+  {
+   "start": 7101,
+   "end": 7179,
+   "path": "/api/ops/contracts",
+   "method": "GET",
+   "fn": "ops_contracts",
+   "text": "@app.get(\n    \"/api/ops/contracts\",\n    response_model=OpsContractsResponse,\n    responses={\n        200: {\n            \"description\": \"Contract registry for ops/audit endpoints\",\n            \"content\": {\n                \"application/json\": {\n                    \"example\": {\n                        \"api_group\": \"ops-audit\",\n                        \"contract_version\": \"2.1\",\n                        \"endpoints\": {\n                            \"/api/audit-log/verify/export\": \"1.2\",\n                            \"/api/audit-log/verify/signature\": \"1.1\",\n                            \"/api/audit-log/immutability-status\": \"1.0\",\n                            \"/api/ops/metrics\": \"1.0\",\n                            \"/api/ops/metrics/recent\": \"1.1\",\n                            \"/api/ops/metrics/prometheus\": \"1.0\",\n                            \"/api/ops/slo-status\": \"1.1\",\n                            \"/api/ops/alerts\": \"1.2\",\n                            \"/api/ops/alert-rules\": \"1.0\",\n                            \"/api/ops/health\": \"1.0\",\n                            \"/api/ops/observability-status\": \"1.1\",\n                            \"/api/ops/otel-status\": \"1.0\",\n                            \"/api/ops/evidence-status\": \"1.0\",\n                            \"/api/ops/security-posture-status\": \"1.0\",\n                            \"/api/ops/security-evidence-status\": \"1.0\",\n                            \"/api/ops/security-evidence/manifest\": \"1.0\",\n                            \"/api/ops/security-evidence/manifest/verify-signature\": \"1.0\",\n                            \"/api/ops/security-evidence/attest\": \"1.0\",\n                            \"/api/ops/security-evidence/attest/latest\": \"1.0\",\n                            \"/api/ops/security-evidence/freshness\": \"1.0\",\n                            \"/api/ops/security-evidence/gate\": \"1.14\",\n                            \"/api/ops/security-evidence/gate/enforce\": \"1.14\",\n                            \"/api/ops/security-evidence/gate/assert\": \"1.14\",\n                            \"/api/ops/security-evidence/gate/check\": \"1.14\",\n                            \"/api/ops/runbook\": \"1.0\",\n                            \"/api/ops/summary\": \"1.1\",\n                        },\n                        \"digest_sha256\": \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\n                        \"signature\": None,\n                        \"signature_alg\": None,\n                        \"signature_kid\": None,\n                        \"timestamp\": \"2026-01-01T00:00:00Z\",\n                    }\n                }\n            },\n        }\n    },\n)\ndef ops_contracts(\n    sign: bool = False,\n    kid: str | None = None,\n    _role: str = Depends(require_viewer),\n):\n    \"\"\"Machine-readable contract/version registry for ops and audit APIs.\"\"\"\n    digest_payload = _ops_contracts_payload()\n    canonical = json.dumps(digest_payload, sort_keys=True, separators=(\",\", \":\"), ensure_ascii=False)\n    digest = hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest()\n\n    out = {\n        \"api_group\": digest_payload[\"api_group\"],\n        \"contract_version\": digest_payload[\"contract_version\"],\n        \"endpoints\": digest_payload[\"endpoints\"],\n        \"digest_sha256\": digest,\n        \"signature\": None,\n        \"signature_alg\": None,\n        \"signature_kid\": None,\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }\n\n    if sign:\n        resolved_kid, key_raw = _resolve_audit_export_signing_key(kid)\n        sig = hmac.new(key_raw.encode(\"utf-8\"), canonical.encode(\"utf-8\"), hashlib.sha256).hexdigest()\n        out[\"signature\"] = sig\n        out[\"signature_alg\"] = \"hmac-sha256\"\n        out[\"signature_kid\"] = resolved_kid\n\n    return out"
+  },
+  {
+   "start": 7182,
+   "end": 7192,
+   "path": "/api/ops/contracts/verify-signature",
+   "method": "GET",
+   "fn": "ops_contracts_verify_signature",
+   "text": "@app.get(\n    \"/api/ops/contracts/verify-signature\",\n    response_model=AuditSignatureVerifyResponse,\n)\ndef ops_contracts_verify_signature(\n    signature: str,\n    kid: str | None = None,\n    _role: str = Depends(require_viewer),\n):\n    \"\"\"Verify detached signature for current ops contracts payload.\"\"\"\n    return _verify_audit_export_signature_payload(_ops_contracts_payload(), signature, kid)"
+  },
+  {
+   "start": 7195,
+   "end": 7204,
+   "path": "/api/ops/contracts/verify-signature",
+   "method": "POST",
+   "fn": "ops_contracts_verify_signature_post",
+   "text": "@app.post(\n    \"/api/ops/contracts/verify-signature\",\n    response_model=AuditSignatureVerifyResponse,\n)\ndef ops_contracts_verify_signature_post(\n    body: AuditSignatureVerifyRequest,\n    _role: str = Depends(require_interpreter),\n):\n    \"\"\"M2M verifier for detached signature over current ops contracts payload.\"\"\"\n    return _verify_audit_export_signature_payload(_ops_contracts_payload(), body.signature, body.kid)"
+  },
+  {
+   "start": 7207,
+   "end": 7217,
+   "path": "/api/ops/security-evidence/attest",
+   "method": "POST",
+   "fn": "ops_security_evidence_attest",
+   "text": "@app.post(\n    \"/api/ops/security-evidence/attest\",\n    response_model=OpsSecurityEvidenceAttestResponse,\n)\ndef ops_security_evidence_attest(\n    body: OpsSecurityEvidenceAttestRequest,\n    _role: str = Depends(require_interpreter),\n):\n    report = body.report if isinstance(body.report, dict) else None\n    signature_obj = body.signature if isinstance(body.signature, dict) else None\n    return _attest_security_evidence_payload(report, signature_obj)"
+  },
+  {
+   "start": 7220,
+   "end": 7259,
+   "path": "/api/ops/security-evidence/attest/latest",
+   "method": "GET",
+   "fn": "ops_security_evidence_attest_latest",
+   "text": "@app.get(\n    \"/api/ops/security-evidence/attest/latest\",\n    response_model=OpsSecurityEvidenceAttestResponse,\n)\ndef ops_security_evidence_attest_latest(_role: str = Depends(require_viewer)):\n    artifact_dir = (os.getenv(\"GEOLOG_BACKUP_DRILL_ARTIFACT_DIR\") or \"artifacts/backup-drill\").strip() or \"artifacts/backup-drill\"\n    report_path = os.path.join(artifact_dir, \"report.json\")\n    sig_path = os.path.join(artifact_dir, \"report.signature.json\")\n\n    if not (os.path.exists(report_path) and os.path.exists(sig_path)):\n        try:\n            candidates = []\n            for name in os.listdir(artifact_dir):\n                sub = os.path.join(artifact_dir, name)\n                rp = os.path.join(sub, \"report.json\")\n                sp = os.path.join(sub, \"report.signature.json\")\n                if os.path.isdir(sub) and os.path.exists(rp) and os.path.exists(sp):\n                    candidates.append((os.path.getmtime(rp), rp, sp))\n            if candidates:\n                candidates.sort(key=lambda x: x[0], reverse=True)\n                _, report_path, sig_path = candidates[0]\n        except Exception:\n            pass\n\n    report_obj = None\n    signature_obj = None\n\n    try:\n        with open(report_path, \"r\", encoding=\"utf-8\") as f:\n            report_obj = json.load(f)\n    except Exception:\n        report_obj = None\n\n    try:\n        with open(sig_path, \"r\", encoding=\"utf-8\") as f:\n            signature_obj = json.load(f)\n    except Exception:\n        signature_obj = None\n\n    return _attest_security_evidence_payload(report_obj, signature_obj)"
+  },
+  {
+   "start": 7262,
+   "end": 7316,
+   "path": "/api/ops/security-evidence/freshness",
+   "method": "GET",
+   "fn": "ops_security_evidence_freshness",
+   "text": "@app.get(\n    \"/api/ops/security-evidence/freshness\",\n    response_model=OpsSecurityEvidenceFreshnessResponse,\n)\ndef ops_security_evidence_freshness(max_age_seconds: int = 86400, _role: str = Depends(require_viewer)):\n    max_age_seconds = max(60, int(max_age_seconds))\n    artifact_dir = (os.getenv(\"GEOLOG_BACKUP_DRILL_ARTIFACT_DIR\") or \"artifacts/backup-drill\").strip() or \"artifacts/backup-drill\"\n    report_path = os.path.join(artifact_dir, \"report.json\")\n    sig_path = os.path.join(artifact_dir, \"report.signature.json\")\n\n    if not (os.path.exists(report_path) and os.path.exists(sig_path)):\n        try:\n            candidates = []\n            for name in os.listdir(artifact_dir):\n                sub = os.path.join(artifact_dir, name)\n                rp = os.path.join(sub, \"report.json\")\n                sp = os.path.join(sub, \"report.signature.json\")\n                if os.path.isdir(sub) and os.path.exists(rp) and os.path.exists(sp):\n                    candidates.append((os.path.getmtime(rp), rp, sp))\n            if candidates:\n                candidates.sort(key=lambda x: x[0], reverse=True)\n                _, report_path, sig_path = candidates[0]\n        except Exception:\n            pass\n\n    if not (os.path.exists(report_path) and os.path.exists(sig_path)):\n        return {\n            \"ok\": False,\n            \"artifact_dir\": artifact_dir,\n            \"report_path\": None,\n            \"signature_path\": None,\n            \"report_age_seconds\": None,\n            \"max_age_seconds\": max_age_seconds,\n            \"stale\": True,\n            \"reason_code\": \"EVIDENCE_MISSING\",\n            \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n        }\n\n    try:\n        report_age_seconds = int(max(0.0, time.time() - os.path.getmtime(report_path)))\n    except Exception:\n        report_age_seconds = None\n\n    stale = report_age_seconds is None or report_age_seconds > max_age_seconds\n    return {\n        \"ok\": not stale,\n        \"artifact_dir\": artifact_dir,\n        \"report_path\": report_path,\n        \"signature_path\": sig_path,\n        \"report_age_seconds\": report_age_seconds,\n        \"max_age_seconds\": max_age_seconds,\n        \"stale\": stale,\n        \"reason_code\": \"STALE\" if stale else \"FRESH\",\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }"
+  },
+  {
+   "start": 7340,
+   "end": 7434,
+   "path": "/api/ops/security-evidence/gate",
+   "method": "GET",
+   "fn": "ops_security_evidence_gate",
+   "text": "@app.get(\n    \"/api/ops/security-evidence/gate\",\n    response_model=OpsSecurityEvidenceGateResponse,\n)\ndef ops_security_evidence_gate(\n    max_age_seconds: int = 86400,\n    min_retention_days: int = 30,\n    required_checks: str = \"attest,freshness,retention\",\n    strict_required_checks: bool = False,\n    _role: str = Depends(require_viewer),\n):\n    max_age_seconds = max(60, int(max_age_seconds))\n    min_retention_days = max(1, int(min_retention_days))\n\n    allowed_checks = {\"attest\", \"freshness\", \"retention\"}\n    parsed_checks = [c.strip().lower() for c in str(required_checks).split(\",\") if c.strip()]\n\n    seen: set[str] = set()\n    duplicate_checks: list[str] = []\n    deduped_checks: list[str] = []\n    for c in parsed_checks:\n        if c in seen:\n            if c not in duplicate_checks:\n                duplicate_checks.append(c)\n            continue\n        seen.add(c)\n        deduped_checks.append(c)\n\n    evaluated_checks = [c for c in deduped_checks if c in allowed_checks]\n    ignored_checks = [c for c in deduped_checks if c not in allowed_checks]\n    if strict_required_checks and ignored_checks:\n        raise HTTPException(\n            status_code=400,\n            detail={\n                \"error\": \"invalid required_checks values\",\n                \"requested_checks\": parsed_checks,\n                \"ignored_checks\": ignored_checks,\n                \"duplicate_checks\": duplicate_checks,\n                \"allowed_checks\": [\"attest\", \"freshness\", \"retention\"],\n            },\n        )\n\n    defaulted_checks = len(evaluated_checks) == 0\n    if defaulted_checks:\n        evaluated_checks = [\"attest\", \"freshness\", \"retention\"]\n\n    attest = ops_security_evidence_attest_latest(_role=_role)\n    freshness = ops_security_evidence_freshness(max_age_seconds=max_age_seconds, _role=_role)\n\n    attest_ok = bool(attest.get(\"ok\", False))\n    freshness_ok = bool(freshness.get(\"ok\", False))\n    retention_days = attest.get(\"retention_days\")\n    retention_ok = isinstance(retention_days, int) and retention_days >= min_retention_days\n    retention_reason_code = (\n        \"RETENTION_OK\" if retention_ok else \"RETENTION_TOO_SHORT\" if isinstance(retention_days, int) else \"RETENTION_UNKNOWN\"\n    )\n\n    check_status = {\n        \"attest\": attest_ok,\n        \"freshness\": freshness_ok,\n        \"retention\": retention_ok,\n    }\n    failed_checks: list[str] = [c for c in evaluated_checks if not bool(check_status.get(c, False))]\n    invariants = _compute_gate_invariants(failed_checks, evaluated_checks)\n\n    return {\n        \"ok\": invariants[\"gate_failed_count\"] == 0,\n        \"gate_reason_code\": \"GATE_PASS\" if invariants[\"gate_failed_count\"] == 0 else \"GATE_FAIL\",\n        \"gate_failed_count\": invariants[\"gate_failed_count\"],\n        \"gate_passed_count\": invariants[\"gate_passed_count\"],\n        \"gate_total_count\": invariants[\"gate_total_count\"],\n        \"gate_pass_ratio\": invariants[\"gate_pass_ratio\"],\n        \"gate_fail_ratio\": invariants[\"gate_fail_ratio\"],\n        \"gate_consistency_ok\": invariants[\"gate_consistency_ok\"],\n        \"gate_consistency_reason\": invariants[\"gate_consistency_reason\"],\n        \"attest_ok\": attest_ok,\n        \"freshness_ok\": freshness_ok,\n        \"retention_ok\": retention_ok,\n        \"strict_required_checks\": bool(strict_required_checks),\n        \"defaulted_checks\": bool(defaulted_checks),\n        \"requested_checks\": parsed_checks,\n        \"ignored_checks\": ignored_checks,\n        \"duplicate_checks\": duplicate_checks,\n        \"evaluated_checks\": evaluated_checks,\n        \"failed_checks\": failed_checks,\n        \"attest_reason_code\": attest.get(\"reason_code\"),\n        \"freshness_reason_code\": freshness.get(\"reason_code\", \"EVIDENCE_MISSING\"),\n        \"retention_reason_code\": retention_reason_code,\n        \"artifact_dir\": str(freshness.get(\"artifact_dir\") or \"\"),\n        \"report_age_seconds\": freshness.get(\"report_age_seconds\"),\n        \"retention_days\": retention_days if isinstance(retention_days, int) else None,\n        \"min_retention_days\": min_retention_days,\n        \"max_age_seconds\": int(freshness.get(\"max_age_seconds\") or max_age_seconds),\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }"
+  },
+  {
+   "start": 7468,
+   "end": 7489,
+   "path": "/api/ops/security-evidence/gate/enforce",
+   "method": "GET",
+   "fn": "ops_security_evidence_gate_enforce",
+   "text": "@app.get(\n    \"/api/ops/security-evidence/gate/enforce\",\n    response_model=OpsSecurityEvidenceGateResponse,\n    responses={503: {\"model\": OpsSecurityEvidenceGateErrorResponse, \"description\": \"Gate failed\"}},\n)\ndef ops_security_evidence_gate_enforce(\n    max_age_seconds: int = 86400,\n    min_retention_days: int = 30,\n    required_checks: str = \"attest,freshness,retention\",\n    strict_required_checks: bool = False,\n    _role: str = Depends(require_viewer),\n):\n    gate = ops_security_evidence_gate(\n        max_age_seconds=max_age_seconds,\n        min_retention_days=min_retention_days,\n        required_checks=required_checks,\n        strict_required_checks=strict_required_checks,\n        _role=_role,\n    )\n    if bool(gate.get(\"ok\", False)):\n        return gate\n    raise HTTPException(status_code=503, detail=_security_evidence_gate_failure_detail(gate))"
+  },
+  {
+   "start": 7492,
+   "end": 7513,
+   "path": "/api/ops/security-evidence/gate/assert",
+   "method": "POST",
+   "fn": "ops_security_evidence_gate_assert",
+   "text": "@app.post(\n    \"/api/ops/security-evidence/gate/assert\",\n    response_model=OpsSecurityEvidenceGateResponse,\n    responses={503: {\"model\": OpsSecurityEvidenceGateErrorResponse, \"description\": \"Gate failed\"}},\n)\ndef ops_security_evidence_gate_assert(\n    max_age_seconds: int = 86400,\n    min_retention_days: int = 30,\n    required_checks: str = \"attest,freshness,retention\",\n    strict_required_checks: bool = False,\n    _role: str = Depends(require_interpreter),\n):\n    gate = ops_security_evidence_gate(\n        max_age_seconds=max_age_seconds,\n        min_retention_days=min_retention_days,\n        required_checks=required_checks,\n        strict_required_checks=strict_required_checks,\n        _role=\"viewer\",\n    )\n    if bool(gate.get(\"ok\", False)):\n        return gate\n    raise HTTPException(status_code=503, detail=_security_evidence_gate_failure_detail(gate))"
+  },
+  {
+   "start": 7516,
+   "end": 7533,
+   "path": "/api/ops/security-evidence/gate/check",
+   "method": "POST",
+   "fn": "ops_security_evidence_gate_check",
+   "text": "@app.post(\n    \"/api/ops/security-evidence/gate/check\",\n    response_model=OpsSecurityEvidenceGateResponse,\n)\ndef ops_security_evidence_gate_check(\n    max_age_seconds: int = 86400,\n    min_retention_days: int = 30,\n    required_checks: str = \"attest,freshness,retention\",\n    strict_required_checks: bool = False,\n    _role: str = Depends(require_interpreter),\n):\n    return ops_security_evidence_gate(\n        max_age_seconds=max_age_seconds,\n        min_retention_days=min_retention_days,\n        required_checks=required_checks,\n        strict_required_checks=strict_required_checks,\n        _role=\"viewer\",\n    )"
+  },
+  {
+   "start": 7536,
+   "end": 7616,
+   "path": "/api/ops/runbook",
+   "method": "GET",
+   "fn": "ops_runbook",
+   "text": "@app.get(\n    \"/api/ops/runbook\",\n    response_model=OpsRunbookResponse,\n    responses={\n        200: {\n            \"description\": \"Machine-readable runbook for known ops alert codes\",\n            \"content\": {\n                \"application/json\": {\n                    \"example\": {\n                        \"version\": \"1.0\",\n                        \"alerts\": {\n                            \"LATENCY_AVG_SLO_BREACH\": {\n                                \"severity\": \"warning\",\n                                \"what_it_means\": \"Average API latency is above configured SLO threshold.\",\n                                \"checks\": [\"Call /api/ops/slo-status and verify avg target vs current\"],\n                                \"actions\": [\"Identify top high-latency endpoints and payload sizes\"],\n                            },\n                            \"ERROR_RATE_SLO_BREACH\": {\n                                \"severity\": \"critical\",\n                                \"what_it_means\": \"5xx error rate is above configured SLO threshold.\",\n                                \"checks\": [\"Call /api/ops/metrics and inspect requests_by_status\"],\n                                \"actions\": [\"Open incident and capture failing request samples\"],\n                            },\n                        },\n                        \"timestamp\": \"2026-01-01T00:00:00Z\",\n                    }\n                }\n            },\n        }\n    },\n)\ndef ops_runbook(_role: str = Depends(require_viewer)):\n    \"\"\"Machine-readable operator runbook for current alert codes.\"\"\"\n    return {\n        \"version\": \"1.0\",\n        \"alerts\": {\n            \"LATENCY_AVG_SLO_BREACH\": {\n                \"severity\": \"warning\",\n                \"what_it_means\": \"Average API latency is above configured SLO threshold.\",\n                \"checks\": [\n                    \"Call /api/ops/metrics and inspect latency_ms_avg + requests_by_status\",\n                    \"Call /api/ops/slo-status and verify avg target vs current\",\n                    \"Inspect recent structured logs for slow endpoints\",\n                ],\n                \"actions\": [\n                    \"Identify top high-latency endpoints and payload sizes\",\n                    \"Reduce heavy query scope or enable/adjust decimation where applicable\",\n                    \"Scale worker/container resources if sustained load increased\",\n                ],\n            },\n            \"LATENCY_P95_SLO_BREACH\": {\n                \"severity\": \"warning\",\n                \"what_it_means\": \"P95 API latency is above configured SLO threshold.\",\n                \"checks\": [\n                    \"Call /api/ops/slo-status and verify p95 target vs current\",\n                    \"Call /api/ops/metrics/recent with status/path filters to isolate spikes\",\n                    \"Inspect structured logs for long-tail endpoints\",\n                ],\n                \"actions\": [\n                    \"Profile worst endpoints and identify tail-latency bottlenecks\",\n                    \"Apply caching/precomputation for expensive repeated reads\",\n                    \"Tune infra resources or concurrency limits for burst traffic\",\n                ],\n            },\n            \"ERROR_RATE_SLO_BREACH\": {\n                \"severity\": \"critical\",\n                \"what_it_means\": \"5xx error rate is above configured SLO threshold.\",\n                \"checks\": [\n                    \"Call /api/ops/metrics and inspect requests_by_status\",\n                    \"Check /api/ops/health for db_ok and alerts summary\",\n                    \"Inspect backend error logs around spike window\",\n                ],\n                \"actions\": [\n                    \"Rollback latest risky change if correlated with spike\",\n                    \"Mitigate failing endpoint path (feature flag/route guard)\",\n                    \"Open incident and capture failing request samples\",\n                ],\n            },\n        },\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }"
+  }
+ ],
+ "audit_models": {
+  "AuditSignatureVerifyRequest": {
+   "start": 4420,
+   "end": 4423,
+   "text": "class AuditSignatureVerifyRequest(BaseModel):\n    payload: dict[str, Any]\n    signature: str = Field(..., min_length=64, max_length=64, pattern=\"^[0-9a-fA-F]{64}$\")\n    kid: str | None = None"
+  },
+  "AuditSignatureVerifyResponse": {
+   "start": 4426,
+   "end": 4431,
+   "text": "class AuditSignatureVerifyResponse(BaseModel):\n    ok: bool\n    reason: str\n    reason_code: AuditReasonCode\n    signature_alg: str\n    signature_kid: str | None = None"
+  }
+ },
+ "ops_models": {
+  "OpsAlertRule": {
+   "start": 5978,
+   "end": 5984,
+   "text": "class OpsAlertRule(BaseModel):\n    code: str\n    severity: Literal[\"warning\", \"critical\"]\n    metric: str\n    threshold: float\n    operator: Literal[\">\"]\n    env_key: str"
+  },
+  "OpsAlertRulesResponse": {
+   "start": 5987,
+   "end": 5990,
+   "text": "class OpsAlertRulesResponse(BaseModel):\n    version: str\n    rules: list[OpsAlertRule]\n    timestamp: str"
+  },
+  "OpsAlertsResponse": {
+   "start": 5968,
+   "end": 5975,
+   "text": "class OpsAlertsResponse(BaseModel):\n    ok: bool\n    alerts: list[dict[str, Any]]\n    count: int\n    severity_counts: dict[str, int]\n    code_counts: dict[str, int]\n    highest_severity: Literal[\"none\", \"warning\", \"critical\"]\n    timestamp: str"
+  },
+  "OpsContractsResponse": {
+   "start": 6758,
+   "end": 6766,
+   "text": "class OpsContractsResponse(BaseModel):\n    api_group: str\n    contract_version: str\n    endpoints: dict[str, str]\n    digest_sha256: str\n    signature: str | None = None\n    signature_alg: str | None = None\n    signature_kid: str | None = None\n    timestamp: str"
+  },
+  "OpsEvidenceStatusResponse": {
+   "start": 6305,
+   "end": 6317,
+   "text": "class OpsEvidenceStatusResponse(BaseModel):\n    ok: bool\n    dashboard_configured: bool\n    dashboard_url: str | None = None\n    dashboard_reachable: bool | None = None\n    alert_delivery_configured: bool\n    alert_delivery_target: str | None = None\n    trace_backend_configured: bool\n    trace_backend_url: str | None = None\n    trace_backend_reachable: bool | None = None\n    probes_enabled: bool\n    ready_for_phase2_acceptance: bool\n    timestamp: str"
+  },
+  "OpsHealthResponse": {
+   "start": 6276,
+   "end": 6282,
+   "text": "class OpsHealthResponse(BaseModel):\n    ok: bool\n    db_ok: bool\n    slo_ok: bool\n    alerts_ok: bool\n    alert_count: int\n    timestamp: str"
+  },
+  "OpsMetricsRecentResponse": {
+   "start": 5829,
+   "end": 5835,
+   "text": "class OpsMetricsRecentResponse(BaseModel):\n    events: list[OpsRecentEvent]\n    count: int\n    limit: int\n    status_min: int\n    path_contains: str | None = None\n    timestamp: str"
+  },
+  "OpsMetricsResponse": {
+   "start": 5811,
+   "end": 5818,
+   "text": "class OpsMetricsResponse(BaseModel):\n    requests_total: int\n    requests_by_method: dict[str, int]\n    requests_by_status: dict[str, int]\n    latency_ms_avg: float\n    latency_samples: int\n    recent_events_size: int\n    timestamp: str"
+  },
+  "OpsObservabilityStatusResponse": {
+   "start": 6285,
+   "end": 6293,
+   "text": "class OpsObservabilityStatusResponse(BaseModel):\n    ok: bool\n    request_id_propagation: bool\n    trace_context_propagation: bool\n    structured_logging: bool\n    recent_events_include_request_id: bool\n    recent_events_include_trace_id: bool\n    otel_enabled: bool\n    timestamp: str"
+  },
+  "OpsOtelStatusResponse": {
+   "start": 6296,
+   "end": 6302,
+   "text": "class OpsOtelStatusResponse(BaseModel):\n    ok: bool\n    enabled: bool\n    exporter_otlp_endpoint_set: bool\n    service_name: str\n    resource_attributes_set: bool\n    timestamp: str"
+  },
+  "OpsRecentEvent": {
+   "start": 5821,
+   "end": 5826,
+   "text": "class OpsRecentEvent(BaseModel):\n    ts: str\n    method: str\n    path: str\n    status: int\n    latency_ms: float"
+  },
+  "OpsRunbookEntry": {
+   "start": 6745,
+   "end": 6749,
+   "text": "class OpsRunbookEntry(BaseModel):\n    severity: Literal[\"warning\", \"critical\"]\n    what_it_means: str\n    checks: list[str]\n    actions: list[str]"
+  },
+  "OpsRunbookResponse": {
+   "start": 6752,
+   "end": 6755,
+   "text": "class OpsRunbookResponse(BaseModel):\n    version: str\n    alerts: dict[str, OpsRunbookEntry]\n    timestamp: str"
+  },
+  "OpsSecurityEvidenceAttestRequest": {
+   "start": 6780,
+   "end": 6782,
+   "text": "class OpsSecurityEvidenceAttestRequest(BaseModel):\n    report: dict[str, Any]\n    signature: dict[str, Any]"
+  },
+  "OpsSecurityEvidenceAttestResponse": {
+   "start": 6785,
+   "end": 6793,
+   "text": "class OpsSecurityEvidenceAttestResponse(BaseModel):\n    ok: bool\n    reason: str\n    reason_code: OpsEvidenceAttestReasonCode\n    report_sha256: str | None = None\n    signature_alg: str | None = None\n    signature_kid: str | None = None\n    retention_days: int | None = None\n    timestamp: str"
+  },
+  "OpsSecurityEvidenceFreshnessResponse": {
+   "start": 6796,
+   "end": 6805,
+   "text": "class OpsSecurityEvidenceFreshnessResponse(BaseModel):\n    ok: bool\n    artifact_dir: str\n    report_path: str | None = None\n    signature_path: str | None = None\n    report_age_seconds: int | None = None\n    max_age_seconds: int\n    stale: bool\n    reason_code: Literal[\"FRESH\", \"STALE\", \"EVIDENCE_MISSING\"]\n    timestamp: str"
+  },
+  "OpsSecurityEvidenceGateErrorDetail": {
+   "start": 6839,
+   "end": 6863,
+   "text": "class OpsSecurityEvidenceGateErrorDetail(BaseModel):\n    error: str\n    gate_reason_code: Literal[\"GATE_FAIL\"]\n    gate_failed_count: int\n    gate_passed_count: int\n    gate_total_count: int\n    gate_pass_ratio: float\n    gate_fail_ratio: float\n    gate_consistency_ok: bool\n    gate_consistency_reason: Literal[\"CONSISTENT\", \"COUNT_MISMATCH\", \"RATIO_MISMATCH\"]\n    strict_required_checks: bool\n    defaulted_checks: bool\n    requested_checks: list[str]\n    ignored_checks: list[str]\n    duplicate_checks: list[str]\n    evaluated_checks: list[Literal[\"attest\", \"freshness\", \"retention\"]]\n    failed_checks: list[Literal[\"attest\", \"freshness\", \"retention\"]]\n    attest_reason_code: str | None = None\n    freshness_reason_code: Literal[\"FRESH\", \"STALE\", \"EVIDENCE_MISSING\"]\n    retention_reason_code: Literal[\"RETENTION_OK\", \"RETENTION_TOO_SHORT\", \"RETENTION_UNKNOWN\"]\n    artifact_dir: str\n    report_age_seconds: int | None = None\n    retention_days: int | None = None\n    min_retention_days: int\n    max_age_seconds: int"
+  },
+  "OpsSecurityEvidenceGateErrorResponse": {
+   "start": 6866,
+   "end": 6867,
+   "text": "class OpsSecurityEvidenceGateErrorResponse(BaseModel):\n    detail: OpsSecurityEvidenceGateErrorDetail"
+  },
+  "OpsSecurityEvidenceGateResponse": {
+   "start": 6808,
+   "end": 6836,
+   "text": "class OpsSecurityEvidenceGateResponse(BaseModel):\n    ok: bool\n    gate_reason_code: Literal[\"GATE_PASS\", \"GATE_FAIL\"]\n    gate_failed_count: int\n    gate_passed_count: int\n    gate_total_count: int\n    gate_pass_ratio: float\n    gate_fail_ratio: float\n    gate_consistency_ok: bool\n    gate_consistency_reason: Literal[\"CONSISTENT\", \"COUNT_MISMATCH\", \"RATIO_MISMATCH\"]\n    attest_ok: bool\n    freshness_ok: bool\n    retention_ok: bool\n    strict_required_checks: bool\n    defaulted_checks: bool\n    requested_checks: list[str]\n    ignored_checks: list[str]\n    duplicate_checks: list[str]\n    evaluated_checks: list[Literal[\"attest\", \"freshness\", \"retention\"]]\n    failed_checks: list[Literal[\"attest\", \"freshness\", \"retention\"]]\n    attest_reason_code: Literal[\"ATTEST_VALID\", \"ATTEST_INVALID\", \"ATTEST_ERROR\"]\n    freshness_reason_code: Literal[\"FRESH\", \"STALE\", \"EVIDENCE_MISSING\"]\n    retention_reason_code: Literal[\"RETENTION_OK\", \"RETENTION_TOO_SHORT\", \"RETENTION_UNKNOWN\"]\n    artifact_dir: str\n    report_age_seconds: int | None = None\n    retention_days: int | None = None\n    min_retention_days: int\n    max_age_seconds: int\n    timestamp: str"
+  },
+  "OpsSecurityEvidenceManifestResponse": {
+   "start": 6345,
+   "end": 6356,
+   "text": "class OpsSecurityEvidenceManifestResponse(BaseModel):\n    ok: bool\n    artifact_dir: str\n    report_path: str | None = None\n    signature_path: str | None = None\n    report_sha256: str | None = None\n    signature_sha256: str | None = None\n    bundle_digest_sha256: str | None = None\n    signature: str | None = None\n    signature_alg: str | None = None\n    signature_kid: str | None = None\n    timestamp: str"
+  },
+  "OpsSecurityEvidenceManifestVerifyRequest": {
+   "start": 6359,
+   "end": 6361,
+   "text": "class OpsSecurityEvidenceManifestVerifyRequest(BaseModel):\n    signature: str = Field(..., min_length=64, max_length=64, pattern=\"^[0-9a-fA-F]{64}$\")\n    kid: str | None = None"
+  },
+  "OpsSecurityEvidenceStatusResponse": {
+   "start": 6332,
+   "end": 6342,
+   "text": "class OpsSecurityEvidenceStatusResponse(BaseModel):\n    ok: bool\n    artifact_dir: str\n    report_present: bool\n    signature_present: bool\n    report_sha256_matches_signature: bool | None = None\n    signature_alg: str | None = None\n    signature_kid: str | None = None\n    hmac_signature_valid: bool | None = None\n    retention_days: int | None = None\n    timestamp: str"
+  },
+  "OpsSecurityPostureStatusResponse": {
+   "start": 6320,
+   "end": 6329,
+   "text": "class OpsSecurityPostureStatusResponse(BaseModel):\n    ok: bool\n    container_non_root: bool\n    secrets_source_configured: bool\n    tls_required: bool\n    ci_security_gates_enabled: bool\n    backup_drill_script_present: bool\n    branch_protection_checklist_present: bool\n    security_evidence_template_present: bool\n    timestamp: str"
+  },
+  "OpsSloChecks": {
+   "start": 5953,
+   "end": 5957,
+   "text": "class OpsSloChecks(BaseModel):\n    latency_ok: bool\n    latency_avg_ok: bool\n    latency_p95_ok: bool\n    error_rate_ok: bool"
+  },
+  "OpsSloCurrent": {
+   "start": 5945,
+   "end": 5950,
+   "text": "class OpsSloCurrent(BaseModel):\n    latency_ms_avg: float\n    latency_ms_p95: float\n    error_rate: float\n    requests_total: int\n    errors_5xx: int"
+  },
+  "OpsSloStatusResponse": {
+   "start": 5960,
+   "end": 5965,
+   "text": "class OpsSloStatusResponse(BaseModel):\n    ok: bool\n    targets: OpsSloTargets\n    current: OpsSloCurrent\n    checks: OpsSloChecks\n    timestamp: str"
+  },
+  "OpsSloTargets": {
+   "start": 5939,
+   "end": 5942,
+   "text": "class OpsSloTargets(BaseModel):\n    latency_ms_avg_max: float\n    latency_ms_p95_max: float\n    error_rate_max: float"
+  },
+  "OpsSummaryAlerts": {
+   "start": 6963,
+   "end": 6967,
+   "text": "class OpsSummaryAlerts(BaseModel):\n    count: int\n    highest_severity: Literal[\"none\", \"warning\", \"critical\"]\n    severity_counts: dict[str, int]\n    code_counts: dict[str, int]"
+  },
+  "OpsSummaryResponse": {
+   "start": 6983,
+   "end": 6990,
+   "text": "class OpsSummaryResponse(BaseModel):\n    ok: bool\n    contract_version: str\n    status: OpsSummaryStatus\n    alerts: OpsSummaryAlerts\n    traffic: OpsSummaryTraffic\n    slo: OpsSummarySlo\n    timestamp: str"
+  },
+  "OpsSummarySlo": {
+   "start": 6977,
+   "end": 6980,
+   "text": "class OpsSummarySlo(BaseModel):\n    targets: dict[str, Any]\n    current: dict[str, Any]\n    checks: dict[str, Any]"
+  },
+  "OpsSummaryStatus": {
+   "start": 6957,
+   "end": 6960,
+   "text": "class OpsSummaryStatus(BaseModel):\n    db_ok: bool\n    slo_ok: bool\n    alerts_ok: bool"
+  },
+  "OpsSummaryTraffic": {
+   "start": 6970,
+   "end": 6974,
+   "text": "class OpsSummaryTraffic(BaseModel):\n    requests_total: int\n    latency_ms_avg: float\n    error_rate: float\n    recent_events_size: int"
+  }
+ },
+ "ops_helpers": {
+  "_attest_security_evidence_payload": {
+   "start": 6870,
+   "end": 6954,
+   "text": "def _attest_security_evidence_payload(report: dict[str, Any] | None, signature_obj: dict[str, Any] | None) -> dict[str, Any]:\n    if not report:\n        return {\n            \"ok\": False,\n            \"reason\": \"report object is required\",\n            \"reason_code\": \"MISSING_REPORT\",\n            \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n        }\n    if not signature_obj:\n        return {\n            \"ok\": False,\n            \"reason\": \"signature object is required\",\n            \"reason_code\": \"MISSING_SIGNATURE\",\n            \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n        }\n\n    report_bytes = json.dumps(report, sort_keys=True, separators=(\",\", \":\"), ensure_ascii=False).encode(\"utf-8\")\n    report_sha = hashlib.sha256(report_bytes).hexdigest()\n\n    declared_sha = str(signature_obj.get(\"report_sha256\", \"\") or \"\").strip().lower()\n    signature_alg = str(signature_obj.get(\"signature_alg\", \"\") or \"\").strip() or None\n    signature_kid = str(signature_obj.get(\"signature_kid\", \"\") or \"\").strip() or None\n    sig = str(signature_obj.get(\"signature\", \"\") or \"\").strip().lower()\n    rd = signature_obj.get(\"retention_days\")\n    retention_days = int(rd) if isinstance(rd, int) else None\n\n    if not declared_sha or declared_sha != report_sha:\n        return {\n            \"ok\": False,\n            \"reason\": \"report_sha256 mismatch\",\n            \"reason_code\": \"DIGEST_MISMATCH\",\n            \"report_sha256\": report_sha,\n            \"signature_alg\": signature_alg,\n            \"signature_kid\": signature_kid,\n            \"retention_days\": retention_days,\n            \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n        }\n\n    if signature_alg == \"hmac-sha256\":\n        if not sig or len(sig) != 64 or any(c not in \"0123456789abcdef\" for c in sig):\n            return {\n                \"ok\": False,\n                \"reason\": \"signature must be 64-char hex\",\n                \"reason_code\": \"INVALID_SIGNATURE_FORMAT\",\n                \"report_sha256\": report_sha,\n                \"signature_alg\": signature_alg,\n                \"signature_kid\": signature_kid,\n                \"retention_days\": retention_days,\n                \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n            }\n        key = (os.getenv(\"BACKUP_DRILL_SIGNING_KEY\") or \"\").strip()\n        if not key:\n            return {\n                \"ok\": False,\n                \"reason\": \"BACKUP_DRILL_SIGNING_KEY is required for hmac-sha256 verification\",\n                \"reason_code\": \"HMAC_KEY_MISSING\",\n                \"report_sha256\": report_sha,\n                \"signature_alg\": signature_alg,\n                \"signature_kid\": signature_kid,\n                \"retention_days\": retention_days,\n                \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n            }\n        expected = hmac.new(key.encode(\"utf-8\"), report_sha.encode(\"utf-8\"), hashlib.sha256).hexdigest()\n        if not hmac.compare_digest(expected, sig):\n            return {\n                \"ok\": False,\n                \"reason\": \"hmac signature mismatch\",\n                \"reason_code\": \"HMAC_SIGNATURE_MISMATCH\",\n                \"report_sha256\": report_sha,\n                \"signature_alg\": signature_alg,\n                \"signature_kid\": signature_kid,\n                \"retention_days\": retention_days,\n                \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n            }\n\n    return {\n        \"ok\": True,\n        \"reason\": \"evidence attestation valid\",\n        \"reason_code\": \"ATTEST_VALID\",\n        \"report_sha256\": report_sha,\n        \"signature_alg\": signature_alg,\n        \"signature_kid\": signature_kid,\n        \"retention_days\": retention_days,\n        \"timestamp\": datetime.datetime.utcnow().isoformat() + \"Z\",\n    }"
+  },
+  "_ops_contracts_payload": {
+   "start": 7065,
+   "end": 7098,
+   "text": "def _ops_contracts_payload() -> dict[str, Any]:\n    endpoints = {\n        \"/api/audit-log/verify/export\": \"1.2\",\n        \"/api/audit-log/verify/signature\": \"1.1\",\n        \"/api/audit-log/immutability-status\": \"1.0\",\n        \"/api/ops/metrics\": \"1.0\",\n        \"/api/ops/metrics/recent\": \"1.1\",\n        \"/api/ops/metrics/prometheus\": \"1.0\",\n        \"/api/ops/slo-status\": \"1.1\",\n        \"/api/ops/alerts\": \"1.2\",\n        \"/api/ops/alert-rules\": \"1.0\",\n        \"/api/ops/health\": \"1.0\",\n        \"/api/ops/observability-status\": \"1.1\",\n        \"/api/ops/otel-status\": \"1.0\",\n        \"/api/ops/evidence-status\": \"1.0\",\n        \"/api/ops/security-posture-status\": \"1.0\",\n        \"/api/ops/security-evidence-status\": \"1.0\",\n        \"/api/ops/security-evidence/manifest\": \"1.0\",\n        \"/api/ops/security-evidence/manifest/verify-signature\": \"1.0\",\n        \"/api/ops/security-evidence/attest\": \"1.0\",\n        \"/api/ops/security-evidence/attest/latest\": \"1.0\",\n        \"/api/ops/security-evidence/freshness\": \"1.0\",\n        \"/api/ops/security-evidence/gate\": \"1.14\",\n        \"/api/ops/security-evidence/gate/enforce\": \"1.14\",\n        \"/api/ops/security-evidence/gate/assert\": \"1.14\",\n        \"/api/ops/security-evidence/gate/check\": \"1.14\",\n        \"/api/ops/runbook\": \"1.0\",\n        \"/api/ops/summary\": \"1.1\",\n    }\n    return {\n        \"api_group\": \"ops-audit\",\n        \"contract_version\": \"2.0\",\n        \"endpoints\": endpoints,\n    }"
+  },
+  "_compute_gate_invariants": {
+   "start": 7319,
+   "end": 7337,
+   "text": "def _compute_gate_invariants(failed_checks: list[str], evaluated_checks: list[str]) -> dict[str, Any]:\n    failed_count = int(len(failed_checks or []))\n    total_count = int(len(evaluated_checks or []))\n    passed_count = int(max(0, total_count - failed_count))\n    pass_ratio = float(passed_count / total_count) if total_count > 0 else 0.0\n    fail_ratio = float(failed_count / total_count) if total_count > 0 else 0.0\n    count_consistent = failed_count + passed_count == total_count\n    ratio_consistent = abs((pass_ratio + fail_ratio) - 1.0) <= 1e-9 if total_count > 0 else True\n    consistency_ok = bool(count_consistent and ratio_consistent)\n    consistency_reason = \"CONSISTENT\" if consistency_ok else \"COUNT_MISMATCH\" if not count_consistent else \"RATIO_MISMATCH\"\n    return {\n        \"gate_failed_count\": failed_count,\n        \"gate_passed_count\": passed_count,\n        \"gate_total_count\": total_count,\n        \"gate_pass_ratio\": pass_ratio,\n        \"gate_fail_ratio\": fail_ratio,\n        \"gate_consistency_ok\": consistency_ok,\n        \"gate_consistency_reason\": consistency_reason,\n    }"
+  },
+  "_security_evidence_gate_failure_detail": {
+   "start": 7437,
+   "end": 7465,
+   "text": "def _security_evidence_gate_failure_detail(gate: dict[str, Any]) -> dict[str, Any]:\n    invariants = _compute_gate_invariants(gate.get(\"failed_checks\") or [], gate.get(\"evaluated_checks\") or [])\n\n    return {\n        \"error\": \"security evidence gate failed\",\n        \"gate_reason_code\": \"GATE_FAIL\",\n        \"gate_failed_count\": invariants[\"gate_failed_count\"],\n        \"gate_passed_count\": invariants[\"gate_passed_count\"],\n        \"gate_total_count\": invariants[\"gate_total_count\"],\n        \"gate_pass_ratio\": invariants[\"gate_pass_ratio\"],\n        \"gate_fail_ratio\": invariants[\"gate_fail_ratio\"],\n        \"gate_consistency_ok\": invariants[\"gate_consistency_ok\"],\n        \"gate_consistency_reason\": invariants[\"gate_consistency_reason\"],\n        \"strict_required_checks\": bool(gate.get(\"strict_required_checks\", False)),\n        \"defaulted_checks\": bool(gate.get(\"defaulted_checks\", False)),\n        \"requested_checks\": gate.get(\"requested_checks\", []),\n        \"ignored_checks\": gate.get(\"ignored_checks\", []),\n        \"duplicate_checks\": gate.get(\"duplicate_checks\", []),\n        \"evaluated_checks\": gate.get(\"evaluated_checks\", []),\n        \"failed_checks\": gate.get(\"failed_checks\", []),\n        \"attest_reason_code\": gate.get(\"attest_reason_code\"),\n        \"freshness_reason_code\": gate.get(\"freshness_reason_code\"),\n        \"retention_reason_code\": gate.get(\"retention_reason_code\"),\n        \"artifact_dir\": gate.get(\"artifact_dir\"),\n        \"report_age_seconds\": gate.get(\"report_age_seconds\"),\n        \"retention_days\": gate.get(\"retention_days\"),\n        \"min_retention_days\": gate.get(\"min_retention_days\"),\n        \"max_age_seconds\": gate.get(\"max_age_seconds\"),\n    }"
+  }
+ }
+}

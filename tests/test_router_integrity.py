@@ -197,6 +197,130 @@ def test_project_routes_respond():
     assert response.status_code < 500, response.text[:200]
 
 
+def test_ops_and_audit_routes_respond():
+    """Exercise the extracted ops/audit handlers.
+
+    Most of these had never been executed by any test, so a broken response model
+    would only show up in production. The gate endpoint was in exactly that state.
+    """
+    from fastapi.testclient import TestClient
+
+    from backend.main import app
+
+    client = TestClient(app)
+    viewer = {"X-User-Role": "viewer"}
+    interpreter = {"X-User-Role": "interpreter"}
+
+    read_paths = [
+        "/api/ops/metrics",
+        "/api/ops/metrics/recent",
+        "/api/ops/metrics/prometheus",
+        "/api/ops/slo-status",
+        "/api/ops/alerts",
+        "/api/ops/alert-rules",
+        "/api/ops/health",
+        "/api/ops/observability-status",
+        "/api/ops/otel-status",
+        "/api/ops/evidence-status",
+        "/api/ops/security-posture-status",
+        "/api/ops/security-evidence-status",
+        "/api/ops/summary",
+        "/api/ops/contracts",
+        "/api/ops/runbook",
+        "/api/ops/security-evidence/freshness",
+        "/api/ops/security-evidence/gate",
+        "/api/audit-log",
+        "/api/audit-log/verify",
+        "/api/audit-log/immutability-status",
+        "/api/audit-log/verify/export",
+    ]
+    for path in read_paths:
+        response = client.get(path, headers=viewer)
+        assert response.status_code < 500, (
+            f"GET {path} -> {response.status_code} {response.text[:200]}"
+        )
+
+    # gate/check always returns 200 by contract, and needs interpreter.
+    assert client.post("/api/ops/security-evidence/gate/check", headers=interpreter).status_code == 200
+
+    # gate/enforce is documented to return 503 when the gate fails, which is the
+    # case with no attested evidence.
+    assert client.get("/api/ops/security-evidence/gate/enforce", headers=viewer).status_code == 503
+
+    # A viewer must not be able to assert the gate.
+    assert client.post("/api/ops/security-evidence/gate/assert", headers=viewer).status_code == 403
+
+
+def test_gate_response_model_accepts_every_reason_code_it_emits():
+    """Regression: the gate's response model declared codes the handler never returns.
+
+    attest_reason_code was typed as ATTEST_VALID | ATTEST_INVALID | ATTEST_ERROR,
+    but _attest_security_evidence_payload returns MISSING_REPORT when nothing has
+    been attested — the normal state of a fresh deployment. FastAPI then failed
+    response validation and the endpoint raised 500.
+    """
+    import re
+
+    source = (REPO_ROOT / "backend" / "routers" / "ops.py").read_text(encoding="utf-8")
+
+    handler = source[source.index("def _attest_security_evidence_payload"):]
+    handler = handler[: handler.index("\ndef ")]
+    emitted = set(re.findall(r'"reason_code":\s*"([A-Z_]+)"', handler))
+    assert emitted, "could not find any reason codes in the attestation handler"
+
+    declared = set(re.findall(r'"([A-Z_]+)"', re.search(
+        r"OpsEvidenceAttestReasonCode = Literal\[[^\]]*\]", source
+    ).group(0)))
+    assert emitted <= declared, (
+        f"the handler emits codes the Literal does not declare: {sorted(emitted - declared)}"
+    )
+
+    # And the gate response must reference that alias, not a narrower literal.
+    gate_model = source[source.index("class OpsSecurityEvidenceGateResponse"):]
+    gate_model = gate_model[: gate_model.index("\nclass ")]
+    assert "attest_reason_code: OpsEvidenceAttestReasonCode" in gate_model, (
+        "the gate response narrowed attest_reason_code to a literal that does not "
+        "cover the handler's outputs"
+    )
+
+
+def test_metrics_middleware_and_ops_routes_share_state():
+    """The counters moved to backend/observability.py; the wiring must still work."""
+    from fastapi.testclient import TestClient
+
+    from backend.main import app
+    from backend.observability import OBS_METRICS
+
+    client = TestClient(app)
+    headers = {"X-User-Role": "viewer"}
+
+    before = OBS_METRICS["requests_total"]
+    client.get("/api/ops/health", headers=headers)
+    client.get("/api/ops/health", headers=headers)
+    after = OBS_METRICS["requests_total"]
+
+    assert after > before, "requests are not reaching the shared counters"
+
+    reported = client.get("/api/ops/metrics", headers=headers).json()
+    assert reported["requests_total"] >= after, (
+        "the ops route is reading a different counter object than the middleware writes"
+    )
+
+
+def test_audit_router_reuses_the_shared_signing_helpers():
+    """Both routers verify signatures through backend/audit.py, not their own copy."""
+    from backend.audit import (
+        resolve_audit_export_signing_key,
+        verify_audit_export_signature_payload,
+    )
+    from backend.routers import audit as audit_router_module
+    from backend.routers import ops as ops_router_module
+
+    assert audit_router_module.verify_audit_export_signature_payload is verify_audit_export_signature_payload
+    assert ops_router_module.verify_audit_export_signature_payload is verify_audit_export_signature_payload
+    assert ops_router_module.resolve_audit_export_signing_key is resolve_audit_export_signing_key
+
+
 def test_async_job_producers_complete(make_well):
     """The job registry moved modules; every producer must still work.
 

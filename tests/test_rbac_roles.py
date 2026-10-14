@@ -11,7 +11,8 @@ if str(ROOT) not in sys.path:
 from backend import main as main_mod
 from backend.main import app
 from backend.main import SessionLocal, AuditLog
-from backend.main import _compute_gate_invariants
+# The security-evidence gate helpers live with the /api/ops routes now.
+from backend.routers.ops import _compute_gate_invariants
 
 
 client = TestClient(app)
