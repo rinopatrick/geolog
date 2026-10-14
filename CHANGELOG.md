@@ -15,6 +15,28 @@ and the schema may change between 0.x versions.
 
 ### Fixed
 
+- **A duplicate route registration made a fix appear not to work.**
+  `POST /api/wells/{wid}/apply-template` was registered by both
+  `routers/templates.py` and `routers/wells.py`. Starlette matches the first, so
+  the second was dead code — and they were not equivalent: different template
+  lists (5 vs 6), different lock sources, and only one accepted `custom_params`.
+  Fixed, and `tests/test_route_inventory.py` now fails on any duplicate
+  registration. (The earlier duplicate, `GET /api/templates`, was found the same
+  way.)
+- **`routers/templates.py` ignored `GEOLOG_ARTIFACT_DIR`.** It built its own lock
+  path from `os.path.dirname(__file__)`, so a deployment that redirected the
+  artifact directory had `template-lock` write one file and `apply-template` read
+  another, and the lock appeared not to work. It now delegates to
+  `well_state.get_template_lock` — one source of truth.
+- **A non-finite float in a JSON body returned 500 instead of 422.** Python's
+  `json` *parses* `Infinity`, so the value reaches FastAPI, which rejects the
+  body; its default handler echoes the offending input, and Starlette serialises
+  with `allow_nan=False`, so building the 422 raised. Affected every endpoint with
+  a Pydantic body model.
+- **Partial updates wrote whatever they were given.** `PUT /api/wells/{wid}` and
+  `PUT /api/tops/{tid}` used `for field in (...): setattr(obj, field, data[field])`,
+  so `{"depth": "abc"}` reached a FLOAT column and `{"name": null}` hit a NOT
+  NULL constraint — both 500s from the driver.
 - **The audit chain was broken by its own routes.** `audit_log` is an append-only
   chain, but `log_audit()` inserted rows with no `prev_hash`/`entry_hash`, so the
   row failed verification and the next request-logged row chained onto an empty
@@ -122,21 +144,30 @@ and the schema may change between 0.x versions.
   a separate `requirements-dev.txt`.
 - `AUTH_MODE=header` is a development convenience and is refused outside
   `dev`/`local`/`test`/`ci`.
-- `backend/main.py` reduced from 9,624 to ~6,200 lines. Extracted: `backend/deps.py`
+- `backend/main.py` reduced from 9,624 to ~1,300 lines. Extracted: `backend/deps.py`
   (shared HTTP primitives), `backend/jobs.py` (job registry), `backend/audit.py`
   (audit chain and signing), `backend/observability.py` (request counters),
-  `backend/schema.py` (migrations), and routers for users, log-runs, projects,
-  audit-log and ops.
+  `backend/schema.py` (migrations), `backend/validation.py` (body validation),
+  `backend/timeutils.py` (UTC clock), and routers for wells, log-runs, projects,
+  audit-log, ops and users.
+- `scripts/regression_harness.py` asserts on response shape and values (100 checks)
+  instead of status codes alone, records transport errors as failures rather than
+  crashing, and defaults to `127.0.0.1` rather than `localhost`.
+- Deleted `backend/schemas.py`: 108 lines of Pydantic schemas that nothing
+  imported — an abandoned attempt at the validation layer `validation.py` now
+  provides.
 
 ### Known limitations
 
-- `backend/main.py` still holds the `/api/wells` routes (87 endpoints, the least
-  tested part of the app) plus the petrophysics helpers they depend on. That is
-  the remaining piece of the split.
+- `backend/main.py` still holds a few routes (correlation markers and profile,
+  health, bulk tops update, the tops export) plus the middleware.
 - Coverage of `backend/main.py` is low; many endpoints have no numeric
   verification beyond a status code. The petrophysics that do have golden-value
   tests are `/compute-sw` and the density-porosity path.
 - No auth provider integration: `AUTH_MODE=jwt` verifies tokens but issues none.
+- `template-unlock` requires the admin role while `template-lock` accepts an
+  interpreter, so an interpreter can sign off a template that only an admin can
+  reopen. Deliberate, but worth confirming it matches your process.
 
 [Unreleased]: https://github.com/rinopatrick/geolog/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/rinopatrick/geolog/releases/tag/v0.1.0
