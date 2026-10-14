@@ -15,6 +15,27 @@ and the schema may change between 0.x versions.
 
 ### Fixed
 
+- **The audit chain was broken by its own routes.** `audit_log` is an append-only
+  chain, but `log_audit()` inserted rows with no `prev_hash`/`entry_hash`, so the
+  row failed verification and the next request-logged row chained onto an empty
+  hash. Measured: `POST /api/wells/1/template-lock` produced two chain issues. The
+  "immutable provenance chain" broke on every route calling `log_audit()` —
+  template lock/unlock, apply-template, save-petro-params. Both writers now go
+  through one `append_audit_entry()` that also holds a lock, so concurrent writes
+  cannot fork the chain either.
+- **Four endpoints returned 500 on missing input instead of 400.**
+  `/api/wells/{wid}/annotations` raised `KeyError` from `data["depth"]`; `dst`,
+  `rft` and `completion` raised `TypeError` from `float(None)`; `tops`, `wells` and
+  `projects` raised `TypeError` when an unknown key reached the model constructor.
+  All now return 400 naming the field.
+- **Mass assignment: a client could choose the primary key.**
+  `POST /api/wells/ {"id": 4242}` created a well with id 4242, and `{"id": 888}`
+  did the same for projects. `FormationTop(well_id=wid, **data)` also let a client
+  write any column, including `created_at`. All four constructors now take an
+  explicit field list.
+- **`GET /api/wells/{wid}/export-bundle` returned 500 on every call.** It built its
+  CSVs from `t.name`, `z.zone_name`, `z.sw_avg` and `z.net_to_gross` — none of
+  which are columns. It had never worked.
 - **`GET /api/ops/security-evidence/gate` returned 500**, and it is the endpoint the
   security-evidence CI gate depends on. Its response model declared
   `attest_reason_code` as `ATTEST_VALID | ATTEST_INVALID | ATTEST_ERROR`, but the
@@ -77,6 +98,8 @@ and the schema may change between 0.x versions.
 - **A schema drift gate.** `verify_schema()` reports missing tables and columns at
   startup, and CI runs `alembic check`, so a model change without a migration
   fails the build instead of breaking someone else's database.
+- **`backend/validation.py`**, giving write endpoints 400 with the field named
+  instead of a 500 from `float(None)` or a missing key.
 - **`scripts/audit_stored_curves.py`**, which finds stored wells whose curve
   values are physically impossible and therefore came from the parser bug. The
   raw upload is not retained, so affected wells must be re-uploaded.
@@ -87,6 +110,9 @@ and the schema may change between 0.x versions.
   published Archie, Larionov, Clavier and Stieber equations.
 - `tests/test_route_inventory.py`, pinning all 186 API endpoints so moving routes
   between modules cannot silently drop one.
+- `tests/test_router_integrity.py`, which checks that every name a handler
+  references is actually bound in its module — the class of bug that made the QC
+  report section fail silently.
 
 ### Changed
 
