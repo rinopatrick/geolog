@@ -4,9 +4,13 @@ from sqlalchemy.orm import Session
 try:
     from database import get_db
     from models import Well, FormationTop, LogRun, CurveData, PetroParams, Zone
+    # Private name on purpose: reports reuses the QC engine rather than
+    # reimplementing it, and that engine currently lives inside routers/qc.py.
+    from routers.qc import _run_advanced_qc
 except ImportError:
     from backend.database import get_db
     from backend.models import Well, FormationTop, LogRun, CurveData, PetroParams, Zone
+    from backend.routers.qc import _run_advanced_qc
 
 import datetime
 import io
@@ -507,17 +511,24 @@ def generate_petrophysical_report_pdf(
     if include_qc:
         elements.append(Paragraph("8. QC Snapshot", section_style))
         qc_rows = [["Metric", "Value"]]
+        # Was calling run_qc_autofix(), which is defined nowhere in the codebase.
+        # The bare except below caught the resulting NameError, so this section
+        # printed "QC data unavailable" on every report it ever produced.
+        # _run_advanced_qc() is the real implementation, in routers/qc.py.
         try:
-            qc = run_qc_autofix(wid, db)
+            qc = _run_advanced_qc(wid, db)
+            summary = qc.get("summary", {}) or {}
             qc_rows.extend([
-                ["QC Score", str(qc.get("score", "-"))],
-                ["Grade", str(qc.get("grade", "-"))],
-                ["Critical Issues", str(qc.get("critical", 0))],
-                ["Warnings", str(qc.get("warnings", 0))],
-                ["Total Curves", str(qc.get("total_curves", 0))],
+                ["QC Score", _fmt(summary.get("overall_score"), 1)],
+                ["Grade", _safe_text(summary.get("overall_rating"))],
+                ["Curves Analysed", str(summary.get("curve_count", 0))],
+                ["Missing Intervals", str(summary.get("total_missing_intervals", 0))],
+                ["Spike Points", str(summary.get("total_spike_points", 0))],
             ])
-        except Exception:
-            qc_rows.append(["Status", "QC data unavailable"])
+        except Exception as exc:
+            # Keep the report generating, but say why rather than claiming the
+            # data is simply "unavailable".
+            qc_rows.append(["Status", f"QC unavailable ({type(exc).__name__})"])
         qct = Table(qc_rows, colWidths=[56 * mm, 112 * mm])
         qct.setStyle(TableStyle([
             ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),

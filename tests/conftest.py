@@ -110,3 +110,21 @@ def seeded_database():
 
     engine.dispose()
     shutil.rmtree(_TMP_DIR, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def reset_well_locks():
+    """Clear interpretation locks before each test.
+
+    Locks are global file state, not rows. A test that approves a snapshot locks
+    its well, and every later test that writes to that well then correctly gets
+    423 Locked — so tests passed or failed depending on execution order. Found
+    via tests/test_router_integrity.py, which borrowed the first seeded well.
+
+    Tests that exercise locking do so within themselves, so starting from no
+    locks is the correct baseline rather than a convenience.
+    """
+    lock_file = pathlib.Path(_TMP_DIR) / "artifacts" / "locks.json"
+    lock_file.unlink(missing_ok=True)
+    yield
+    lock_file.unlink(missing_ok=True)
