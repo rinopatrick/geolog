@@ -17,10 +17,12 @@ from __future__ import annotations
 import datetime
 from threading import Lock
 from typing import Any
+
 try:
     from timeutils import utcnow
 except ImportError:
     from backend.timeutils import utcnow
+
 
 OBS_METRICS_LOCK = Lock()
 OBS_METRICS: dict[str, Any] = {

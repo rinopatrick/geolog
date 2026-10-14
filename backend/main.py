@@ -39,6 +39,7 @@ try:
     from timeutils import utcnow
 except ImportError:
     from backend.timeutils import utcnow
+
 try:
     from audit import append_audit_entry, log_audit as _log_audit
     from deps import (

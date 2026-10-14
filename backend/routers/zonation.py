@@ -12,6 +12,7 @@ try:
     from timeutils import utcnow
 except ImportError:
     from backend.timeutils import utcnow
+
 try:
     from database import get_db
     from models import Well, LogRun, CurveData, FormationTop, Zone, PetroParams

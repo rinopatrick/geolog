@@ -20,10 +20,12 @@ import datetime
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
+
 try:
     from timeutils import utcnow
 except ImportError:
     from backend.timeutils import utcnow
+
 
 JOB_EXECUTOR = ThreadPoolExecutor(max_workers=2)
 JOBS: dict[str, dict] = {}

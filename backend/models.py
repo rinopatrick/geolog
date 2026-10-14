@@ -11,7 +11,6 @@ try:
 except ImportError:
     from backend.timeutils import utcnow
 
-
 class Project(Base):
     __tablename__ = "projects"
 
