@@ -52,6 +52,65 @@ DTP.US/F                  :
 5003.0 8.8 26.0 31.0 86.0
 """
 
+# Two ~C mnemonics collapsing to the same canonical name must NOT lose a column:
+# ~A data is positional, so dropping one shifts every later curve.
+DUP_MNEMONIC_LAS = """~Version Information
+VERS.                  2.0 :
+WRAP.                  NO  :
+~Well Information
+STRT.FT             5000.0 :
+STOP.FT             5002.0 :
+STEP.FT                1.0 :
+NULL.              -999.25  :
+~Curve Information
+DEPT.FT                   :
+DEN .G/C3                 :
+RHOC.G/C3                 :
+GR  .GAPI                 :
+DT35.US/F                 :
+DT  .US/F                 :
+~ASCII
+5000.0 2.60 2.58 50.0 80.0 82.0
+5001.0 2.55 2.53 55.0 85.0 87.0
+5002.0 2.50 2.48 60.0 90.0 92.0
+"""
+
+PERCENT_LAS = """~Version Information
+VERS.                  2.0 :
+WRAP.                  NO  :
+~Well Information
+STRT.FT             5000.0 :
+STOP.FT             5001.0 :
+STEP.FT                1.0 :
+NULL.              -999.25  :
+~Curve Information
+DEPT.FT                   :
+NPRL.PERC                 :
+DPOR.PU                   :
+~ASCII
+5000.0 40.0 0.25
+5001.0 42.0 0.27
+"""
+
+# ~C declares 3 curves, ~A rows carry 4 columns.
+MISMATCH_LAS = """~Version Information
+VERS.                  2.0 :
+WRAP.                  NO  :
+~Well Information
+STRT.FT             5000.0 :
+STOP.FT             5001.0 :
+STEP.FT                1.0 :
+NULL.              -999.25  :
+~Curve Information
+DEPT.FT                   :
+GR  .GAPI                 :
+RHOB.G/C3                 :
+~ASCII
+5000.0 50.0 2.60 9.9
+5001.0 55.0 2.55 9.8
+"""
+
+
 def _parse(s):
     return LASParser.parse_string(s)
 
@@ -134,6 +193,40 @@ def test_mnem_dot_unit_format():
     rt_curve = next(c for c in p.curves if c.mnemonic == 'RT')
     assert rt_curve.unit == 'OHMM', f"Expected OHMM, got {rt_curve.unit}"
     print("✅ test_mnem_dot_unit_format")
+
+def test_duplicate_canonical_mnemonics_keep_columns_aligned():
+    """Alias collisions must not drop columns and shift every later curve."""
+    p = _parse(DUP_MNEMONIC_LAS)
+
+    assert [c.mnemonic for c in p.curves] == ['DEPT', 'RHOB', 'RHOC', 'GR', 'DT', 'DT_2'], \
+        f"Column count changed: {[c.mnemonic for c in p.curves]}"
+
+    # Each curve must still read its own column.
+    assert p.data['RHOB'][0] == 2.60
+    assert p.data['RHOC'][0] == 2.58
+    assert p.data['GR'][0] == 50.0
+    assert p.data['DT'][0] == 80.0
+    assert p.data['DT_2'][0] == 82.0
+    assert p.warnings == []
+    print("✅ test_duplicate_canonical_mnemonics_keep_columns_aligned")
+
+
+def test_percent_unit_porosity_normalized_to_fraction():
+    """PERC porosity curves become fractions; PU curves are left alone."""
+    p = _parse(PERCENT_LAS)
+    assert p.data['NPHI'][0] == 0.40, f"Expected 0.40, got {p.data['NPHI'][0]}"
+    assert p.data['DPOR'][0] == 0.25, f"PU must not be rescaled, got {p.data['DPOR'][0]}"
+    print("✅ test_percent_unit_porosity_normalized_to_fraction")
+
+
+def test_column_count_mismatch_is_reported():
+    """A ~C/~A disagreement must surface as a warning, not silent truncation."""
+    p = _parse(MISMATCH_LAS)
+    assert len(p.curves) == 3
+    assert any('columns' in w for w in p.warnings), f"No warning raised: {p.warnings}"
+    assert p.to_dict()['warnings'] == p.warnings
+    print("✅ test_column_count_mismatch_is_reported")
+
 
 def test_empty_las():
     """Empty string should not crash."""
@@ -271,6 +364,9 @@ if __name__ == '__main__':
     test_well_info()
     test_large_dataset()
     test_mnem_dot_unit_format()
+    test_duplicate_canonical_mnemonics_keep_columns_aligned()
+    test_percent_unit_porosity_normalized_to_fraction()
+    test_column_count_mismatch_is_reported()
     test_empty_las()
     test_malformed_las()
     

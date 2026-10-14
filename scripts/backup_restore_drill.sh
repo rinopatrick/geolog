@@ -23,7 +23,7 @@ orig_sha="$(sha256sum "${DB_PATH}" | awk '{print $1}')"
 backup_sha="$(sha256sum "${BACKUP_PATH}" | awk '{print $1}')"
 restore_sha="$(sha256sum "${RESTORE_PATH}" | awk '{print $1}')"
 
-python3 - <<'PY' "${DB_PATH}" "${RESTORE_PATH}" "${REPORT_PATH}" "${orig_sha}" "${backup_sha}" "${restore_sha}"
+${PYTHON:-python3} - <<'PY' "${DB_PATH}" "${RESTORE_PATH}" "${REPORT_PATH}" "${orig_sha}" "${backup_sha}" "${restore_sha}"
 import json, sqlite3, sys, datetime, hashlib, hmac, os
 
 db_path, restore_path, report_path, orig_sha, backup_sha, restore_sha = sys.argv[1:]

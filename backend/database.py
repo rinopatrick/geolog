@@ -3,9 +3,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 
-# Use absolute path so DB is always in backend/ regardless of CWD
+# Use absolute path so DB is always in backend/ regardless of CWD.
+# GEOLOG_DB_PATH overrides it (tests use a throwaway file; deployments point it
+# at a mounted volume).
 _backend_dir = os.path.dirname(os.path.abspath(__file__))
-_db_path = os.path.join(_backend_dir, "geolog.db")
+_db_path = os.environ.get("GEOLOG_DB_PATH") or os.path.join(_backend_dir, "geolog.db")
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{_db_path}"
 
 engine = create_engine(

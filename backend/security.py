@@ -1,8 +1,12 @@
 """Authentication and role-resolution utilities (Sprint 1).
 
 Modes:
-- AUTH_MODE=header (default for backward compatibility)
-- AUTH_MODE=jwt (server-verified bearer JWT; OIDC-ready via issuer/audience)
+- AUTH_MODE=jwt (default outside dev: server-verified bearer JWT, OIDC-ready)
+- AUTH_MODE=header (trusted client header; dev/local/test/ci only)
+
+Header mode takes the caller's role from a request header, so it is only safe
+where the network boundary is trusted. It is refused outside dev environments
+unless AUTH_MODE is set explicitly and GEOLOG_ENV says otherwise.
 """
 from __future__ import annotations
 
@@ -14,10 +18,17 @@ from fastapi import Request, HTTPException
 
 ROLE_RANK = {"viewer": 1, "interpreter": 2, "admin": 3}
 
+# Environments where the trusted-header shim is acceptable.
+DEV_ENVIRONMENTS = {"dev", "local", "test", "ci"}
+
+
+def current_env() -> str:
+    return (os.getenv("GEOLOG_ENV") or os.getenv("ENV") or "dev").strip().lower()
+
 
 @dataclass
 class AuthConfig:
-    mode: str = "header"
+    mode: str = "jwt"
     header_role_name: str = "X-User-Role"
     jwt_issuer: Optional[str] = None
     jwt_audience: Optional[str] = None
@@ -26,7 +37,19 @@ class AuthConfig:
 
     @classmethod
     def from_env(cls) -> "AuthConfig":
-        mode = (os.getenv("AUTH_MODE", "header") or "header").strip().lower()
+        env = current_env()
+        mode = (os.getenv("AUTH_MODE") or "").strip().lower()
+        if not mode:
+            # Secure by default: a real deployment must verify tokens. Local runs
+            # keep the header shim so the app is usable without an identity provider.
+            mode = "header" if env in DEV_ENVIRONMENTS else "jwt"
+        if mode not in ("header", "jwt"):
+            raise RuntimeError(f"unsupported AUTH_MODE {mode!r} (expected 'header' or 'jwt')")
+        if mode == "header" and env not in DEV_ENVIRONMENTS:
+            raise RuntimeError(
+                f"AUTH_MODE=header trusts a client-supplied role header, which is not "
+                f"allowed with GEOLOG_ENV={env!r}. Set AUTH_MODE=jwt."
+            )
         alg_raw = (os.getenv("AUTH_JWT_ALGORITHMS", "HS256") or "HS256").strip()
         algs = tuple(a.strip() for a in alg_raw.split(",") if a.strip()) or ("HS256",)
         return cls(

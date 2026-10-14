@@ -1,0 +1,7 @@
+# Test / CI-only dependencies. Not needed to run the app.
+-r backend/requirements.txt
+
+pytest==9.1.1
+httpx==0.28.1
+requests==2.34.2
+coverage==7.16.2

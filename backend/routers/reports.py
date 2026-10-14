@@ -140,6 +140,9 @@ def zone_stats(wid: int, db: Session = Depends(get_db)):
             )
             net_pay_ft = float(np.count_nonzero(pay_mask)) * md_step
             gross_ft = float(zone_item["gross_ft"])
+            # The zone mask is inclusive at both ends, so a zone that is net top to
+            # bottom can count one sample more than its own gross thickness.
+            net_pay_ft = min(net_pay_ft, gross_ft) if gross_ft > 0 else 0.0
             zone_item["net_pay_ft"] = round(net_pay_ft, 6)
             zone_item["ntg"] = round((net_pay_ft / gross_ft), 6) if gross_ft > 0 else 0.0
 

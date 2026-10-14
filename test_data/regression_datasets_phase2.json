@@ -1,27 +1,56 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "purpose": "Phase 2 regression suite realistic LAS datasets",
   "datasets": [
     {
       "id": "kgs_culwell_unit4_32",
       "path": "test_data/kgs_culwell_unit4_32_density_neutron_resistivity.las",
       "source": "KGS public well logs",
+      "delimiter": ",",
       "expected_min_depth_points": 1000,
-      "expected_min_curves": 10
+      "expected_min_curves": 10,
+      "golden_index": 0,
+      "golden": {
+        "DEPT": 4195.0,
+        "GR": 83.376,
+        "RHOB": 2.594,
+        "DT": 69.239,
+        "NPHI": 0.127,
+        "DPOR": 0.068
+      }
     },
     {
       "id": "kgs_plant_site_disposal10",
       "path": "test_data/kgs_plant_site_disposal10_sand_shaly_standard.las",
       "source": "KGS public well logs",
+      "delimiter": ",",
       "expected_min_depth_points": 5000,
-      "expected_min_curves": 10
+      "expected_min_curves": 10,
+      "golden_index": 0,
+      "golden": {
+        "DEPT": 3300.0,
+        "GR": 80.684,
+        "RHOB": 2.458,
+        "DT": 111.103,
+        "NPHI": 0.34353
+      }
     },
     {
       "id": "kgs_stephens_trust1",
       "path": "test_data/kgs_stephens_trust1_nonstandard_mnemonics.las",
       "source": "KGS public well logs",
+      "delimiter": ",",
       "expected_min_depth_points": 10000,
-      "expected_min_curves": 10
+      "expected_min_curves": 10,
+      "golden_index": 103,
+      "golden": {
+        "DEPT": 275.909,
+        "GR": 53.631,
+        "RHOB": 2.312,
+        "DT": 174.63,
+        "NPHI": 0.40002,
+        "DPOR": 0.23247
+      }
     }
   ]
 }

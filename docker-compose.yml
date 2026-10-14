@@ -5,11 +5,19 @@ services:
       - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
+      # Trusted-header auth: fine for a local/demo container. Before exposing this
+      # on a network set GEOLOG_ENV=prod, AUTH_MODE=jwt and AUTH_JWT_SECRET.
+      - GEOLOG_ENV=dev
+      - GEOLOG_ENABLE_DEMO_SEED=true
+      # Keep the database and interpretation snapshots on the mounted volume.
+      - GEOLOG_DB_PATH=/app/backend/data/geolog.db
+      - GEOLOG_ARTIFACT_DIR=/app/backend/data/artifacts
     volumes:
       - geolog-data:/app/backend/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      # python:3.11-slim has no curl; match the Dockerfile's urllib probe.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2).status < 500 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3
