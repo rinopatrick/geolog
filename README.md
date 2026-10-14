@@ -467,9 +467,12 @@ If this project helps you, support ongoing development:
 
 Current state: **engineering sample / pre-production**.
 
+Version: see [`backend/version.py`](backend/version.py) (single source of truth)
+and [CHANGELOG.md](CHANGELOG.md). While the major version is `0`, the API is not
+stable and the schema may change between releases.
+
 Recommended next steps:
-1. Split `backend/main.py` (single file, ~9.6k lines) into the routers that already exist for six domains
-2. Introduce schema migrations (Alembic) — schema changes are currently applied by ad-hoc `_ensure_*` helpers at import time
-3. Raise coverage on the petrophysics paths (`backend/main.py` is the least covered module)
-4. Add a release/versioning policy and tag releases
-5. Add monitoring and an operational runbook
+1. Split `backend/main.py` (single file, ~9.5k lines) into the routers that already exist for six domains
+2. Raise coverage on the petrophysics paths (`backend/main.py` is the least covered module)
+3. Add an auth provider integration — `AUTH_MODE=jwt` verifies tokens but issues none
+4. Add monitoring and an operational runbook

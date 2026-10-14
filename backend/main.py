@@ -28,6 +28,7 @@ try:
     )
     from deps import SafeJSONResponse, require_admin, require_interpreter, require_role, require_viewer
     from schema import ensure_schema
+    from version import __version__
     from routers.qc import router as qc_router
     from routers.correlation import router as corr_router
     from routers.zonation import router as zonation_router
@@ -46,6 +47,7 @@ except ImportError:
     )
     from backend.deps import SafeJSONResponse, require_admin, require_interpreter, require_role, require_viewer
     from backend.schema import ensure_schema
+    from backend.version import __version__
     from backend.routers.qc import router as qc_router
     from backend.routers.correlation import router as corr_router
     from backend.routers.zonation import router as zonation_router
@@ -254,7 +256,7 @@ def _build_petro_summary(wid: int, params: dict, db: Session):
 app = FastAPI(
     title="GeoLog",
     description="Oil & Gas Well Log Viewer",
-    version="2.0.0",
+    version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
     default_response_class=SafeJSONResponse,
@@ -811,7 +813,7 @@ def _auto_seed():
 # ─── Health ───────────────────────────────────────────────────
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "app": "GeoLog", "version": "2.0.0"}
+    return {"status": "ok", "app": "GeoLog", "version": __version__}
 
 
 # ─── Projects ─────────────────────────────────────────────────
@@ -5503,7 +5505,7 @@ def export_audit_log_verification(
             "auth_subject": str(getattr(request.state, "auth_subject", "") or ""),
             "auth_role": str(getattr(request.state, "user_role", "viewer") or "viewer"),
             "input": {"limit": int(limit)},
-            "code_version": (os.getenv("GEOLOG_CODE_VERSION") or "unknown").strip() or "unknown",
+            "code_version": (os.getenv("GEOLOG_CODE_VERSION") or __version__).strip() or "unknown",
         },
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
