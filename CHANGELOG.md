@@ -15,6 +15,15 @@ and the schema may change between 0.x versions.
 
 ### Fixed
 
+- **`GET /api/ops/security-evidence/gate` returned 500**, and it is the endpoint the
+  security-evidence CI gate depends on. Its response model declared
+  `attest_reason_code` as `ATTEST_VALID | ATTEST_INVALID | ATTEST_ERROR`, but the
+  handler returns `MISSING_REPORT` when nothing has been attested — the normal
+  state of a fresh deployment — so response validation failed.
+- **Section 8 "QC Snapshot" of every PDF report printed "QC data unavailable".**
+  It called `run_qc_autofix()`, which is defined nowhere in the codebase, and a
+  bare `except Exception` swallowed the resulting `NameError`. It now reports the
+  real QC summary.
 - **Silent LAS column corruption.** The parser dropped a `~C` definition whenever
   two vendor mnemonics mapped to the same canonical name, while `~A` data stayed
   positional, so every curve after the collision read its neighbour's column. On
@@ -87,13 +96,20 @@ and the schema may change between 0.x versions.
   a separate `requirements-dev.txt`.
 - `AUTH_MODE=header` is a development convenience and is refused outside
   `dev`/`local`/`test`/`ci`.
+- `backend/main.py` reduced from 9,624 to ~6,200 lines. Extracted: `backend/deps.py`
+  (shared HTTP primitives), `backend/jobs.py` (job registry), `backend/audit.py`
+  (audit chain and signing), `backend/observability.py` (request counters),
+  `backend/schema.py` (migrations), and routers for users, log-runs, projects,
+  audit-log and ops.
 
 ### Known limitations
 
-- `backend/main.py` is a single ~9.5k-line module holding most routes. Six router
-  modules and `backend/deps.py` exist; the rest of the split is pending.
+- `backend/main.py` still holds the `/api/wells` routes (87 endpoints, the least
+  tested part of the app) plus the petrophysics helpers they depend on. That is
+  the remaining piece of the split.
 - Coverage of `backend/main.py` is low; many endpoints have no numeric
-  verification beyond a status code.
+  verification beyond a status code. The petrophysics that do have golden-value
+  tests are `/compute-sw` and the density-porosity path.
 - No auth provider integration: `AUTH_MODE=jwt` verifies tokens but issues none.
 
 [Unreleased]: https://github.com/rinopatrick/geolog/compare/v0.1.0...HEAD

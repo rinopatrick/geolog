@@ -321,6 +321,65 @@ def test_audit_router_reuses_the_shared_signing_helpers():
     assert ops_router_module.resolve_audit_export_signing_key is resolve_audit_export_signing_key
 
 
+def test_well_export_bundle_is_a_valid_zip(make_well):
+    """Regression: the bundle referenced model fields that do not exist.
+
+    export_client_bundle built tops.csv from t.name (the model has
+    formation_name) and zones.csv from z.zone_name / z.sw_avg / z.net_to_gross
+    (Zone stores name, top_depth, bottom_depth, color only), so every call raised
+    AttributeError and returned 500. It had never worked.
+    """
+    import io
+    import zipfile
+
+    from fastapi.testclient import TestClient
+
+    from backend.main import SessionLocal, FormationTop, Well, Zone, app
+
+    client = TestClient(app)
+    headers = {"X-User-Role": "interpreter"}
+
+    n = 60
+    wid = make_well("bundle-well", {
+        "DEPT": [1000.0 + i for i in range(n)],
+        "GR": [50.0 + i for i in range(n)],
+        "RHOB": [2.4] * n,
+        "NPI": [0.25] * n,
+    })
+
+    # Give it a top and a zone so both CSV branches execute.
+    db = SessionLocal()
+    try:
+        db.add(FormationTop(well_id=wid, formation_name="Test Fm", depth=1010.0,
+                            color="#ff0000", lithology="Sandstone"))
+        db.add(Zone(well_id=wid, name="Zone A", top_depth=1000.0, bottom_depth=1030.0))
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get(f"/api/wells/{wid}/export-bundle", headers=headers)
+    assert response.status_code == 200, response.text[:200]
+
+    archive = zipfile.ZipFile(io.BytesIO(response.content))
+    names = archive.namelist()
+    assert any(n.endswith(".las") for n in names), names
+    assert "tops.csv" in names
+    assert "zones.csv" in names
+    assert "report.md" in names
+
+    tops_csv = archive.read("tops.csv").decode()
+    assert tops_csv.splitlines()[0] == "depth,formation_name,color,lithology"
+    assert "Test Fm" in tops_csv
+
+    zones_csv = archive.read("zones.csv").decode()
+    assert zones_csv.splitlines()[0] == "name,top_depth,bottom_depth,color"
+    assert "Zone A" in zones_csv
+
+    report = archive.read("report.md").decode()
+    assert "Test Fm" in report
+    assert "Zone A" in report
+
+
 def test_async_job_producers_complete(make_well):
     """The job registry moved modules; every producer must still work.
 

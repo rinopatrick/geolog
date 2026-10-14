@@ -472,7 +472,23 @@ and [CHANGELOG.md](CHANGELOG.md). While the major version is `0`, the API is not
 stable and the schema may change between releases.
 
 Recommended next steps:
-1. Split `backend/main.py` (single file, ~9.5k lines) into the routers that already exist for six domains
+1. Finish splitting `backend/main.py` — the `/api/wells` routes (87 endpoints) and the petrophysics helpers they depend on
 2. Raise coverage on the petrophysics paths (`backend/main.py` is the least covered module)
 3. Add an auth provider integration — `AUTH_MODE=jwt` verifies tokens but issues none
 4. Add monitoring and an operational runbook
+
+Module layout:
+```
+backend/
+├── main.py            app assembly, middleware, /api/wells routes
+├── deps.py            SafeJSONResponse, role dependencies
+├── schema.py          Alembic runner + drift verification
+├── audit.py           audit chain + evidence signing
+├── observability.py   request counters (middleware writes, /api/ops reads)
+├── jobs.py            in-process background job registry
+├── curve_corrections.py  density-porosity + bad-hole QC
+├── curve_plausibility.py stored-curve sanity checks
+├── migrations/        Alembic revisions
+└── routers/           users, log_runs, projects, audit, ops, qc,
+                       correlation, zonation, units, templates, reports
+```

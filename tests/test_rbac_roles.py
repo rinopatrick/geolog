@@ -2174,7 +2174,12 @@ def test_compute_gate_invariants_scenarios():
 
 def test_snapshot_approval_optimistic_lock_and_history(monkeypatch):
     with tempfile.TemporaryDirectory() as td:
-        monkeypatch.setattr(main_mod, "SNAPSHOT_DIR", td)
+        # Snapshots live in backend/well_state.py; snapshot_path() reads the
+        # module global at call time, so patching it there is what redirects the
+        # routes.
+        from backend import well_state
+
+        monkeypatch.setattr(well_state, "SNAPSHOT_DIR", td)
         wells_resp = client.get("/api/wells/", headers=_h("viewer"))
         assert wells_resp.status_code == 200
         wells = wells_resp.json()
