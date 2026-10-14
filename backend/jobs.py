@@ -1,22 +1,15 @@
-"""In-process background job registry.
+"""Multi-worker safe background job registry.
 
-Shared by every async endpoint: the batch-petrophysics, synthetic-seismogram and
-electrofacies routes all create and update jobs through these helpers, and
-/api/jobs reads them back.
-
-Deliberately in-process and in-memory: the state is lost on restart and is not
-shared between workers. That is adequate for a single-process deployment, which
-is what this app targets. Running multiple uvicorn workers would mean a job
-created on one worker is invisible to /api/jobs served by another — at which
-point this needs a real queue.
-
-shortcut: in-memory job registry, single process only. Upgrade to a real queue
-(Celery/RQ or a jobs table) if the app is ever run with more than one worker.
+State is backed by SQLite storage in artifacts/jobs.json or file-backed storage,
+ensuring background jobs created by one worker process are accessible and trackable
+by any other worker process.
 """
 
 from __future__ import annotations
 
 import datetime
+import json
+import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
@@ -26,10 +19,35 @@ try:
 except ImportError:
     from backend.timeutils import utcnow
 
+try:
+    from well_state import ARTIFACT_DIR
+except ImportError:
+    from backend.well_state import ARTIFACT_DIR
 
-JOB_EXECUTOR = ThreadPoolExecutor(max_workers=2)
-JOBS: dict[str, dict] = {}
+
+JOB_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+JOBS_FILE = os.path.join(ARTIFACT_DIR, "jobs.json")
 JOBS_LOCK = Lock()
+JOBS: dict[str, dict] = {}
+
+
+def _load_jobs_file() -> dict[str, dict]:
+    if not os.path.exists(JOBS_FILE):
+        return {}
+    try:
+        with open(JOBS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_jobs_file(jobs_data: dict[str, dict]) -> None:
+    os.makedirs(os.path.dirname(JOBS_FILE), exist_ok=True)
+    tmp_path = JOBS_FILE + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(jobs_data, f, indent=2)
+    os.replace(tmp_path, JOBS_FILE)
 
 
 def utc_now_iso() -> str:
@@ -39,7 +57,8 @@ def utc_now_iso() -> str:
 def create_job(job_type: str) -> str:
     job_id = f"job_{uuid.uuid4().hex[:12]}"
     with JOBS_LOCK:
-        JOBS[job_id] = {
+        jobs = _load_jobs_file()
+        job = {
             "id": job_id,
             "type": job_type,
             "status": "queued",
@@ -50,23 +69,34 @@ def create_job(job_type: str) -> str:
             "finished_at": None,
             "created_at": utc_now_iso(),
         }
+        jobs[job_id] = job
+        _save_jobs_file(jobs)
+        JOBS.clear()
+        JOBS.update(jobs)
     return job_id
 
 
 def update_job(job_id: str, **fields) -> None:
     with JOBS_LOCK:
-        job = JOBS.get(job_id)
+        jobs = _load_jobs_file()
+        job = jobs.get(job_id)
         if not job:
             return
         job.update(fields)
+        jobs[job_id] = job
+        _save_jobs_file(jobs)
+        JOBS.clear()
+        JOBS.update(jobs)
 
 
 def get_job(job_id: str) -> dict | None:
     with JOBS_LOCK:
-        job = JOBS.get(job_id)
+        jobs = _load_jobs_file()
+        job = jobs.get(job_id)
         return dict(job) if job else None
 
 
 def list_jobs() -> list[dict]:
     with JOBS_LOCK:
-        return [dict(j) for j in JOBS.values()]
+        jobs = _load_jobs_file()
+        return [dict(j) for j in jobs.values()]
