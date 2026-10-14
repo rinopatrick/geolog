@@ -1,8 +1,14 @@
 """Tests for GeoLog LAS parser and API endpoints."""
 import sys, os, io, json, math
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 
-from las_parser import LASParser
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+# Import via the package path. Putting backend/ on sys.path would make the same
+# files importable as both 'las_parser' and 'backend.las_parser', giving two
+# independent module objects (and two SQLAlchemy registries).
+from backend.las_parser import LASParser
 
 # ─── LAS Parser Tests ────────────────────────────────────────────
 
