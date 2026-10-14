@@ -15,6 +15,10 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 try:
+    from timeutils import utcnow
+except ImportError:
+    from backend.timeutils import utcnow
+try:
     from database import get_db
     from deps import SafeJSONResponse
     from las_parser import CURVE_TRACKS
@@ -334,7 +338,7 @@ def get_curve_data(
         raise HTTPException(404, "Log run not found")
 
     headers = _build_curve_cache_headers(lr_id, mnemonics, start, stop, step)
-    last_modified_dt = (lr.uploaded_at or datetime.datetime.utcnow()).replace(tzinfo=datetime.timezone.utc)
+    last_modified_dt = (lr.uploaded_at or utcnow()).replace(tzinfo=datetime.timezone.utc)
     headers["Last-Modified"] = _httpdate(last_modified_dt)
 
     if if_none_match and if_none_match.strip() == headers["ETag"]:
@@ -805,7 +809,7 @@ def get_decimated_data(
     curves = db.query(CurveData).filter(CurveData.log_run_id == lr_id).all()
 
     headers = _build_curve_cache_headers(lr_id, [c.mnemonic for c in curves], start_depth, stop_depth, 1, max_points=max_points)
-    last_modified_dt = (lr.uploaded_at or datetime.datetime.utcnow()).replace(tzinfo=datetime.timezone.utc)
+    last_modified_dt = (lr.uploaded_at or utcnow()).replace(tzinfo=datetime.timezone.utc)
     headers["Last-Modified"] = _httpdate(last_modified_dt)
 
     if if_none_match and if_none_match.strip() == headers["ETag"]:

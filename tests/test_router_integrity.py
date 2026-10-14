@@ -114,7 +114,8 @@ def test_log_run_routes_respond():
     """Exercise the extracted log-run handlers against seeded demo data."""
     from fastapi.testclient import TestClient
 
-    from backend.main import LogRun, SessionLocal, app
+    from backend.main import SessionLocal, app
+    from backend.models import LogRun
 
     client = TestClient(app)
     headers = {"X-User-Role": "interpreter"}
@@ -160,7 +161,8 @@ def test_project_routes_respond():
     """Exercise the extracted project handlers against seeded demo data."""
     from fastapi.testclient import TestClient
 
-    from backend.main import Project, SessionLocal, Well, app
+    from backend.main import SessionLocal, app
+    from backend.models import Project, Well
 
     client = TestClient(app)
     headers = {"X-User-Role": "interpreter"}
@@ -334,7 +336,8 @@ def test_well_export_bundle_is_a_valid_zip(make_well):
 
     from fastapi.testclient import TestClient
 
-    from backend.main import SessionLocal, FormationTop, Well, Zone, app
+    from backend.main import SessionLocal, app
+    from backend.models import FormationTop, Well, Zone
 
     client = TestClient(app)
     headers = {"X-User-Role": "interpreter"}

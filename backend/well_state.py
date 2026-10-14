@@ -19,6 +19,10 @@ import os
 from sqlalchemy.orm import Session
 
 try:
+    from timeutils import utcnow
+except ImportError:
+    from backend.timeutils import utcnow
+try:
     from models import PetroParams
 except ImportError:
     from backend.models import PetroParams
@@ -107,7 +111,7 @@ def set_well_lock(wid: int, locked: bool, actor: str = "system", snapshot_id: st
         "locked": bool(locked),
         "actor": actor,
         "snapshot_id": snapshot_id,
-        "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "updated_at": utcnow().isoformat() + "Z",
     })
     locks[str(wid)] = current
     save_locks(locks)

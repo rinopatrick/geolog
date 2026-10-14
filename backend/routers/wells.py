@@ -12,10 +12,8 @@ from __future__ import annotations
 
 import csv
 import datetime
-import hashlib
 import io
 import json
-import os
 import re
 import uuid
 import zipfile
@@ -25,6 +23,10 @@ from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
+try:
+    from timeutils import utcnow
+except ImportError:
+    from backend.timeutils import utcnow
 try:
     from curve_corrections import (
         DEFAULT_DRHO_LIMIT,
@@ -61,7 +63,6 @@ try:
         Zone,
     )
     from well_state import (
-        current_petro_params_payload as _current_petro_params_payload,
         default_template_lock as _default_template_lock,
         get_template_lock as _get_template_lock,
         get_well_lock as _get_well_lock,
@@ -70,6 +71,13 @@ try:
         set_template_lock as _set_template_lock,
         set_well_lock as _set_well_lock,
         snapshot_template_signature as _snapshot_template_signature,
+    )
+    from validation import (
+        optional_float,
+        optional_str,
+        require_float,
+        require_int,
+        require_str,
     )
 except ImportError:
     from backend.curve_corrections import (
@@ -107,7 +115,6 @@ except ImportError:
         Zone,
     )
     from backend.well_state import (
-        current_petro_params_payload as _current_petro_params_payload,
         default_template_lock as _default_template_lock,
         get_template_lock as _get_template_lock,
         get_well_lock as _get_well_lock,
@@ -116,6 +123,13 @@ except ImportError:
         set_template_lock as _set_template_lock,
         set_well_lock as _set_well_lock,
         snapshot_template_signature as _snapshot_template_signature,
+    )
+    from backend.validation import (
+        optional_float,
+        optional_str,
+        require_float,
+        require_int,
+        require_str,
     )
 
 MAX_UPLOAD_SIZE = 200 * 1024 * 1024
@@ -532,7 +546,22 @@ def list_wells(project_id: int = None, db: Session = Depends(get_db)):
 
 @router.post("/", status_code=201)
 def create_well(data: dict, db: Session = Depends(get_db)):
-    w = Well(**data)
+    # Was Well(**data), which let a client choose the primary key and write any
+    # column. Only these fields are part of the request contract.
+    w = Well(
+        project_id=require_int(data, "project_id"),
+        name=require_str(data, "name"),
+        uwi=optional_str(data, "uwi"),
+        api_number=optional_str(data, "api_number"),
+        latitude=optional_float(data, "latitude"),
+        longitude=optional_float(data, "longitude"),
+        elevation=optional_float(data, "elevation"),
+        total_depth=optional_float(data, "total_depth"),
+        depth_unit=optional_str(data, "depth_unit", "FT"),
+        operator=optional_str(data, "operator"),
+        field_name=optional_str(data, "field_name"),
+        spud_date=optional_str(data, "spud_date"),
+    )
     db.add(w)
     db.commit()
     db.refresh(w)
@@ -753,7 +782,19 @@ def list_tops(wid: int, db: Session = Depends(get_db)):
 
 @router.post("/{wid}/tops", status_code=201)
 def create_top(wid: int, data: dict, db: Session = Depends(get_db)):
-    t = FormationTop(well_id=wid, **data)
+    # Was FormationTop(well_id=wid, **data), which is mass assignment: a client
+    # could set id and created_at, and any unknown key raised TypeError -> 500.
+    t = FormationTop(
+        well_id=wid,
+        formation_name=require_str(data, "formation_name"),
+        depth=require_float(data, "depth"),
+        top_depth=optional_float(data, "top_depth"),
+        base_depth=optional_float(data, "base_depth"),
+        depth_unit=optional_str(data, "depth_unit", "FT"),
+        color=optional_str(data, "color", "#888888"),
+        lithology=optional_str(data, "lithology"),
+        notes=optional_str(data, "notes"),
+    )
     db.add(t)
     db.commit()
     db.refresh(t)
@@ -821,7 +862,7 @@ def create_snapshot(wid: int, data: dict = None, db: Session = Depends(get_db)):
         "snapshot_id": snap_id,
         "well_id": wid,
         "well_name": well.name,
-        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "created_at": utcnow().isoformat() + "Z",
         "label": (data or {}).get("label", f"snapshot-{len(snapshots)+1}"),
         "snapshot_version": 1,
         "approved": False,
@@ -875,7 +916,7 @@ def lock_template(wid: int, data: dict = None, db: Session = Depends(get_db), x_
     lock = {
         "locked": True,
         "locked_by": actor,
-        "locked_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "locked_at": utcnow().isoformat() + "Z",
         "reason": reason,
         "signature": signature,
         "signed_template": payload.get("template", "custom"),
@@ -947,7 +988,7 @@ def approve_snapshot(
                     },
                 )
 
-            approved_at = datetime.datetime.utcnow().isoformat() + "Z"
+            approved_at = utcnow().isoformat() + "Z"
             s["approved"] = True
             s["approved_by"] = actor
             s["approved_at"] = approved_at
@@ -1018,7 +1059,7 @@ def delivery_bundle(wid: int, db: Session = Depends(get_db)):
     manifest = {
         "well_id": wid,
         "well_name": well.name,
-        "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "generated_at": utcnow().isoformat() + "Z",
         "files": [
             "well.json",
             "tops.json",
@@ -1536,10 +1577,10 @@ def list_annotations(wid: int, db: Session = Depends(get_db)):
 def create_annotation(wid: int, data: dict, db: Session = Depends(get_db)):
     ann = Annotation(
         well_id=wid,
-        depth=float(data["depth"]),
-        text=str(data.get("text", "")),
-        annotation_type=str(data.get("annotation_type", "note")),
-        color=str(data.get("color", "#f39c12")),
+        depth=require_float(data, "depth"),
+        text=optional_str(data, "text"),
+        annotation_type=optional_str(data, "annotation_type", "note"),
+        color=optional_str(data, "color", "#f39c12"),
     )
     db.add(ann)
     db.commit()
@@ -1552,18 +1593,18 @@ def create_dst(wid: int, data: dict, db: Session = Depends(get_db)):
     row = DSTTest(
         well_id=wid,
         test_number=str(data.get("test_number", "")),
-        top_depth=float(data.get("top_depth")),
-        bottom_depth=float(data.get("bottom_depth")),
-        formation=str(data.get("formation", "")),
-        choke_size=str(data.get("choke_size", "")),
-        flow_rate=float(data["flow_rate"]) if data.get("flow_rate") is not None else None,
-        shut_in_pressure=float(data["shut_in_pressure"]) if data.get("shut_in_pressure") is not None else None,
-        flowing_pressure=float(data["flowing_pressure"]) if data.get("flowing_pressure") is not None else None,
-        temperature=float(data["temperature"]) if data.get("temperature") is not None else None,
-        permeability=float(data["permeability"]) if data.get("permeability") is not None else None,
-        skin=float(data["skin"]) if data.get("skin") is not None else None,
-        result=str(data.get("result", "")),
-        notes=str(data.get("notes", "")),
+        top_depth=require_float(data, "top_depth"),
+        bottom_depth=require_float(data, "bottom_depth"),
+        formation=optional_str(data, "formation"),
+        choke_size=optional_str(data, "choke_size"),
+        flow_rate=optional_float(data, "flow_rate"),
+        shut_in_pressure=optional_float(data, "shut_in_pressure"),
+        flowing_pressure=optional_float(data, "flowing_pressure"),
+        temperature=optional_float(data, "temperature"),
+        permeability=optional_float(data, "permeability"),
+        skin=optional_float(data, "skin"),
+        result=optional_str(data, "result"),
+        notes=optional_str(data, "notes"),
     )
     db.add(row)
     db.commit()
@@ -1581,12 +1622,12 @@ def list_dst(wid: int, db: Session = Depends(get_db)):
 def create_rft(wid: int, data: dict, db: Session = Depends(get_db)):
     row = RFTPoint(
         well_id=wid,
-        depth=float(data.get("depth")),
-        pressure=float(data.get("pressure")),
-        mobility=float(data["mobility"]) if data.get("mobility") is not None else None,
-        fluid_type=str(data.get("fluid_type", "unknown") or "unknown").lower(),
-        sample_recovered=str(data.get("sample_recovered", "")),
-        notes=str(data.get("notes", "")),
+        depth=require_float(data, "depth"),
+        pressure=require_float(data, "pressure"),
+        mobility=optional_float(data, "mobility"),
+        fluid_type=(optional_str(data, "fluid_type", "unknown") or "unknown").lower(),
+        sample_recovered=optional_str(data, "sample_recovered"),
+        notes=optional_str(data, "notes"),
     )
     db.add(row)
     db.commit()
@@ -1606,8 +1647,8 @@ def create_completion_component(wid: int, data: dict, db: Session = Depends(get_
     if ctype not in COMPLETION_COMPONENT_TYPES:
         raise HTTPException(400, f"Invalid component_type. Allowed: {sorted(COMPLETION_COMPONENT_TYPES)}")
 
-    top = float(data.get("depth_top"))
-    base = float(data.get("depth_base"))
+    top = require_float(data, "depth_top")
+    base = require_float(data, "depth_base")
     if base < top:
         top, base = base, top
 
@@ -1616,9 +1657,9 @@ def create_completion_component(wid: int, data: dict, db: Session = Depends(get_
         depth_top=top,
         depth_base=base,
         component_type=ctype,
-        size=str(data.get("size", "") or ""),
-        description=str(data.get("description", "") or ""),
-        notes=str(data.get("notes", "") or ""),
+        size=optional_str(data, "size"),
+        description=optional_str(data, "description"),
+        notes=optional_str(data, "notes"),
     )
     db.add(row)
     db.commit()
@@ -2105,10 +2146,16 @@ def splice_curves(wid: int, data: dict, db: Session = Depends(get_db)):
     composite_depth = base["depth"].copy()
     composite_values = base["values"].copy()
 
-    for interval in intervals:
+    for index, interval in enumerate(intervals):
         src_id = interval.get("source_lr_id")
-        start = float(interval.get("start"))
-        end = float(interval.get("end"))
+        try:
+            start = float(interval.get("start"))
+            end = float(interval.get("end"))
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"intervals[{index}] requires numeric start and end",
+            )
         src = run_data.get(src_id)
         if not src:
             continue
@@ -2183,7 +2230,7 @@ def generate_report(wid: int, db: Session = Depends(get_db)):
         "well": {c.name: getattr(well, c.name) for c in Well.__table__.columns},
         "formation_tops": tops, "zones": zones,
         "curve_summary": curve_summary, "petro_params": petro,
-        "generated_at": datetime.datetime.utcnow().isoformat(),
+        "generated_at": utcnow().isoformat(),
     }
 
 

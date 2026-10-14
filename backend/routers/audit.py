@@ -14,11 +14,15 @@ import json
 import os
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+try:
+    from timeutils import utcnow
+except ImportError:
+    from backend.timeutils import utcnow
 try:
     from audit import (
         compute_audit_chain_report,
@@ -126,7 +130,7 @@ def export_audit_log_verification(
     """Export verification report with SHA256 digest and optional detached HMAC signature."""
     report = compute_audit_chain_report(limit, db)
     payload = {
-        "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "generated_at": utcnow().isoformat() + "Z",
         "report": report,
         "trace": {
             "request_id": request.headers.get("X-Request-ID") or "",

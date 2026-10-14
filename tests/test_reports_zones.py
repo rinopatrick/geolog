@@ -11,7 +11,8 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.main import SessionLocal, Well, LogRun, CurveData, Zone
+from backend.main import SessionLocal
+from backend.models import CurveData, LogRun, Well, Zone
 from backend.main import app
 
 

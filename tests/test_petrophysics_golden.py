@@ -22,7 +22,8 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.main import SessionLocal, Project, Well, LogRun, CurveData, app
+from backend.main import SessionLocal, app
+from backend.models import CurveData, LogRun, Project, Well
 
 client = TestClient(app)
 HEADERS = {"X-User-Role": "interpreter"}

@@ -20,6 +20,10 @@ import datetime
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
+try:
+    from timeutils import utcnow
+except ImportError:
+    from backend.timeutils import utcnow
 
 JOB_EXECUTOR = ThreadPoolExecutor(max_workers=2)
 JOBS: dict[str, dict] = {}
@@ -27,7 +31,7 @@ JOBS_LOCK = Lock()
 
 
 def utc_now_iso() -> str:
-    return datetime.datetime.utcnow().isoformat() + "Z"
+    return utcnow().isoformat() + "Z"
 
 
 def create_job(job_type: str) -> str:

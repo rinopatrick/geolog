@@ -19,12 +19,16 @@ import urllib.request
 from typing import Any, Literal
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
+try:
+    from timeutils import utcnow
+except ImportError:
+    from backend.timeutils import utcnow
 try:
     from audit import resolve_audit_export_signing_key, verify_audit_export_signature_payload
     from database import get_db
@@ -382,14 +386,14 @@ def _attest_security_evidence_payload(report: dict[str, Any] | None, signature_o
             "ok": False,
             "reason": "report object is required",
             "reason_code": "MISSING_REPORT",
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "timestamp": utcnow().isoformat() + "Z",
         }
     if not signature_obj:
         return {
             "ok": False,
             "reason": "signature object is required",
             "reason_code": "MISSING_SIGNATURE",
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "timestamp": utcnow().isoformat() + "Z",
         }
 
     report_bytes = json.dumps(report, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -411,7 +415,7 @@ def _attest_security_evidence_payload(report: dict[str, Any] | None, signature_o
             "signature_alg": signature_alg,
             "signature_kid": signature_kid,
             "retention_days": retention_days,
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "timestamp": utcnow().isoformat() + "Z",
         }
 
     if signature_alg == "hmac-sha256":
@@ -424,7 +428,7 @@ def _attest_security_evidence_payload(report: dict[str, Any] | None, signature_o
                 "signature_alg": signature_alg,
                 "signature_kid": signature_kid,
                 "retention_days": retention_days,
-                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+                "timestamp": utcnow().isoformat() + "Z",
             }
         key = (os.getenv("BACKUP_DRILL_SIGNING_KEY") or "").strip()
         if not key:
@@ -436,7 +440,7 @@ def _attest_security_evidence_payload(report: dict[str, Any] | None, signature_o
                 "signature_alg": signature_alg,
                 "signature_kid": signature_kid,
                 "retention_days": retention_days,
-                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+                "timestamp": utcnow().isoformat() + "Z",
             }
         expected = hmac.new(key.encode("utf-8"), report_sha.encode("utf-8"), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected, sig):
@@ -448,7 +452,7 @@ def _attest_security_evidence_payload(report: dict[str, Any] | None, signature_o
                 "signature_alg": signature_alg,
                 "signature_kid": signature_kid,
                 "retention_days": retention_days,
-                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+                "timestamp": utcnow().isoformat() + "Z",
             }
 
     return {
@@ -459,7 +463,7 @@ def _attest_security_evidence_payload(report: dict[str, Any] | None, signature_o
         "signature_alg": signature_alg,
         "signature_kid": signature_kid,
         "retention_days": retention_days,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
 
@@ -586,7 +590,7 @@ def ops_metrics(_role: str = Depends(require_viewer)):
             "latency_ms_avg": round(avg, 2),
             "latency_samples": count,
             "recent_events_size": len(OBS_METRICS.get("recent_events", [])) if isinstance(OBS_METRICS.get("recent_events"), list) else 0,
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "timestamp": utcnow().isoformat() + "Z",
         }
 
 
@@ -648,7 +652,7 @@ def ops_metrics_recent(
         "limit": limit,
         "status_min": status_min,
         "path_contains": path_contains,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
 
@@ -733,7 +737,7 @@ def ops_slo_status(_role: str = Depends(require_viewer)):
             "latency_p95_ok": latency_p95_ok,
             "error_rate_ok": error_ok,
         },
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
 
@@ -816,7 +820,7 @@ def ops_alerts(_role: str = Depends(require_viewer)):
         "severity_counts": severity_counts,
         "code_counts": code_counts,
         "highest_severity": highest_severity,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
 
@@ -880,7 +884,7 @@ def ops_alert_rules(_role: str = Depends(require_viewer)):
                 "env_key": "OPS_SLO_ERROR_RATE",
             },
         ],
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
 
@@ -973,7 +977,7 @@ def ops_health(db: Session = Depends(get_db), _role: str = Depends(require_viewe
         "slo_ok": bool(slo.get("ok", False)),
         "alerts_ok": bool(alerts.get("ok", False)),
         "alert_count": int(alerts.get("count", 0)),
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
 
@@ -993,7 +997,7 @@ def ops_observability_status(_role: str = Depends(require_viewer)):
         "recent_events_include_request_id": has_request_id,
         "recent_events_include_trace_id": has_trace_id,
         "otel_enabled": otel_enabled,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
 
@@ -1009,7 +1013,7 @@ def ops_otel_status(_role: str = Depends(require_viewer)):
         "exporter_otlp_endpoint_set": bool(endpoint),
         "service_name": service_name,
         "resource_attributes_set": bool(resource_attrs),
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
 
@@ -1063,7 +1067,7 @@ def ops_evidence_status(
         "trace_backend_reachable": trace_backend_reachable,
         "probes_enabled": bool(probe),
         "ready_for_phase2_acceptance": ready,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
 
@@ -1096,7 +1100,7 @@ def ops_security_posture_status(_role: str = Depends(require_viewer)):
         "backup_drill_script_present": backup_drill_script_present,
         "branch_protection_checklist_present": branch_protection_checklist_present,
         "security_evidence_template_present": security_evidence_template_present,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
 
@@ -1187,7 +1191,7 @@ def ops_security_evidence_status(_role: str = Depends(require_viewer)):
         "signature_kid": signature_kid,
         "hmac_signature_valid": hmac_signature_valid,
         "retention_days": retention_days,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
 
@@ -1216,7 +1220,7 @@ def ops_security_evidence_manifest(sign: bool = False, kid: str | None = None, _
         return {
             "ok": False,
             "artifact_dir": artifact_dir,
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "timestamp": utcnow().isoformat() + "Z",
         }
 
     with open(report_path, "rb") as f:
@@ -1248,7 +1252,7 @@ def ops_security_evidence_manifest(sign: bool = False, kid: str | None = None, _
         "signature": None,
         "signature_alg": None,
         "signature_kid": None,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
     if sign:
@@ -1384,7 +1388,7 @@ def ops_summary(db: Session = Depends(get_db), _role: str = Depends(require_view
             "current": dict(slo.get("current", {})),
             "checks": dict(slo.get("checks", {})),
         },
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
 
@@ -1456,7 +1460,7 @@ def ops_contracts(
         "signature": None,
         "signature_alg": None,
         "signature_kid": None,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
     if sign:
@@ -1584,7 +1588,7 @@ def ops_security_evidence_freshness(max_age_seconds: int = 86400, _role: str = D
             "max_age_seconds": max_age_seconds,
             "stale": True,
             "reason_code": "EVIDENCE_MISSING",
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "timestamp": utcnow().isoformat() + "Z",
         }
 
     try:
@@ -1602,7 +1606,7 @@ def ops_security_evidence_freshness(max_age_seconds: int = 86400, _role: str = D
         "max_age_seconds": max_age_seconds,
         "stale": stale,
         "reason_code": "STALE" if stale else "FRESH",
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
 
@@ -1699,7 +1703,7 @@ def ops_security_evidence_gate(
         "retention_days": retention_days if isinstance(retention_days, int) else None,
         "min_retention_days": min_retention_days,
         "max_age_seconds": int(freshness.get("max_age_seconds") or max_age_seconds),
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }
 
 
@@ -1850,5 +1854,5 @@ def ops_runbook(_role: str = Depends(require_viewer)):
                 ],
             },
         },
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat() + "Z",
     }

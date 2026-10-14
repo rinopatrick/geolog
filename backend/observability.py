@@ -17,6 +17,10 @@ from __future__ import annotations
 import datetime
 from threading import Lock
 from typing import Any
+try:
+    from timeutils import utcnow
+except ImportError:
+    from backend.timeutils import utcnow
 
 OBS_METRICS_LOCK = Lock()
 OBS_METRICS: dict[str, Any] = {
@@ -54,7 +58,7 @@ def record_request(
         recent = OBS_METRICS.get("recent_events")
         if isinstance(recent, list):
             recent.append({
-                "ts": datetime.datetime.utcnow().isoformat() + "Z",
+                "ts": utcnow().isoformat() + "Z",
                 "request_id": request_id,
                 "trace_id": trace_id,
                 "method": method,

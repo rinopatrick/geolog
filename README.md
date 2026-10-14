@@ -277,16 +277,29 @@ curl -s -X POST "http://localhost:8000/api/audit-log/verify/signature" \
 ```text
 geolog-app/
 ├── backend/
-│   ├── __init__.py
-│   ├── database.py
-│   ├── las_parser.py
-│   ├── main.py
-│   ├── models.py
-│   ├── schemas.py
-│   ├── seed.py
+│   ├── main.py            app assembly, middleware, health
+│   ├── database.py        engine and session factory
+│   ├── models.py          SQLAlchemy models
+│   ├── schema.py          Alembic runner + drift verification
+│   ├── migrations/        Alembic revisions
+│   ├── security.py        auth modes and role resolution
+│   ├── deps.py            SafeJSONResponse, role dependencies
+│   ├── validation.py      request-body validation helpers
+│   ├── audit.py           audit chain + evidence signing
+│   ├── observability.py   request counters
+│   ├── jobs.py            in-process background job registry
+│   ├── well_state.py      locks, snapshots, template signatures
+│   ├── curve_corrections.py   density-porosity + bad-hole QC
+│   ├── curve_plausibility.py  stored-curve sanity checks
+│   ├── las_parser.py      LAS 2.0 parser
+│   ├── dlis_lis_parser.py DLIS/LIS parsers
+│   ├── version.py         single-source version
+│   ├── seed.py            demo data seeding
 │   ├── demo.las
 │   ├── requirements.txt
-│   └── routers/
+│   └── routers/           wells, log_runs, projects, audit, ops, qc,
+│                          correlation, zonation, units, templates,
+│                          reports, users
 ├── frontend/
 │   ├── index.html
 │   ├── assets/

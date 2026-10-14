@@ -10,7 +10,8 @@ if str(ROOT) not in sys.path:
 
 from backend import main as main_mod
 from backend.main import app
-from backend.main import SessionLocal, AuditLog
+from backend.main import SessionLocal
+from backend.models import AuditLog
 # The security-evidence gate helpers live with the /api/ops routes now.
 from backend.routers.ops import _compute_gate_invariants
 
@@ -532,29 +533,30 @@ def test_audit_verify_export_contains_report_shape():
     assert data.get("signature_detached") is True
 
 
-def test_audit_verify_export_hmac_signature():
+def test_audit_verify_export_hmac_signature(monkeypatch):
+    """Exercises the legacy single-key path.
+
+    The rotation variables take priority over AUDIT_EXPORT_HMAC_KEY, so they have
+    to be cleared for this test to be about the legacy path at all. Without that
+    the assertion failed whenever CI set them — which it does.
+    """
     import hashlib
     import hmac
     import json
-    import os
 
-    old = os.environ.get("AUDIT_EXPORT_HMAC_KEY")
-    os.environ["AUDIT_EXPORT_HMAC_KEY"] = "unit-test-key"
-    try:
-        r = client.get("/api/audit-log/verify/export?sign=true", headers=_h("viewer"))
-        assert r.status_code == 200
-        data = r.json()
-        payload = data["payload"]
-        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        expected = hmac.new(b"unit-test-key", canonical.encode("utf-8"), hashlib.sha256).hexdigest()
-        assert data.get("signature_alg") == "hmac-sha256"
-        assert data.get("signature_detached") is True
-        assert data.get("signature") == expected
-    finally:
-        if old is None:
-            os.environ.pop("AUDIT_EXPORT_HMAC_KEY", None)
-        else:
-            os.environ["AUDIT_EXPORT_HMAC_KEY"] = old
+    monkeypatch.delenv("AUDIT_EXPORT_HMAC_KEYS_JSON", raising=False)
+    monkeypatch.delenv("AUDIT_EXPORT_HMAC_ACTIVE_KID", raising=False)
+    monkeypatch.setenv("AUDIT_EXPORT_HMAC_KEY", "unit-test-key")
+
+    r = client.get("/api/audit-log/verify/export?sign=true", headers=_h("viewer"))
+    assert r.status_code == 200
+    data = r.json()
+    payload = data["payload"]
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    expected = hmac.new(b"unit-test-key", canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+    assert data.get("signature_alg") == "hmac-sha256"
+    assert data.get("signature_detached") is True
+    assert data.get("signature") == expected
 
 
 def test_audit_verify_export_hmac_missing_key_fails():

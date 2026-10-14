@@ -1,100 +1,111 @@
 """GeoLog — Oil & Gas Well Log Viewer."""
+import asyncio
+import csv
+import datetime
+import hashlib
+import io
+import json
 import logging
+import math
+import os
+import time
 import traceback
-from fastapi import FastAPI, Request, UploadFile, File, Depends, HTTPException, Header, WebSocket, WebSocketDisconnect, Query
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import StreamingResponse
+import urllib.error
+import uuid
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
+from typing import Any, Literal
+
+import numpy as np
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-import numpy as np
-import json
-import os
-import math
-from typing import Any, Literal
-from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
 
 try:
-    from curve_corrections import (
-        DEFAULT_DRHO_LIMIT,
-        DEFAULT_WASHOUT_INCHES,
-        apply_mask,
-        bad_hole_mask,
-        density_porosity,
-        qc_summary,
+    from timeutils import utcnow
+except ImportError:
+    from backend.timeutils import utcnow
+try:
+    from audit import append_audit_entry, log_audit as _log_audit
+    from deps import (
+        SafeJSONResponse,
+        require_admin,
+        require_interpreter,
+        require_role,
+        require_viewer,
     )
-    from deps import SafeJSONResponse, require_admin, require_interpreter, require_role, require_viewer
-    from schema import ensure_schema
-    from version import __version__
     from jobs import (
         JOB_EXECUTOR,
-        JOBS,
-        JOBS_LOCK,
         create_job as _create_job,
         get_job as _get_job,
         list_jobs as _list_jobs,
         update_job as _update_job,
         utc_now_iso as _utc_now_iso,
-    )
-    from audit import (
-        log_audit as _log_audit,
     )
     from observability import record_request
+    from schema import ensure_schema
+    from version import __version__
     from well_state import get_well_lock as _get_well_lock
-    from routers.qc import router as qc_router
-    from routers.correlation import router as corr_router
-    from routers.zonation import router as zonation_router
-    from routers.units import router as units_router
-    from routers.templates import router as templates_router
-    from routers.reports import router as reports_router
-    from routers.users import router as users_router
-    from routers.log_runs import router as log_runs_router
-    from routers.projects import router as projects_router
     from routers.audit import router as audit_router
+    from routers.correlation import router as corr_router
+    from routers.log_runs import router as log_runs_router
     from routers.ops import router as ops_router
+    from routers.projects import router as projects_router
+    from routers.qc import router as qc_router
+    from routers.reports import router as reports_router
+    from routers.templates import router as templates_router
+    from routers.units import router as units_router
+    from routers.users import router as users_router
     from routers.wells import router as wells_router
+    from routers.zonation import router as zonation_router
 except ImportError:
-    from backend.curve_corrections import (
-        DEFAULT_DRHO_LIMIT,
-        DEFAULT_WASHOUT_INCHES,
-        apply_mask,
-        bad_hole_mask,
-        density_porosity,
-        qc_summary,
+    from backend.audit import append_audit_entry, log_audit as _log_audit
+    from backend.deps import (
+        SafeJSONResponse,
+        require_admin,
+        require_interpreter,
+        require_role,
+        require_viewer,
     )
-    from backend.deps import SafeJSONResponse, require_admin, require_interpreter, require_role, require_viewer
-    from backend.schema import ensure_schema
-    from backend.version import __version__
     from backend.jobs import (
         JOB_EXECUTOR,
-        JOBS,
-        JOBS_LOCK,
         create_job as _create_job,
         get_job as _get_job,
         list_jobs as _list_jobs,
         update_job as _update_job,
         utc_now_iso as _utc_now_iso,
     )
-    from backend.audit import (
-        log_audit as _log_audit,
-    )
     from backend.observability import record_request
+    from backend.schema import ensure_schema
+    from backend.version import __version__
     from backend.well_state import get_well_lock as _get_well_lock
-    from backend.routers.qc import router as qc_router
-    from backend.routers.correlation import router as corr_router
-    from backend.routers.zonation import router as zonation_router
-    from backend.routers.units import router as units_router
-    from backend.routers.templates import router as templates_router
-    from backend.routers.reports import router as reports_router
-    from backend.routers.users import router as users_router
-    from backend.routers.log_runs import router as log_runs_router
-    from backend.routers.projects import router as projects_router
     from backend.routers.audit import router as audit_router
+    from backend.routers.correlation import router as corr_router
+    from backend.routers.log_runs import router as log_runs_router
     from backend.routers.ops import router as ops_router
+    from backend.routers.projects import router as projects_router
+    from backend.routers.qc import router as qc_router
+    from backend.routers.reports import router as reports_router
+    from backend.routers.templates import router as templates_router
+    from backend.routers.units import router as units_router
+    from backend.routers.users import router as users_router
     from backend.routers.wells import router as wells_router
+    from backend.routers.zonation import router as zonation_router
+
 
 
 import datetime
@@ -120,17 +131,53 @@ import urllib.error
 from email.utils import format_datetime, parsedate_to_datetime
 
 try:
-    from database import engine, Base, get_db, SessionLocal
-    from models import Project, Well, LogRun, CurveData, FormationTop, Annotation, DSTTest, RFTPoint, CompletionData, ProductionData, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
-    from las_parser import LASParser, CURVE_TRACKS
-    from dlis_lis_parser import parse_dlis_content, parse_lis_content
-    from security import AuthConfig, current_env, resolve_auth_context, require_min_role, role_from_request, ROLE_RANK
+    from database import Base, SessionLocal, engine, get_db
+    from las_parser import CURVE_TRACKS, LASParser
+    from models import (
+        Annotation,
+        AuditLog,
+        CompletionData,
+        CorrelationMarker,
+        CorrelationProfile,
+        CurveData,
+        FormationTop,
+        LogRun,
+        Project,
+        User,
+        Well,
+    )
+    from security import (
+        ROLE_RANK,
+        AuthConfig,
+        current_env,
+        require_min_role,
+        resolve_auth_context,
+        role_from_request,
+    )
 except ImportError:
-    from backend.database import engine, Base, get_db, SessionLocal
-    from backend.models import Project, Well, LogRun, CurveData, FormationTop, Annotation, DSTTest, RFTPoint, CompletionData, ProductionData, Zone, CorrelationMarker, CorrelationProfile, PetroParams, LogRunDepthShift, CurveAlias, DeviationSurvey, AuditLog, User
-    from backend.las_parser import LASParser, CURVE_TRACKS
-    from backend.dlis_lis_parser import parse_dlis_content, parse_lis_content
-    from backend.security import AuthConfig, current_env, resolve_auth_context, require_min_role, role_from_request, ROLE_RANK
+    from backend.database import Base, SessionLocal, engine, get_db
+    from backend.las_parser import CURVE_TRACKS, LASParser
+    from backend.models import (
+        Annotation,
+        AuditLog,
+        CompletionData,
+        CorrelationMarker,
+        CorrelationProfile,
+        CurveData,
+        FormationTop,
+        LogRun,
+        Project,
+        User,
+        Well,
+    )
+    from backend.security import (
+        ROLE_RANK,
+        AuthConfig,
+        current_env,
+        require_min_role,
+        resolve_auth_context,
+        role_from_request,
+    )
 
 # Create tables
 # Configure logging
@@ -398,40 +445,24 @@ class ImmutableAuditTrailMiddleware(BaseHTTPMiddleware):
 
         db = SessionLocal()
         try:
-            prev = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
-            prev_hash = getattr(prev, "entry_hash", "") if prev else ""
-            canonical = json.dumps({
-                "request_id": request_id,
-                "subject": subject,
-                "role": role,
-                "method": method,
-                "path": path,
-                "status": int(response.status_code),
-                "payload_hash": payload_hash,
-                "prev_hash": prev_hash,
-                "well_id": well_id,
-                "project_id": project_id,
-            }, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-            entry_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-            db.add(AuditLog(
-                project_id=project_id,
-                well_id=well_id,
+            # Shared with log_audit(), so the two writers cannot compute the
+            # chain differently. The read-previous-hash and insert happen under
+            # a lock inside append_audit_entry.
+            append_audit_entry(
+                db,
                 action=f"write:{method.lower()}",
                 entity_type="api",
+                well_id=well_id,
+                project_id=project_id,
                 details=path,
-                user_label="local",
                 request_id=request_id,
-                auth_subject=subject,
-                auth_role=role,
-                route_path=path,
+                subject=subject,
+                role=role,
                 method=method,
+                path=path,
                 status_code=int(response.status_code),
                 payload_hash=payload_hash,
-                prev_hash=prev_hash,
-                entry_hash=entry_hash,
-            ))
-            db.commit()
+            )
         except Exception:
             db.rollback()
         finally:
@@ -667,17 +698,33 @@ def replace_correlation_markers(data: dict, db: Session = Depends(get_db)):
     well_a_id = int(well_a_id_raw)
     well_b_id = int(well_b_id_raw)
     markers = data.get("markers", [])
+    # Validate every marker before touching the database. The delete below runs
+    # in the same transaction, so a bad marker would have rolled back — but
+    # validating first means the client gets a 400 naming the field instead of a
+    # 500, and no partially-applied replacement can ever be committed.
+    prepared = []
+    for index, m in enumerate(markers):
+        try:
+            a_depth = float(m.get("aDepth"))
+            b_depth = float(m.get("bDepth"))
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"markers[{index}] requires numeric aDepth and bDepth",
+            )
+        prepared.append((a_depth, b_depth, str(m.get("label", ""))))
+
     db.query(CorrelationMarker).filter(
         ((CorrelationMarker.well_a_id == well_a_id) & (CorrelationMarker.well_b_id == well_b_id)) |
         ((CorrelationMarker.well_a_id == well_b_id) & (CorrelationMarker.well_b_id == well_a_id))
     ).delete()
-    for m in markers:
+    for a_depth, b_depth, label in prepared:
         db.add(CorrelationMarker(
             well_a_id=well_a_id,
             well_b_id=well_b_id,
-            a_depth=float(m.get("aDepth")),
-            b_depth=float(m.get("bDepth")),
-            label=str(m.get("label", "")),
+            a_depth=a_depth,
+            b_depth=b_depth,
+            label=label,
         ))
     db.commit()
     return {"status": "ok"}
@@ -1216,7 +1263,7 @@ def regression_smoke(db: Session = Depends(get_db), _role: str = Depends(require
     checks.append({"name": "curve_data_exist", "ok": db.query(CurveData).count() > 0})
     checks.append({"name": "users_table_access", "ok": db.query(User).count() >= 0})
     ok = all(c["ok"] for c in checks)
-    return {"ok": ok, "checks": checks, "timestamp": datetime.datetime.utcnow().isoformat() + "Z"}
+    return {"ok": ok, "checks": checks, "timestamp": utcnow().isoformat() + "Z"}
 
 
 # (deduplicated) auto-pick-tops endpoint defined earlier in file

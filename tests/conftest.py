@@ -37,7 +37,8 @@ def make_well():
     """
     import numpy as np
 
-    from backend.main import CurveData, LogRun, Project, SessionLocal, Well
+    from backend.main import SessionLocal
+    from backend.models import CurveData, LogRun, Project, Well
 
     created: list[int] = []
 

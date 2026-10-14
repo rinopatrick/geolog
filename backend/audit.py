@@ -4,6 +4,11 @@
 are used by the /api/audit-log and /api/ops routes, so all of them live here
 rather than in either caller.
 
+Every row in `audit_log` must be chained: it stores the previous row's
+`entry_hash` and its own. There is exactly one place that appends a row
+(`append_audit_entry`), because a second, unchained writer silently breaks the
+chain — which is what used to happen; see the note on `log_audit`.
+
 The signing keys come from the environment (AUDIT_EXPORT_HMAC_KEYS_JSON with
 AUDIT_EXPORT_HMAC_ACTIVE_KID for rotation, or the legacy single
 AUDIT_EXPORT_HMAC_KEY). Nothing here issues tokens; it signs and verifies the
@@ -16,6 +21,8 @@ import hashlib
 import hmac
 import json
 import os
+from threading import Lock
+from typing import Optional
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -25,15 +32,127 @@ try:
 except ImportError:
     from backend.models import AuditLog
 
+# Serialises the read-previous-hash / insert pair. Without it two concurrent
+# writes can both chain onto the same predecessor, producing two rows claiming
+# the same prev_hash and a chain that fails its own verification.
+_CHAIN_LOCK = Lock()
+
+
+def _canonical_payload(
+    *,
+    request_id: str,
+    subject: str,
+    role: str,
+    method: str,
+    path: str,
+    status_code: int,
+    payload_hash: str,
+    prev_hash: str,
+    well_id: Optional[int],
+    project_id: Optional[int],
+) -> str:
+    """The exact bytes the chain hash is computed over.
+
+    `compute_audit_chain_report` rebuilds this same object when verifying, so the
+    field set and the JSON options must match it exactly.
+    """
+    return json.dumps({
+        "request_id": request_id,
+        "subject": subject,
+        "role": role,
+        "method": (method or "").upper(),
+        "path": path,
+        "status": int(status_code),
+        "payload_hash": payload_hash,
+        "prev_hash": prev_hash,
+        "well_id": well_id,
+        "project_id": project_id,
+    }, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def append_audit_entry(
+    db: Session,
+    *,
+    action: str,
+    entity_type: str = "",
+    entity_id: Optional[int] = None,
+    well_id: Optional[int] = None,
+    project_id: Optional[int] = None,
+    details: str = "",
+    request_id: str = "",
+    subject: str = "",
+    role: str = "viewer",
+    method: str = "",
+    path: str = "",
+    status_code: Optional[int] = None,
+    payload_hash: str = "",
+    commit: bool = True,
+) -> str:
+    """Append one chained entry and return its entry_hash.
+
+    The only writer of `audit_log`. Reads the previous entry's hash and inserts
+    under a lock, so the chain cannot fork.
+    """
+    with _CHAIN_LOCK:
+        previous = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
+        prev_hash = (getattr(previous, "entry_hash", "") or "") if previous else ""
+
+        canonical = _canonical_payload(
+            request_id=request_id or "",
+            subject=subject or "",
+            role=role or "viewer",
+            method=method or "",
+            path=path or "",
+            status_code=status_code if status_code is not None else 0,
+            payload_hash=payload_hash or "",
+            prev_hash=prev_hash,
+            well_id=well_id,
+            project_id=project_id,
+        )
+        entry_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+        db.add(AuditLog(
+            project_id=project_id,
+            well_id=well_id,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            details=details,
+            user_label="local",
+            request_id=request_id or "",
+            auth_subject=subject or "",
+            auth_role=role or "viewer",
+            route_path=path or "",
+            method=method or "",
+            status_code=status_code,
+            payload_hash=payload_hash or "",
+            prev_hash=prev_hash,
+            entry_hash=entry_hash,
+        ))
+        if commit:
+            db.commit()
+        return entry_hash
+
 
 def log_audit(db: Session, action: str, entity_type: str = "", entity_id: int = None,
-               well_id: int = None, project_id: int = None, details: str = ""):
-    """Write an audit trail entry."""
-    db.add(AuditLog(
-        project_id=project_id, well_id=well_id, action=action,
-        entity_type=entity_type, entity_id=entity_id, details=details
-    ))
-    db.commit()
+              well_id: int = None, project_id: int = None, details: str = ""):
+    """Write an audit trail entry for an application-level action.
+
+    This used to insert a bare AuditLog row with no prev_hash or entry_hash. That
+    left the row failing verification and, worse, the next request-logged row
+    chained onto an empty hash — so every route calling this broke the chain.
+    Measured: POST /api/wells/1/template-lock produced two chain issues. It now
+    uses the same chained append as the middleware.
+    """
+    return append_audit_entry(
+        db,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        well_id=well_id,
+        project_id=project_id,
+        details=details,
+    )
 
 
 def compute_audit_chain_report(limit: int, db: Session):

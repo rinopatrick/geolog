@@ -24,7 +24,6 @@ from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.graphics.shapes import Drawing
 from reportlab.graphics.charts.barcharts import VerticalBarChart
-from reportlab.graphics import renderPDF
 from starlette.responses import StreamingResponse
 
 router = APIRouter(prefix="/api/wells/{wid}", tags=["reports"])

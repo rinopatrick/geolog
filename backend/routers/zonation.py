@@ -5,10 +5,13 @@ from sqlalchemy.orm import Session
 import numpy as np
 import io
 import csv
-import json
 import math
 import datetime
 
+try:
+    from timeutils import utcnow
+except ImportError:
+    from backend.timeutils import utcnow
 try:
     from database import get_db
     from models import Well, LogRun, CurveData, FormationTop, Zone, PetroParams
@@ -384,7 +387,7 @@ def zone_report_pdf(wid: int, db: Session = Depends(get_db)):
     elements.append(Paragraph(f"Zone Report — {well.name if well else f'Well {wid}'}", styles["Title"]))
     if well and well.uwi:
         elements.append(Paragraph(f"UWI: {well.uwi}", styles["Normal"]))
-    elements.append(Paragraph(f"Generated: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}", styles["Normal"]))
+    elements.append(Paragraph(f"Generated: {utcnow().strftime('%Y-%m-%d %H:%M UTC')}", styles["Normal"]))
     elements.append(Spacer(1, 10*mm))
 
     # Zone table

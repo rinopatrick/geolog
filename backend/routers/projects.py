@@ -18,6 +18,7 @@ from starlette.responses import StreamingResponse
 try:
     from database import SessionLocal, get_db
     from deps import require_interpreter
+    from validation import optional_str, require_str
     from jobs import (
         JOB_EXECUTOR,
         create_job as _create_job,
@@ -36,6 +37,7 @@ try:
 except ImportError:
     from backend.database import SessionLocal, get_db
     from backend.deps import require_interpreter
+    from backend.validation import optional_str, require_str
     from backend.jobs import (
         JOB_EXECUTOR,
         create_job as _create_job,
@@ -68,7 +70,15 @@ def list_projects(db: Session = Depends(get_db)):
 
 @router.post("/", status_code=201)
 def create_project(data: dict, db: Session = Depends(get_db)):
-    p = Project(**data)
+    # Was Project(**data): mass assignment, so a client could choose the primary
+    # key and any unknown key raised TypeError -> 500.
+    p = Project(
+        name=require_str(data, "name"),
+        description=optional_str(data, "description"),
+        field_name=optional_str(data, "field_name"),
+        operator=optional_str(data, "operator"),
+        country=optional_str(data, "country"),
+    )
     db.add(p)
     db.commit()
     db.refresh(p)

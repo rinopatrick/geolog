@@ -7,10 +7,10 @@ import os
 
 try:
     from database import get_db
-    from models import Well, LogRun, PetroParams
+    from models import Well, PetroParams
 except ImportError:
     from backend.database import get_db
-    from backend.models import Well, LogRun, PetroParams
+    from backend.models import Well, PetroParams
 
 router = APIRouter(prefix="/api", tags=["templates"])
 LOCK_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "artifacts", "locks.json")

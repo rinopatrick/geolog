@@ -1,11 +1,15 @@
 """Database models for well log viewer."""
-import datetime
 from sqlalchemy import Column, Integer, Float, String, Text, Date, DateTime, ForeignKey, LargeBinary
 from sqlalchemy.orm import relationship
 try:
     from database import Base
 except ImportError:
     from backend.database import Base
+
+try:
+    from timeutils import utcnow
+except ImportError:
+    from backend.timeutils import utcnow
 
 
 class Project(Base):
@@ -17,8 +21,8 @@ class Project(Base):
     field_name = Column(String(200), default="")
     operator = Column(String(200), default="")
     country = Column(String(100), default="")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     wells = relationship("Well", back_populates="project", cascade="all, delete-orphan")
 
@@ -39,8 +43,8 @@ class Well(Base):
     operator = Column(String(200), default="")
     field_name = Column(String(200), default="")
     spud_date = Column(String(50), default="")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     project = relationship("Project", back_populates="wells")
     log_runs = relationship("LogRun", back_populates="well", cascade="all, delete-orphan")
@@ -66,7 +70,7 @@ class LogRun(Base):
     num_points = Column(Integer, default=0)
     curves_json = Column(Text, default="[]")  # JSON array of curve definitions
     parameters_json = Column(Text, default="[]")
-    uploaded_at = Column(DateTime, default=datetime.datetime.utcnow)
+    uploaded_at = Column(DateTime, default=utcnow)
 
     well = relationship("Well", back_populates="log_runs")
     curve_data = relationship("CurveData", back_populates="log_run", cascade="all, delete-orphan")
@@ -102,7 +106,7 @@ class FormationTop(Base):
     color = Column(String(20), default="#888888")
     lithology = Column(String(100), default="")
     notes = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     well = relationship("Well", back_populates="formation_tops")
 
@@ -116,7 +120,7 @@ class Annotation(Base):
     text = Column(Text, nullable=False)
     annotation_type = Column(String(50), default="note")  # note, flag, zone
     color = Column(String(20), default="#f39c12")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class DSTTest(Base):
@@ -137,7 +141,7 @@ class DSTTest(Base):
     skin = Column(Float, nullable=True)
     result = Column(String(200), default="")
     notes = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     well = relationship("Well", back_populates="dst_tests")
 
@@ -153,7 +157,7 @@ class RFTPoint(Base):
     fluid_type = Column(String(50), default="unknown")
     sample_recovered = Column(String(100), default="")
     notes = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     well = relationship("Well", back_populates="rft_points")
 
@@ -169,7 +173,7 @@ class CompletionData(Base):
     size = Column(String(100), default="")
     description = Column(Text, default="")
     notes = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     well = relationship("Well", back_populates="completion_data")
 
@@ -192,7 +196,7 @@ class ProductionData(Base):
     cumulative_gas = Column(Float, nullable=True)
     cumulative_water = Column(Float, nullable=True)
     notes = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     well = relationship("Well")
 
@@ -207,8 +211,8 @@ class Zone(Base):
     bottom_depth = Column(Float, nullable=False)
     color = Column(String(20), default="#1f6feb")
     sort_order = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     well = relationship("Well", back_populates="zones")
 
@@ -222,7 +226,7 @@ class CorrelationMarker(Base):
     a_depth = Column(Float, nullable=False)
     b_depth = Column(Float, nullable=False)
     label = Column(String(100), default="")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class CorrelationProfile(Base):
@@ -235,8 +239,8 @@ class CorrelationProfile(Base):
     depth_shift = Column(Float, default=0.0)
     stretch = Column(Float, default=1.0)
     snap_to_tops = Column(Integer, default=1)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class PetroParams(Base):
@@ -254,8 +258,8 @@ class PetroParams(Base):
     phie_cutoff = Column(Float, default=0.10)
     sw_cutoff = Column(Float, default=0.60)
     template = Column(String(50), default="custom")  # sandstone / carbonate / shaly_sand / custom
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     well = relationship("Well")
 
@@ -268,8 +272,8 @@ class LogRunDepthShift(Base):
     shift = Column(Float, default=0.0)
     stretch = Column(Float, default=1.0)
     notes = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     log_run = relationship("LogRun")
 
@@ -281,7 +285,7 @@ class CurveAlias(Base):
     well_id = Column(Integer, ForeignKey("wells.id"), nullable=False)
     original_mnemonic = Column(String(50), nullable=False)
     alias_mnemonic = Column(String(50), nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     well = relationship("Well")
 
@@ -297,7 +301,7 @@ class DeviationSurvey(Base):
     tvd = Column(Float, nullable=True)
     northing = Column(Float, nullable=True)
     easting = Column(Float, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     well = relationship("Well")
 
@@ -324,7 +328,7 @@ class AuditLog(Base):
     payload_hash = Column(String(64), default="")
     prev_hash = Column(String(64), default="")
     entry_hash = Column(String(64), default="")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class User(Base):
@@ -336,4 +340,4 @@ class User(Base):
     display_name = Column(String(200), default="")
     role = Column(String(50), default="interpreter")  # admin, interpreter, viewer
     token = Column(String(200), default="")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
