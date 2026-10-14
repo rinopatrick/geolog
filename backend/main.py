@@ -18,6 +18,14 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 try:
+    from curve_corrections import (
+        DEFAULT_DRHO_LIMIT,
+        DEFAULT_WASHOUT_INCHES,
+        apply_mask,
+        bad_hole_mask,
+        density_porosity,
+        qc_summary,
+    )
     from deps import SafeJSONResponse, require_admin, require_interpreter, require_role, require_viewer
     from routers.qc import router as qc_router
     from routers.correlation import router as corr_router
@@ -27,6 +35,14 @@ try:
     from routers.reports import router as reports_router
     from routers.users import router as users_router
 except ImportError:
+    from backend.curve_corrections import (
+        DEFAULT_DRHO_LIMIT,
+        DEFAULT_WASHOUT_INCHES,
+        apply_mask,
+        bad_hole_mask,
+        density_porosity,
+        qc_summary,
+    )
     from backend.deps import SafeJSONResponse, require_admin, require_interpreter, require_role, require_viewer
     from backend.routers.qc import router as qc_router
     from backend.routers.correlation import router as corr_router
@@ -4384,7 +4400,7 @@ def compute_permeability(wid: int, data: dict, db: Session = Depends(get_db)):
         rho_arr = np.frombuffer(rho_cd.data_binary, dtype=np.float64).copy()
         rho_ma = grain_density
         rho_f = 1.0
-        phie = np.clip((rho_ma - rho_arr) / max(1e-9, (rho_ma - rho_f)), 0.0, 0.6)
+        phie = density_porosity(rho_arr, rho_ma, rho_f, lo=0.0, hi=0.6)
         phie[np.isnan(rho_arr)] = np.nan
 
     # Sw / Swir handling
@@ -4679,7 +4695,7 @@ def moveable_oil_index(wid: int, data: dict, db: Session = Depends(get_db)):
         rhob_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == "RHOB").first()
         if rhob_cd:
             rhob_arr = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy()
-            phie_arr = np.clip((2.65 - rhob_arr) / (2.65 - 1.0), 0, 1)
+            phie_arr = density_porosity(rhob_arr, lo=0.0, hi=1.0)
             phie_arr[rhob_arr <= 0] = np.nan
             phie_cd = rhob_cd  # reuse for length reference
             phie_computed = True
@@ -4930,7 +4946,7 @@ def hingle_plot(wid: int, data: dict, db: Session = Depends(get_db)):
     if x_curve in ("RHOB", "RHOZ", "ZDEN", "RHOB_CAL"):
         rho_ma = 2.65
         rho_f = 1.0
-        phi_for_sw = np.clip((rho_ma - x_raw) / (rho_ma - rho_f), 1e-6, 1.0)
+        phi_for_sw = density_porosity(x_raw, rho_ma, rho_f, lo=1e-6, hi=1.0)
     else:
         phi_for_sw = np.clip(x_raw, 1e-6, 1.0)
     phi_eff = np.clip(phi_for_sw, 1e-6, 1.0)
@@ -6187,6 +6203,10 @@ def compute_saturation(wid: int, data: dict, db: Session = Depends(get_db)):
     rhob_cd = _get_curve(["RHOB", "RHOZ", "DEN"])
     dt_cd = _get_curve(["DT", "DTC", "DTCO"])
     dept_cd = _get_curve(["DEPT", "DEPTH"])
+    # Density quality control: the tool's own correction, and hole size vs bit.
+    drho_cd = _get_curve(["DRHO", "DCOR", "HDRA"])
+    cali_cd = _get_curve(["CAL", "CALI", "HCAL", "DCAL"])
+    bs_cd = _get_curve(["BS", "BIT", "BIT_SIZE"])
 
     if not rt_cd:
         raise HTTPException(400, "RT curve required")
@@ -6199,6 +6219,9 @@ def compute_saturation(wid: int, data: dict, db: Session = Depends(get_db)):
     rhob = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy() if rhob_cd else np.full_like(rt, np.nan)
     dt = np.frombuffer(dt_cd.data_binary, dtype=np.float64).copy() if dt_cd else np.full_like(rt, np.nan)
     dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(rt)) * 0.5
+    drho = np.frombuffer(drho_cd.data_binary, dtype=np.float64).copy() if drho_cd else None
+    cali = np.frombuffer(cali_cd.data_binary, dtype=np.float64).copy() if cali_cd else None
+    bit_size = np.frombuffer(bs_cd.data_binary, dtype=np.float64).copy() if bs_cd else None
 
     # Parameters
     model = str(data.get("model", "archie")).lower()
@@ -6217,6 +6240,19 @@ def compute_saturation(wid: int, data: dict, db: Session = Depends(get_db)):
     sw = np.full(n, np.nan)
     vsh_arr = np.full(n, np.nan)
     phie_arr = np.full(n, np.nan)
+
+    # --- Density quality control ---
+    # A rugose or washed-out hole lets the density pad lift off the formation and
+    # the tool applies a large correction to compensate. Those samples must not
+    # be read as porosity. Default is to flag and report only: nulling samples is
+    # a data change, so it is opt-in.
+    drho_limit = float(data.get("drho_limit", DEFAULT_DRHO_LIMIT))
+    washout_inches = float(data.get("washout_inches", DEFAULT_WASHOUT_INCHES))
+    apply_filter = bool(data.get("apply_bad_hole_filter", False))
+    bad_mask, bad_reasons = bad_hole_mask(
+        n, drho=drho, cali=cali, bit_size=bit_size,
+        drho_limit=drho_limit, washout_inches=washout_inches,
+    )
 
     # --- Vclay computation ---
     gr_range = max(gr_shale - gr_clean, 1.0)
@@ -6241,7 +6277,7 @@ def compute_saturation(wid: int, data: dict, db: Session = Depends(get_db)):
         phi_n = nphi[i] if not np.isnan(nphi[i]) else np.nan
         phi_d = np.nan
         if not np.isnan(rhob[i]):
-            phi_d = np.clip((2.65 - rhob[i]) / (2.65 - 1.0), -0.15, 0.60)
+            phi_d = density_porosity(rhob[i], lo=-0.15, hi=0.60)
 
         # Density porosity preferred, neutron-density combo for gas
         if not np.isnan(phi_d) and not np.isnan(phi_n):
@@ -6258,6 +6294,13 @@ def compute_saturation(wid: int, data: dict, db: Session = Depends(get_db)):
             continue
 
         phie_arr[i] = max(0.0, min(0.60, phie_v - vsh_arr[i] * phi_sh))
+
+    # Apply the bad-hole filter after the porosity loop, not by blanking RHOB:
+    # a NaN RHOB would fall through to the neutron fallback branch above and
+    # quietly substitute a different measurement for a sample the caller asked
+    # to exclude. VSH stays, since it comes from GR and not from the density.
+    if apply_filter and bad_mask.any():
+        phie_arr = apply_mask(phie_arr, bad_mask)
 
     # --- Saturation computation ---
     for i in range(n):
@@ -6329,9 +6372,13 @@ def compute_saturation(wid: int, data: dict, db: Session = Depends(get_db)):
         "sw": [None if np.isnan(v) else round(float(v), 4) for v in sw],
         "vsh": [None if np.isnan(v) else round(float(v), 4) for v in vsh_arr],
         "phie": [None if np.isnan(v) else round(float(v), 4) for v in phie_arr],
+        "bad_hole": bad_mask.astype(bool).tolist(),
         "model": model,
         "params": {"a": a_v, "m": m_v, "n": n_v, "rw": rw, "rwb": rwb, "qv": qv,
-                   "vsh_method": vsh_method, "gr_clean": gr_clean, "gr_shale": gr_shale},
+                   "vsh_method": vsh_method, "gr_clean": gr_clean, "gr_shale": gr_shale,
+                   "drho_limit": drho_limit, "washout_inches": washout_inches,
+                   "apply_bad_hole_filter": apply_filter},
+        "qc": qc_summary(bad_mask, bad_reasons),
         "stats": {
             "sw_mean": round(float(np.nanmean(valid_sw)), 4) if len(valid_sw) else None,
             "sw_min": round(float(np.nanmin(valid_sw)), 4) if len(valid_sw) else None,
@@ -6420,7 +6467,7 @@ def multimineral_solver(wid: int, data: dict, db: Session = Depends(get_db)):
 
         # Simplified deterministic: use RHOB-NPHI crossplot
         # phi from density
-        phi_d = (2.65 - rhob[i]) / (2.65 - 1.0)
+        phi_d = density_porosity(rhob[i], lo=-np.inf, hi=np.inf)
         phi_n = nphi[i]
 
         # Clay volume from neutron-density spread
@@ -6518,7 +6565,7 @@ def compute_permeability_multi(wid: int, data: dict, db: Session = Depends(get_d
     dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(nphi))
 
     # Porosity
-    phi = np.where(np.isnan(rhob), nphi, np.clip((2.65 - rhob) / (2.65 - 1.0), -0.15, 0.60))
+    phi = np.where(np.isnan(rhob), nphi, density_porosity(rhob, lo=-0.15, hi=0.60))
     phi = np.clip(phi, 0.001, 0.60)
 
     # Vclay from GR
