@@ -1246,9 +1246,12 @@
             <div class="panel-toolbar">
                 <div class="toolbar-group">
                     <label>User Management</label>
-                    <span class="toolbar-hint">Manage users and roles (admin, interpreter, viewer)</span>
+                    <span class="toolbar-hint">Manage users, roles and JWT tokens</span>
                 </div>
-                <button class="btn-primary" onclick="app.createUser()"><i data-lucide="user-plus"></i> Add User</button>
+                <div style="display:flex;gap:8px">
+                    <button class="btn-sm" onclick="app.loginWithToken()"><i data-lucide="key"></i> Set Token / Login</button>
+                    <button class="btn-primary" onclick="app.createUser()"><i data-lucide="user-plus"></i> Add User</button>
+                </div>
             </div>
             <div style="padding:20px">
                 <div id="usersResults">

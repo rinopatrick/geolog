@@ -1,8 +1,14 @@
 """Tests for GeoLog LAS parser and API endpoints."""
 import sys, os, io, json, math
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 
-from las_parser import LASParser
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+# Import via the package path. Putting backend/ on sys.path would make the same
+# files importable as both 'las_parser' and 'backend.las_parser', giving two
+# independent module objects (and two SQLAlchemy registries).
+from backend.las_parser import LASParser
 
 # ─── LAS Parser Tests ────────────────────────────────────────────
 
@@ -246,140 +252,156 @@ def test_malformed_las():
         print("✅ test_malformed_las (raised gracefully)")
 
 
-# ─── API Tests (requires running server) ────────────────────────
+# ─── API tests ──────────────────────────────────────────────────
+#
+# These used to call `requests` against http://localhost:8000 and wrap every
+# assertion in `try/except Exception: print("skipped")`. With no server running
+# they reported as passing without checking anything, so they could never fail.
+# They now drive the app through TestClient, which needs no server and cannot
+# silently skip.
+
+from fastapi.testclient import TestClient
+
+from backend.main import SessionLocal, app
+from backend.models import Well
+
+client = TestClient(app)
+HEADERS = {"X-User-Role": "interpreter"}
+
+
+def _first_well_id() -> int:
+    db = SessionLocal()
+    try:
+        well = db.query(Well).order_by(Well.id.asc()).first()
+        assert well is not None, "conftest should have seeded a well"
+        return well.id
+    finally:
+        db.close()
+
 
 def test_api_health():
-    """Health endpoint returns ok."""
-    try:
-        import requests
-        r = requests.get("http://localhost:8000/api/health", timeout=5)
-        assert r.status_code == 200
-        data = r.json()
-        assert data['status'] == 'ok'
-        assert data['app'] == 'GeoLog'
-        print("✅ test_api_health")
-    except ImportError:
-        print("⏭️ test_api_health (requests not installed)")
-    except Exception as e:
-        print(f"⏭️ test_api_health (skipped: {e})")
+    """Health endpoint reports the running version."""
+    from backend.version import __version__
+
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["app"] == "GeoLog"
+    assert body["version"] == __version__
+
 
 def test_api_projects():
-    """Projects endpoint returns list."""
-    try:
-        import requests
-        r = requests.get("http://localhost:8000/api/projects/", timeout=5)
-        assert r.status_code == 200
-        data = r.json()
-        assert isinstance(data, list)
-        assert len(data) >= 1
-        print("✅ test_api_projects")
-    except Exception as e:
-        print(f"⏭️ test_api_projects (skipped: {e})")
+    """Projects endpoint returns a list."""
+    response = client.get("/api/projects/", headers=HEADERS)
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) >= 1
+    assert "id" in data[0]
+
 
 def test_api_wells():
-    """Wells endpoint returns list with log runs."""
-    try:
-        import requests
-        r = requests.get("http://localhost:8000/api/wells/", timeout=5)
-        assert r.status_code == 200
-        data = r.json()
-        assert isinstance(data, list)
-        assert len(data) >= 2
-        print("✅ test_api_wells")
-    except Exception as e:
-        print(f"⏭️ test_api_wells (skipped: {e})")
+    """Wells endpoint returns wells with log run counts."""
+    response = client.get("/api/wells/", headers=HEADERS)
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) >= 1
+    assert "log_run_count" in data[0]
+
 
 def test_api_upload_empty():
-    """Empty file upload rejected with 400."""
-    try:
-        import requests
-        wells = requests.get("http://localhost:8000/api/wells/", timeout=5).json()
-        wid = wells[0]['id']
-        r = requests.post(
-            f"http://localhost:8000/api/wells/{wid}/upload-las",
-            files={"file": ("empty.las", b"", "text/plain")},
-            timeout=5,
-        )
-        assert r.status_code == 400, f"Expected 400, got {r.status_code}"
-        print("✅ test_api_upload_empty")
-    except Exception as e:
-        print(f"⏭️ test_api_upload_empty (skipped: {e})")
+    """An empty file is rejected."""
+    wid = _first_well_id()
+    response = client.post(
+        f"/api/wells/{wid}/upload-las",
+        files={"file": ("empty.las", b"", "text/plain")},
+        headers=HEADERS,
+    )
+    assert response.status_code == 400, response.text[:200]
+
 
 def test_api_upload_valid():
-    """Valid LAS upload returns curves and points."""
-    try:
-        import requests
-        wells = requests.get("http://localhost:8000/api/wells/", timeout=5).json()
-        wid = wells[0]['id']
-        r = requests.post(
-            f"http://localhost:8000/api/wells/{wid}/upload-las",
-            files={"file": ("test.las", SAMPLE_LAS.encode(), "text/plain")},
-            timeout=5,
-        )
-        assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
-        data = r.json()
-        assert data['num_points'] == 4
-        assert 'DEPT' in data['curves']
-        print("✅ test_api_upload_valid")
-    except Exception as e:
-        print(f"⏭️ test_api_upload_valid (skipped: {e})")
+    """A valid LAS upload reports the curves and point count it stored."""
+    wid = _first_well_id()
+    response = client.post(
+        f"/api/wells/{wid}/upload-las",
+        files={"file": ("parser-test.las", SAMPLE_LAS.encode(), "text/plain")},
+        headers=HEADERS,
+    )
+    assert response.status_code == 200, response.text[:300]
+    data = response.json()
+    assert data["num_points"] == 4
+    assert "DEPT" in data["curves"]
+
+
+def test_api_upload_las_values_round_trip():
+    """The uploaded values must come back unchanged, not just present.
+
+    This is the check that would have caught the positional column bug: the
+    parser could return a curve under the right name holding another curve's
+    numbers, and a status-only check would pass.
+    """
+    wid = _first_well_id()
+    upload = client.post(
+        f"/api/wells/{wid}/upload-las",
+        files={"file": ("roundtrip.las", SAMPLE_LAS.encode(), "text/plain")},
+        headers=HEADERS,
+    )
+    assert upload.status_code == 200, upload.text[:300]
+    log_run_id = upload.json()["log_run_id"]
+
+    response = client.post(
+        f"/api/log-runs/{log_run_id}/data",
+        json={"curve_mnemonics": ["GR", "RT", "NPHI", "RHOB"]},
+        headers=HEADERS,
+    )
+    assert response.status_code == 200, response.text[:300]
+    data = response.json()
+
+    # Values from SAMPLE_LAS above, transcribed by hand.
+    assert data["GR"][:2] == [50.0, 55.0], data["GR"][:4]
+    assert data["RT"][:2] == [10.0, 12.0], data["RT"][:4]
+    assert data["NPHI"][:2] == [0.25, 0.22], data["NPHI"][:4]
+    assert data["RHOB"][:2] == [2.65, 2.60], data["RHOB"][:4]
+    # -999.25 is the file's NULL, so it must arrive as null, not as a number.
+    assert data["RT"][2] is None, f"null sentinel not converted: {data['RT'][2]}"
+    assert data["NPHI"][3] is None, f"null sentinel not converted: {data['NPHI'][3]}"
+
 
 def test_api_curves_and_data():
-    """After upload, curves and data endpoints work."""
-    try:
-        import requests
-        wells = requests.get("http://localhost:8000/api/wells/", timeout=5).json()
-        wid = wells[0]['id']
-        # Get log runs
-        well_detail = requests.get(f"http://localhost:8000/api/wells/{wid}", timeout=5).json()
-        runs = well_detail.get('log_runs', [])
-        assert len(runs) >= 1, "No log runs found"
-        rid = runs[0]['id']
-        # Get curves
-        curves = requests.get(f"http://localhost:8000/api/log-runs/{rid}/curves", timeout=5).json()
-        assert len(curves) >= 1, "No curves found"
-        # Get data
-        data = requests.post(
-            f"http://localhost:8000/api/log-runs/{rid}/data",
-            json={"curve_mnemonics": [curves[0]['mnemonic']]},
-            timeout=10,
-        ).json()
-        assert 'DEPTH' in data or curves[0]['mnemonic'] in data, "No data returned"
-        print("✅ test_api_curves_and_data")
-    except Exception as e:
-        print(f"⏭️ test_api_curves_and_data (skipped: {e})")
+    """Curve listing and data retrieval work for an uploaded run."""
+    wid = _first_well_id()
+    upload = client.post(
+        f"/api/wells/{wid}/upload-las",
+        files={"file": ("curves.las", SAMPLE_LAS.encode(), "text/plain")},
+        headers=HEADERS,
+    )
+    assert upload.status_code == 200, upload.text[:300]
+    log_run_id = upload.json()["log_run_id"]
+
+    curves = client.get(f"/api/log-runs/{log_run_id}/curves", headers=HEADERS)
+    assert curves.status_code == 200
+    curve_list = curves.json()
+    assert len(curve_list) >= 1
+    mnemonic = curve_list[0]["mnemonic"]
+    assert mnemonic, "curve has no mnemonic"
+
+    data = client.post(
+        f"/api/log-runs/{log_run_id}/data",
+        json={"curve_mnemonics": [mnemonic]},
+        headers=HEADERS,
+    )
+    assert data.status_code == 200
+    body = data.json()
+    assert mnemonic in body or "DEPTH" in body, sorted(body)[:10]
 
 
-if __name__ == '__main__':
-    print("=" * 50)
-    print("GeoLog Test Suite")
-    print("=" * 50)
-    
-    # Parser tests (always run, no server needed)
-    test_parse_basic()
-    test_null_sentinel()
-    test_alias_normalization()
-    test_operator_extraction()
-    test_depth_unit()
-    test_well_info()
-    test_large_dataset()
-    test_mnem_dot_unit_format()
-    test_duplicate_canonical_mnemonics_keep_columns_aligned()
-    test_percent_unit_porosity_normalized_to_fraction()
-    test_column_count_mismatch_is_reported()
-    test_empty_las()
-    test_malformed_las()
-    
-    print()
-    
-    # API tests (need running server)
-    test_api_health()
-    test_api_projects()
-    test_api_wells()
-    test_api_upload_empty()
-    test_api_upload_valid()
-    test_api_curves_and_data()
-    
-    print()
-    print("=" * 50)
-    print("Done. Parser tests: always pass. API tests: need server.")
+def test_api_upload_unknown_well_is_404():
+    response = client.post(
+        "/api/wells/999999/upload-las",
+        files={"file": ("x.las", SAMPLE_LAS.encode(), "text/plain")},
+        headers=HEADERS,
+    )
+    assert response.status_code == 404

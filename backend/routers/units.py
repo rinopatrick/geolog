@@ -7,10 +7,10 @@ import json
 
 try:
     from database import get_db
-    from models import Well, LogRun, CurveData, CurveAlias
+    from models import LogRun, CurveAlias
 except ImportError:
     from backend.database import get_db
-    from backend.models import Well, LogRun, CurveData, CurveAlias
+    from backend.models import LogRun, CurveAlias
 
 router = APIRouter(prefix="/api", tags=["units"])
 

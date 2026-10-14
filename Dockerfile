@@ -17,6 +17,8 @@ COPY frontend/ ./frontend/
 COPY tests/ ./tests/
 COPY run.py ./run.py
 COPY requirements.txt ./requirements.txt
+# Needed at startup: backend/schema.py runs migrations, which read this file.
+COPY alembic.ini ./alembic.ini
 
 # Create writable SQLite data directory
 RUN mkdir -p /app/backend/data

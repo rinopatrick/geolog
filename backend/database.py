@@ -8,6 +8,14 @@ import os
 # at a mounted volume).
 _backend_dir = os.path.dirname(os.path.abspath(__file__))
 _db_path = os.environ.get("GEOLOG_DB_PATH") or os.path.join(_backend_dir, "geolog.db")
+
+# SQLite will not create missing directories, and failing here produces only
+# "unable to open database file" from deep inside the driver. Make the parent
+# directory first so a bad GEOLOG_DB_PATH is obvious rather than mysterious.
+_db_parent = os.path.dirname(os.path.abspath(_db_path))
+if _db_parent:
+    os.makedirs(_db_parent, exist_ok=True)
+
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{_db_path}"
 
 engine = create_engine(

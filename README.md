@@ -277,16 +277,29 @@ curl -s -X POST "http://localhost:8000/api/audit-log/verify/signature" \
 ```text
 geolog-app/
 ├── backend/
-│   ├── __init__.py
-│   ├── database.py
-│   ├── las_parser.py
-│   ├── main.py
-│   ├── models.py
-│   ├── schemas.py
-│   ├── seed.py
+│   ├── main.py            app assembly, middleware, health
+│   ├── database.py        engine and session factory
+│   ├── models.py          SQLAlchemy models
+│   ├── schema.py          Alembic runner + drift verification
+│   ├── migrations/        Alembic revisions
+│   ├── security.py        auth modes and role resolution
+│   ├── deps.py            SafeJSONResponse, role dependencies
+│   ├── validation.py      request-body validation helpers
+│   ├── audit.py           audit chain + evidence signing
+│   ├── observability.py   request counters
+│   ├── jobs.py            in-process background job registry
+│   ├── well_state.py      locks, snapshots, template signatures
+│   ├── curve_corrections.py   density-porosity + bad-hole QC
+│   ├── curve_plausibility.py  stored-curve sanity checks
+│   ├── las_parser.py      LAS 2.0 parser
+│   ├── dlis_lis_parser.py DLIS/LIS parsers
+│   ├── version.py         single-source version
+│   ├── seed.py            demo data seeding
 │   ├── demo.las
 │   ├── requirements.txt
-│   └── routers/
+│   └── routers/           wells, log_runs, projects, audit, ops, qc,
+│                          correlation, zonation, units, templates,
+│                          reports, users
 ├── frontend/
 │   ├── index.html
 │   ├── assets/
@@ -408,8 +421,7 @@ Configuration reference:
 | `AUTH_JWT_ALGORITHMS` | `HS256` | Comma-separated allowed algorithms |
 | `GEOLOG_CORS_ORIGINS` | unset | Comma-separated allowed origins. Unset disables CORS entirely; the bundled frontend is same-origin and needs none |
 | `GEOLOG_DB_PATH` | `backend/geolog.db` | SQLite file location |
-| `GEOLOG_ARTIFACT_DIR` | `backend/artifacts` | Interpretation snapshots and well locks |
-| `GEOLOG_ENABLE_DEMO_SEED` | `false` | Seed demo wells on first startup |
+| `GEOLOG_ARTIFACT_DIR` | `backend/artifacts` | Interpretation snapshots and well locks || `GEOLOG_ENABLE_DEMO_SEED` | `false` | Seed demo wells on first startup |
 | `GEOLOG_ENFORCE_SECRETS_SOURCE` | `true` | Require `GEOLOG_SECRETS_SOURCE` in non-dev |
 | `GEOLOG_SECRETS_SOURCE` | — | Required when `GEOLOG_ENV` is non-dev |
 | `AUDIT_EXPORT_HMAC_KEYS_JSON` / `AUDIT_EXPORT_HMAC_ACTIVE_KID` | — | Audit/evidence signing key rotation |
@@ -417,6 +429,33 @@ Configuration reference:
 
 Header auth takes the caller's role from a request header, so anyone who can reach
 the port can be an admin. It is a development convenience only.
+
+### Schema migrations
+
+The schema is owned by Alembic. The app runs `upgrade head` at startup and then
+verifies the result, so a database that is missing a table or column is reported
+at boot instead of failing at first query.
+
+```bash
+python -m alembic upgrade head          # apply migrations
+python -m alembic check                 # fail if a model changed without a migration
+python -m alembic revision --autogenerate -m "add X"   # new migration
+python -m alembic downgrade -1          # roll back one
+```
+
+`alembic check` is a CI gate. If you change a model without adding a migration,
+the build fails with the exact missing operation rather than passing and then
+breaking someone else's database.
+
+Databases created before Alembic was introduced have every table but no
+`alembic_version` row. Those are stamped at the baseline instead of being handed
+the baseline `CREATE TABLE` statements, which would fail. See
+`backend/schema.py`.
+
+Note for contributors: `create_all()` is gone. Adding a field to `models.py` is
+not enough — `create_all()` only ever created missing *tables*, never missing
+*columns*, so such a change reached a fresh database and silently not an existing
+one. Add a migration.
 
 Notes:
 - Parser tests run without server.
@@ -441,9 +480,28 @@ If this project helps you, support ongoing development:
 
 Current state: **engineering sample / pre-production**.
 
+Version: see [`backend/version.py`](backend/version.py) (single source of truth)
+and [CHANGELOG.md](CHANGELOG.md). While the major version is `0`, the API is not
+stable and the schema may change between releases.
+
 Recommended next steps:
-1. Split `backend/main.py` (single file, ~9.6k lines) into the routers that already exist for six domains
-2. Introduce schema migrations (Alembic) — schema changes are currently applied by ad-hoc `_ensure_*` helpers at import time
-3. Raise coverage on the petrophysics paths (`backend/main.py` is the least covered module)
-4. Add a release/versioning policy and tag releases
-5. Add monitoring and an operational runbook
+1. Finish splitting `backend/main.py` — the `/api/wells` routes (87 endpoints) and the petrophysics helpers they depend on
+2. Raise coverage on the petrophysics paths (`backend/main.py` is the least covered module)
+3. Add an auth provider integration — `AUTH_MODE=jwt` verifies tokens but issues none
+4. Add monitoring and an operational runbook
+
+Module layout:
+```
+backend/
+├── main.py            app assembly, middleware, /api/wells routes
+├── deps.py            SafeJSONResponse, role dependencies
+├── schema.py          Alembic runner + drift verification
+├── audit.py           audit chain + evidence signing
+├── observability.py   request counters (middleware writes, /api/ops reads)
+├── jobs.py            in-process background job registry
+├── curve_corrections.py  density-porosity + bad-hole QC
+├── curve_plausibility.py stored-curve sanity checks
+├── migrations/        Alembic revisions
+└── routers/           users, log_runs, projects, audit, ops, qc,
+                       correlation, zonation, units, templates, reports
+```

@@ -7,9 +7,7 @@ extract numeric channels with depth-like index.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from types import SimpleNamespace
-from typing import Dict, List, Optional, Tuple
-import io
+from typing import Dict, List
 import re
 import tempfile
 import numpy as np

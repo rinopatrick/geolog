@@ -37,6 +37,17 @@ jobs:
       - name: Test gates
         run: python -m pytest tests/ -q
 
+      # Fails when a model changed without a matching migration. This is what
+      # stops two people from colliding on the schema: the second one to push
+      # gets a red build instead of a database that silently lacks their column.
+      - name: Migration gates
+        env:
+          GEOLOG_ENV: ci
+          GEOLOG_DB_PATH: ${{ runner.temp }}/migration-gate.db
+        run: |
+          python -m alembic upgrade head
+          python -m alembic check
+
       - name: Frontend syntax gates
         run: |
           for f in frontend/js/*.js scripts/*.js; do

@@ -7,26 +7,26 @@ import os
 
 try:
     from database import get_db
-    from models import Well, LogRun, PetroParams
+    from models import Well, PetroParams
+    from well_state import get_template_lock
 except ImportError:
     from backend.database import get_db
-    from backend.models import Well, LogRun, PetroParams
+    from backend.models import Well, PetroParams
+    from backend.well_state import get_template_lock
 
 router = APIRouter(prefix="/api", tags=["templates"])
-LOCK_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "artifacts", "locks.json")
 
 
 def _template_locked(wid: int) -> bool:
-    if not os.path.exists(LOCK_FILE):
-        return False
-    try:
-        with open(LOCK_FILE, "r", encoding="utf-8") as f:
-            locks = json.load(f)
-        row = locks.get(str(wid), {}) if isinstance(locks, dict) else {}
-        tlock = row.get("template_lock") if isinstance(row, dict) else None
-        return bool(isinstance(tlock, dict) and tlock.get("locked"))
-    except Exception:
-        return False
+    """Whether the well's petrophysical template has been signed off.
+
+    Delegates to well_state so there is one lock file. This module used to build
+    its own path with os.path.dirname(__file__), which ignored
+    GEOLOG_ARTIFACT_DIR — so a deployment that redirected the artifact directory
+    had lock_template write one file and apply_template read another, and the
+    lock appeared not to work.
+    """
+    return bool(get_template_lock(wid).get("locked"))
 
 # ── Template Database ─────────────────────────────────────────
 TEMPLATE_DB = [
@@ -119,10 +119,14 @@ def apply_template(wid: int, data: dict, db: Session = Depends(get_db)):
     if _template_locked(wid):
         raise HTTPException(423, "Template is locked; unlock required before edits")
 
+    # Coerce: the name may arrive as any JSON type. `.lower()` on an int raised
+    # AttributeError -> 500; a non-string simply does not match a template, so the
+    # existing 400 below applies.
     template_name = data.get("template_name") or data.get("name") or ""
+    target = str(template_name).strip().lower()
     template = None
     for t in TEMPLATE_DB:
-        if t["name"].lower() == template_name.lower():
+        if t["name"].lower() == target:
             template = t
             break
     if not template:

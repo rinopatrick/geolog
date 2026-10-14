@@ -7,10 +7,12 @@ try:
     from database import get_db
     from deps import require_admin, require_viewer
     from models import User
+    from security import AuthConfig, create_access_token
 except ImportError:
     from backend.database import get_db
     from backend.deps import require_admin, require_viewer
     from backend.models import User
+    from backend.security import AuthConfig, create_access_token
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -40,7 +42,10 @@ def create_user(data: dict, db: Session = Depends(get_db), _role: str = Depends(
         raise HTTPException(400, "username required")
     if db.query(User).filter(User.username == username).first():
         raise HTTPException(409, "Username already exists")
-    token = hashlib.sha256(f"{username}{time.time()}".encode()).hexdigest()[:32]
+    # When creating user, if client specifies an initial token/secret, preserve it; otherwise auto-generate
+    token = (data.get("token") or "").strip()
+    if not token:
+        token = hashlib.sha256(f"{username}{time.time()}".encode()).hexdigest()[:32]
     u = User(
         username=username,
         display_name=data.get("display_name", username),
@@ -72,3 +77,34 @@ def delete_user(uid: int, db: Session = Depends(get_db), _role: str = Depends(re
         raise HTTPException(404, "User not found")
     db.delete(u)
     db.commit()
+
+
+@router.post("/token")
+def issue_user_token(data: dict, db: Session = Depends(get_db)):
+    """Authenticate user by username and user token/secret, returning signed JWT bearer token."""
+    username = (data.get("username") or "").strip()
+    token = (data.get("token") or "").strip()
+    if not username:
+        raise HTTPException(400, "username required")
+
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(401, "Invalid credentials")
+
+    # If user has a registered token/secret, verify it
+    if user.token and user.token != token:
+        raise HTTPException(401, "Invalid credentials")
+
+    cfg = AuthConfig.from_env()
+    if not cfg.jwt_secret:
+        # If secret not set in env, provide temporary dev secret to permit local test token issuance
+        cfg.jwt_secret = "geolog-dev-token-secret"
+
+    access_token = create_access_token(subject=user.username, role=user.role, cfg=cfg)
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "username": user.username,
+        "role": user.role,
+    }
+

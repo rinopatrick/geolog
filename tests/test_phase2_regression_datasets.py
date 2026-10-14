@@ -17,9 +17,11 @@ import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "backend"))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-from las_parser import FRACTION_CURVES, LASParser, PERCENT_UNITS  # noqa: E402
+# Package imports only — see tests/test_import_hygiene.py for why.
+from backend.las_parser import FRACTION_CURVES, LASParser, PERCENT_UNITS  # noqa: E402
 
 
 MANIFEST_PATH = REPO_ROOT / "test_data" / "regression_datasets_phase2.json"

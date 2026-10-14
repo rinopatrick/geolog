@@ -121,6 +121,7 @@ class GeoLogApp {
         this._searchDebounceTimer = null;
         this._jobMonitorTimer = null;
         this.currentRole = (localStorage.getItem('geolog_active_role') || 'admin').toLowerCase();
+        this.authToken = localStorage.getItem('geolog_auth_token') || '';
         this.jobIds = JSON.parse(localStorage.getItem('geolog_job_ids') || '[]');
         this.dstData = [];
         this.rftData = [];
@@ -500,7 +501,11 @@ class GeoLogApp {
                 formData.append('file', file);
                 try {
                     GeoLoading.show(`Uploading ${file.name}...`);
-                    const resp = await fetch(`/api/wells/${this.currentWell.id}/upload-las`, { method: 'POST', body: formData });
+                    const resp = await fetch(`/api/wells/${this.currentWell.id}/upload-las`, {
+                        method: 'POST',
+                        body: formData,
+                        headers: this._authHeaders(),
+                    });
                     if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
                     const result = await resp.json();
                     this._applyUploadedLASVersion(result);
@@ -720,6 +725,23 @@ class GeoLogApp {
         });
     }
 
+    _authHeaders() {
+        const headers = { 'X-User-Role': this.currentRole || 'viewer' };
+        if (this.authToken) {
+            headers['Authorization'] = `Bearer ${this.authToken}`;
+        }
+        return headers;
+    }
+
+    setAuthToken(token) {
+        this.authToken = (token || '').trim();
+        if (this.authToken) {
+            localStorage.setItem('geolog_auth_token', this.authToken);
+        } else {
+            localStorage.removeItem('geolog_auth_token');
+        }
+    }
+
     setActiveRole(role) {
         const r = String(role || 'viewer').toLowerCase();
         this.currentRole = r;
@@ -850,8 +872,13 @@ class GeoLogApp {
         }
 
         try {
+            const headers = {
+                'Content-Type': 'application/json',
+                ...this._authHeaders(),
+                ...opts.headers,
+            };
             const resp = await fetch('/api' + path, {
-                headers: { 'Content-Type': 'application/json', 'X-User-Role': this.currentRole || 'viewer', ...opts.headers },
+                headers,
                 ...opts,
                 signal: controller.signal,
             });
@@ -2478,7 +2505,11 @@ class GeoLogApp {
             formData.append('file', file);
             GeoLoading.show(`Uploading ${file.name}...`);
             try {
-                const resp = await fetch(`/api/wells/${wellId}/${conf.endpoint}`, { method: 'POST', body: formData });
+                const resp = await fetch(`/api/wells/${wellId}/${conf.endpoint}`, {
+                    method: 'POST',
+                    body: formData,
+                    headers: this._authHeaders(),
+                });
                 if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
                 const result = await resp.json();
                 this._applyUploadedLASVersion(result);
@@ -2609,7 +2640,10 @@ class GeoLogApp {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.open('POST', `/api/wells/${wellId}/upload-las`);
-            xhr.setRequestHeader('X-User-Role', this.currentRole || 'viewer');
+            const authH = this._authHeaders();
+            for (const [k, v] of Object.entries(authH)) {
+                xhr.setRequestHeader(k, v);
+            }
             xhr.upload.onprogress = (evt) => {
                 if (evt.lengthComputable && onProgress) onProgress(Math.round((evt.loaded / evt.total) * 100));
             };
@@ -5036,7 +5070,11 @@ class GeoLogApp {
             formData.append('file', file);
             GeoLoading.show(`Uploading ${file.name}...`);
             try {
-                const resp = await fetch('/api/wells/' + this.currentWell.id + '/rft/upload-csv', { method: 'POST', body: formData });
+                const resp = await fetch('/api/wells/' + this.currentWell.id + '/rft/upload-csv', {
+                    method: 'POST',
+                    body: formData,
+                    headers: this._authHeaders(),
+                });
                 const result = await resp.json();
                 if (resp.ok) {
                     if (status) status.textContent = 'Inserted ' + (result.inserted || 0) + ' RFT rows';
@@ -5199,7 +5237,11 @@ class GeoLogApp {
         const formData = new FormData();
         formData.append('file', file);
         try {
-            const resp = await fetch('/api/wells/' + this.currentWell.id + '/completion/upload-csv', { method: 'POST', body: formData });
+            const resp = await fetch('/api/wells/' + this.currentWell.id + '/completion/upload-csv', {
+                method: 'POST',
+                body: formData,
+                headers: this._authHeaders(),
+            });
             const result = await resp.json();
             if (!resp.ok) throw new Error(result?.detail || 'Upload failed');
             if (status) status.textContent = `Inserted ${result.inserted || 0} rows`;
@@ -5362,7 +5404,11 @@ class GeoLogApp {
             const formData = new FormData();
             formData.append('file', file);
             try {
-                const resp = await fetch('/api/wells/' + this.currentWell.id + '/production/upload-csv', { method: 'POST', body: formData, headers: { 'X-User-Role': this.currentRole || 'viewer' } });
+                const resp = await fetch('/api/wells/' + this.currentWell.id + '/production/upload-csv', {
+                method: 'POST',
+                body: formData,
+                headers: this._authHeaders(),
+            });
                 const result = await resp.json();
                 if (!resp.ok) throw new Error(result?.detail || 'Upload failed');
                 if (status) status.textContent = 'Inserted ' + (result.inserted || 0) + ' rows';
@@ -6329,7 +6375,11 @@ class GeoLogApp {
             const formData = new FormData();
             formData.append('file', file);
             try {
-                const resp = await fetch('/api/wells/' + this.currentWell.id + '/upload-csv', { method: 'POST', body: formData });
+                const resp = await fetch('/api/wells/' + this.currentWell.id + '/upload-csv', {
+                    method: 'POST',
+                    body: formData,
+                    headers: this._authHeaders(),
+                });
                 const result = await resp.json();
                 if (resp.ok) {
                     if (status) status.textContent = 'OK: ' + result.curves.length + ' curves, ' + result.points + ' points';
@@ -8470,9 +8520,8 @@ class GeoLogApp {
     // ─── Sprint 28: Users Management ────────────────────────────
     async loadUsers() {
         try {
-            const resp = await fetch('/api/users');
-            const users = await resp.json();
-            this._renderUsers(users);
+            const users = await this._api('/users');
+            this._renderUsers(users || []);
         } catch { }
     }
 
@@ -8520,19 +8569,63 @@ class GeoLogApp {
             ],
             onConfirm: async (vals) => {
                 try {
-                    await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(vals) });
+                    await this._api('/users', { method: 'POST', body: JSON.stringify(vals) });
                     GeoToast.success('User created');
                     this.loadUsers();
-                } catch { GeoToast.error('Failed to create user'); }
+                } catch (e) { GeoToast.error('Failed to create user: ' + e.message); }
+            }
+        });
+    }
+
+    loginWithToken() {
+        GeoModal.show({
+            title: 'JWT Bearer Authentication',
+            fields: [
+                { id: 'username', label: 'Username', type: 'text', value: 'admin' },
+                { id: 'userToken', label: 'User Token / Secret', type: 'password', placeholder: 'Secret user token from backend/user' },
+                { id: 'rawJwt', label: 'Or Paste Raw Bearer JWT', type: 'textarea', placeholder: 'eyJhbGci...' },
+            ],
+            onConfirm: async (vals) => {
+                const rawJwt = (vals.rawJwt || '').trim();
+                if (rawJwt) {
+                    this.setAuthToken(rawJwt);
+                    GeoToast.success('Stored custom Bearer JWT token');
+                    return;
+                }
+                const username = (vals.username || '').trim();
+                const token = (vals.userToken || '').trim();
+                if (!username) {
+                    GeoToast.error('Username required');
+                    return;
+                }
+                try {
+                    const res = await this._api('/users/token', {
+                        method: 'POST',
+                        body: JSON.stringify({ username, token }),
+                    });
+                    if (res && res.access_token) {
+                        this.setAuthToken(res.access_token);
+                        if (res.role) this.setActiveRole(res.role);
+                        GeoToast.success(`Authenticated as ${res.username} (${res.role})`);
+                    } else {
+                        GeoToast.error('Login failed to return token');
+                    }
+                } catch (err) {
+                    GeoToast.error('Login failed: ' + err.message);
+                }
             }
         });
     }
 
     async deleteUser(uid) {
         if (!confirm('Delete this user?')) return;
-        await fetch(`/api/users/${uid}`, { method: 'DELETE' });
-        GeoToast.success('User deleted');
-        this.loadUsers();
+        try {
+            await this._api(`/users/${uid}`, { method: 'DELETE' });
+            GeoToast.success('User deleted');
+            this.loadUsers();
+        } catch (e) {
+            GeoToast.error('Failed to delete user: ' + e.message);
+        }
     }
 
     // ═══ Professional Petrophysics Engine (Sprint 29) ═══
