@@ -140,3 +140,37 @@ def require_min_role(role: str, current_role: str):
 
 def role_from_request(request: Request) -> str:
     return _normalize_role(getattr(request.state, "user_role", None) or "viewer")
+
+
+def create_access_token(
+    subject: str,
+    role: str,
+    cfg: AuthConfig,
+    expires_delta_seconds: int = 86400,
+) -> str:
+    """Generate a signed JWT bearer token matching server auth configuration."""
+    try:
+        import jwt  # PyJWT
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"jwt auth misconfigured: PyJWT missing ({e})")
+
+    if not cfg.jwt_secret:
+        raise HTTPException(status_code=500, detail="jwt auth misconfigured: AUTH_JWT_SECRET missing")
+
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc)
+    exp = now + datetime.timedelta(seconds=expires_delta_seconds)
+
+    payload: Dict[str, Any] = {
+        "sub": subject,
+        "role": _normalize_role(role),
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+    }
+    if cfg.jwt_issuer:
+        payload["iss"] = cfg.jwt_issuer
+    if cfg.jwt_audience:
+        payload["aud"] = cfg.jwt_audience
+
+    algorithm = cfg.jwt_algorithms[0] if cfg.jwt_algorithms else "HS256"
+    return jwt.encode(payload, cfg.jwt_secret, algorithm=algorithm)

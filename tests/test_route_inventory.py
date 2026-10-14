@@ -136,6 +136,7 @@ EXPECTED_ROUTES = [
     "POST /api/projects/{pid}/batch-petro",
     "POST /api/projects/{pid}/batch-petro-async",
     "POST /api/users",
+    "POST /api/users/token",
     "POST /api/wells/",
     "POST /api/wells/{wid}/aliases",
     "POST /api/wells/{wid}/annotations",

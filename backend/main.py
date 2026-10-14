@@ -361,6 +361,7 @@ class RBACWriteGuardMiddleware(BaseHTTPMiddleware):
             # POST endpoints that are read/query-only (safe for viewer)
             viewer_safe = {
                 "/api/log-runs/",       # /data, /data-decimated queries
+                "/api/users/token",     # public login / token issuance
             }
 
             # Admin-only paths (structural/destructive)
@@ -370,6 +371,8 @@ class RBACWriteGuardMiddleware(BaseHTTPMiddleware):
             required = "interpreter"
             if path in admin_exact_post and method == "POST":
                 required = "admin"
+            elif path == "/api/users/token":
+                required = "viewer"
             elif any(path.startswith(p) for p in admin_prefixes):
                 required = "admin"
             elif method == "DELETE":
