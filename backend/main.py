@@ -27,6 +27,7 @@ try:
         qc_summary,
     )
     from deps import SafeJSONResponse, require_admin, require_interpreter, require_role, require_viewer
+    from schema import ensure_schema
     from routers.qc import router as qc_router
     from routers.correlation import router as corr_router
     from routers.zonation import router as zonation_router
@@ -44,6 +45,7 @@ except ImportError:
         qc_summary,
     )
     from backend.deps import SafeJSONResponse, require_admin, require_interpreter, require_role, require_viewer
+    from backend.schema import ensure_schema
     from backend.routers.qc import router as qc_router
     from backend.routers.correlation import router as corr_router
     from backend.routers.zonation import router as zonation_router
@@ -111,135 +113,9 @@ OBS_METRICS = {
     "recent_events": [],
 }
 
-Base.metadata.create_all(bind=engine)
-
-
-def _ensure_well_coordinate_columns():
-    """Add latitude/longitude columns if missing (idempotent)."""
-    with engine.begin() as conn:
-        try:
-            conn.execute(text("ALTER TABLE wells ADD COLUMN latitude FLOAT;"))
-        except Exception:
-            pass
-        try:
-            conn.execute(text("ALTER TABLE wells ADD COLUMN longitude FLOAT;"))
-        except Exception:
-            pass
-
-
-_ensure_well_coordinate_columns()
-
-
-def _ensure_production_table():
-    """Create production table for existing deployments without migrations."""
-    ddl = """
-    CREATE TABLE IF NOT EXISTS production_data (
-        id INTEGER PRIMARY KEY,
-        well_id INTEGER NOT NULL,
-        date DATE NOT NULL,
-        oil_rate FLOAT,
-        gas_rate FLOAT,
-        water_rate FLOAT,
-        water_cut FLOAT,
-        gor FLOAT,
-        bhp FLOAT,
-        whp FLOAT,
-        choke_size FLOAT,
-        cumulative_oil FLOAT,
-        cumulative_gas FLOAT,
-        cumulative_water FLOAT,
-        notes TEXT DEFAULT '',
-        created_at DATETIME,
-        FOREIGN KEY(well_id) REFERENCES wells(id)
-    );
-    """
-    with engine.begin() as conn:
-        try:
-            conn.execute(text(ddl))
-        except Exception:
-            pass
-
-
-_ensure_production_table()
-
-
-def _ensure_audit_log_columns():
-    """Backfill audit_log schema for immutable provenance chain (idempotent)."""
-    ddls = [
-        "ALTER TABLE audit_log ADD COLUMN request_id VARCHAR(64) DEFAULT '';",
-        "ALTER TABLE audit_log ADD COLUMN auth_subject VARCHAR(120) DEFAULT '';",
-        "ALTER TABLE audit_log ADD COLUMN auth_role VARCHAR(50) DEFAULT 'viewer';",
-        "ALTER TABLE audit_log ADD COLUMN route_path VARCHAR(255) DEFAULT '';",
-        "ALTER TABLE audit_log ADD COLUMN method VARCHAR(10) DEFAULT '';",
-        "ALTER TABLE audit_log ADD COLUMN status_code INTEGER;",
-        "ALTER TABLE audit_log ADD COLUMN payload_hash VARCHAR(64) DEFAULT '';",
-        "ALTER TABLE audit_log ADD COLUMN prev_hash VARCHAR(64) DEFAULT '';",
-        "ALTER TABLE audit_log ADD COLUMN entry_hash VARCHAR(64) DEFAULT '';",
-    ]
-    with engine.begin() as conn:
-        for ddl in ddls:
-            try:
-                conn.execute(text(ddl))
-            except Exception:
-                pass
-
-
-_ensure_audit_log_columns()
-
-
-def _ensure_audit_log_immutability_triggers():
-    """Prevent updates/deletes on audit_log rows (append-only)."""
-    stmts = [
-        """
-        CREATE TRIGGER IF NOT EXISTS trg_audit_log_no_update
-        BEFORE UPDATE ON audit_log
-        BEGIN
-            SELECT RAISE(ABORT, 'audit_log is immutable');
-        END;
-        """,
-        """
-        CREATE TRIGGER IF NOT EXISTS trg_audit_log_no_delete
-        BEFORE DELETE ON audit_log
-        BEGIN
-            SELECT RAISE(ABORT, 'audit_log is immutable');
-        END;
-        """,
-    ]
-    with engine.begin() as conn:
-        for stmt in stmts:
-            try:
-                conn.execute(text(stmt))
-            except Exception:
-                pass
-
-
-_ensure_audit_log_immutability_triggers()
-
-
-def _ensure_completion_table():
-    """Create completion table for existing deployments without migrations."""
-    ddl = """
-    CREATE TABLE IF NOT EXISTS completion_data (
-        id INTEGER PRIMARY KEY,
-        well_id INTEGER NOT NULL,
-        depth_top FLOAT NOT NULL,
-        depth_base FLOAT NOT NULL,
-        component_type VARCHAR(50) NOT NULL,
-        size VARCHAR(100) DEFAULT '',
-        description TEXT DEFAULT '',
-        notes TEXT DEFAULT '',
-        created_at DATETIME,
-        FOREIGN KEY(well_id) REFERENCES wells(id)
-    );
-    """
-    with engine.begin() as conn:
-        try:
-            conn.execute(text(ddl))
-        except Exception:
-            pass
-
-
-_ensure_completion_table()
+# Schema is owned by Alembic. See backend/schema.py for why the previous
+# create_all() + _ensure_* helper combination could not be trusted.
+ensure_schema()
 
 
 def _to_float_or_none(value):

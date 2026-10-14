@@ -408,8 +408,7 @@ Configuration reference:
 | `AUTH_JWT_ALGORITHMS` | `HS256` | Comma-separated allowed algorithms |
 | `GEOLOG_CORS_ORIGINS` | unset | Comma-separated allowed origins. Unset disables CORS entirely; the bundled frontend is same-origin and needs none |
 | `GEOLOG_DB_PATH` | `backend/geolog.db` | SQLite file location |
-| `GEOLOG_ARTIFACT_DIR` | `backend/artifacts` | Interpretation snapshots and well locks |
-| `GEOLOG_ENABLE_DEMO_SEED` | `false` | Seed demo wells on first startup |
+| `GEOLOG_ARTIFACT_DIR` | `backend/artifacts` | Interpretation snapshots and well locks || `GEOLOG_ENABLE_DEMO_SEED` | `false` | Seed demo wells on first startup |
 | `GEOLOG_ENFORCE_SECRETS_SOURCE` | `true` | Require `GEOLOG_SECRETS_SOURCE` in non-dev |
 | `GEOLOG_SECRETS_SOURCE` | — | Required when `GEOLOG_ENV` is non-dev |
 | `AUDIT_EXPORT_HMAC_KEYS_JSON` / `AUDIT_EXPORT_HMAC_ACTIVE_KID` | — | Audit/evidence signing key rotation |
@@ -417,6 +416,33 @@ Configuration reference:
 
 Header auth takes the caller's role from a request header, so anyone who can reach
 the port can be an admin. It is a development convenience only.
+
+### Schema migrations
+
+The schema is owned by Alembic. The app runs `upgrade head` at startup and then
+verifies the result, so a database that is missing a table or column is reported
+at boot instead of failing at first query.
+
+```bash
+python -m alembic upgrade head          # apply migrations
+python -m alembic check                 # fail if a model changed without a migration
+python -m alembic revision --autogenerate -m "add X"   # new migration
+python -m alembic downgrade -1          # roll back one
+```
+
+`alembic check` is a CI gate. If you change a model without adding a migration,
+the build fails with the exact missing operation rather than passing and then
+breaking someone else's database.
+
+Databases created before Alembic was introduced have every table but no
+`alembic_version` row. Those are stamped at the baseline instead of being handed
+the baseline `CREATE TABLE` statements, which would fail. See
+`backend/schema.py`.
+
+Note for contributors: `create_all()` is gone. Adding a field to `models.py` is
+not enough — `create_all()` only ever created missing *tables*, never missing
+*columns*, so such a change reached a fresh database and silently not an existing
+one. Add a migration.
 
 Notes:
 - Parser tests run without server.
