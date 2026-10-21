@@ -16,6 +16,13 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-21
+
+### Fixed
+
+- Core CSV picker accepts XLSX/XLSM; image picker accepts DLIS.
+
+
 ### Added
 
 - **Core/SCAL completion.** XLSX import, Brooks-Corey/Lambda/Thomeer/
@@ -309,7 +316,8 @@ and the schema may change between 0.x versions.
   interpreter, so an interpreter can sign off a template that only an admin can
   reopen. Deliberate, but worth confirming it matches your process.
 
-[Unreleased]: https://github.com/rinopatrick/geolog/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/rinopatrick/geolog/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/rinopatrick/geolog/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/rinopatrick/geolog/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/rinopatrick/geolog/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rinopatrick/geolog/compare/v0.2.0...v0.6.0
