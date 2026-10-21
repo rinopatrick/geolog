@@ -194,3 +194,46 @@ def test_decimated_data_uses_semantics(make_well):
     assert data["depth"][-1] == 1501.0
     assert "GR" in data["curves"]
     assert len(data["depth"]) <= 200
+
+def test_compute_saturation_uses_semantics(make_well):
+    wid = make_well("SEM-SW", {
+        "DEPT": np.array([1000.0, 1001.0, 1002.0]),
+        "GR": np.array([20.0, 60.0, 100.0]),
+        "NPHI": np.array([0.30, 0.20, 0.10]),
+        "RHOB": np.array([2.30, 2.40, 2.50]),
+        "RT": np.array([10.0, 20.0, 30.0]),
+    })
+    db = SessionLocal()
+    try:
+        well = db.query(Well).filter(Well.id == wid).first()
+        lr = db.query(LogRun).filter(LogRun.well_id == wid).first()
+        well.unit_system = "si"
+        dept = db.query(CurveData).filter_by(log_run_id=lr.id, mnemonic="DEPT").first()
+        dept.unit = "FT"
+        db.add_all([
+            DepthControlPoint(log_run_id=lr.id, md=1000.0, corrected_depth=1000.0, sort_order=0),
+            DepthControlPoint(log_run_id=lr.id, md=1002.0, corrected_depth=1003.0, sort_order=1),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    r = client.post(
+        f"/api/wells/{wid}/compute-sw",
+        headers=INTERPRETER,
+        json={"model": "archie", "a": 1.0, "m": 2.0, "n": 2.0, "rw": 0.1},
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert np.allclose(data["depth"], [304.8, 304.8 + 1.5 * 0.3048, 304.8 + 3 * 0.3048])
+
+def test_dual_water_endpoint_runs(make_well):
+    wid = make_well("DUAL", {
+        "DEPT": np.array([1000.0, 1001.0]),
+        "GR": np.array([20.0, 80.0]),
+        "NPHI": np.array([0.30, 0.20]),
+        "RT": np.array([10.0, 20.0]),
+    })
+    r = client.post(f"/api/wells/{wid}/dual-water", headers=INTERPRETER, json={})
+    assert r.status_code == 200, r.text
+    assert len(r.json()["depth"]) == 2

@@ -58,11 +58,11 @@ a warning is returned.
 
 ## Compute endpoints
 
-The shared helper is used by the log-run data endpoints. Petrophysics and QC
-endpoints still read stored curves directly and will be migrated to the same
-helper in the next data-semantics increment; they must not silently disagree
-with the viewer. The control-point and unit target are applied by the shared
-layer only after that migration.
+The shared helper is used by the log-run data endpoints, advanced QC, unified
+saturation (`compute-sw`), permeability, dual-water, VCL models, multimineral
+and permeability-multi. They therefore see the same aliases, units and corrected
+MD as the viewer. Curve-editing/export endpoints that intentionally operate on
+stored values remain direct readers; they are listed in the migration backlog.
 
 ## UI
 

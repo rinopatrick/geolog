@@ -207,6 +207,7 @@ def apply_run_semantics(
     start: Optional[float] = None,
     stop: Optional[float] = None,
     step: int = 1,
+    as_arrays: bool = False,
 ) -> dict[str, Any]:
     """Return corrected curves, depth/TVD and provenance metadata for one run."""
     well = log_run.well
@@ -286,7 +287,7 @@ def apply_run_semantics(
         arr, unit_warning = convert_array(arr, cd.unit, target) if target else (arr, None)
         if unit_warning:
             warnings.append(f"{item['name']}: {unit_warning}")
-        curves[item["name"]] = [
+        curves[item["name"]] = arr if as_arrays else [
             None if np.isnan(v) else round(float(v), 6) for v in arr
         ]
         curve_meta.append({
@@ -300,8 +301,8 @@ def apply_run_semantics(
     depth_out = corrected[mask][::step]
     tvd_out = tvd[mask][::step]
     if depth_out.size:
-        curves["DEPTH"] = [round(float(v), 4) for v in depth_out]
-        curves["TVD"] = [round(float(v), 4) for v in tvd_out]
+        curves["DEPTH"] = depth_out if as_arrays else [round(float(v), 4) for v in depth_out]
+        curves["TVD"] = tvd_out if as_arrays else [round(float(v), 4) for v in tvd_out]
 
     payload = {
         "version": SEMANTICS_VERSION,

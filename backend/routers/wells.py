@@ -47,6 +47,7 @@ try:
         utc_now_iso as _utc_now_iso,
     )
     from las_parser import LASParser
+    from semantics import apply_run_semantics
     from models import (
         Annotation,
         CompletionData,
@@ -102,6 +103,7 @@ except ImportError:
         utc_now_iso as _utc_now_iso,
     )
     from backend.las_parser import LASParser
+    from backend.semantics import apply_run_semantics
     from backend.models import (
         Annotation,
         CompletionData,
@@ -236,6 +238,35 @@ def _build_petro_summary(wid: int, params: dict, db: Session):
         "notes": "Template applied and petrophysical defaults updated.",
     }
 
+
+def _semantic_curves(db: Session, lr: LogRun):
+    """Depth plus a raw/canonical name -> corrected array map for one run."""
+    semantic = apply_run_semantics(db, lr, as_arrays=True)
+    depth = np.asarray(semantic["depth"], dtype=np.float64)
+    by_name = {}
+    for meta in semantic["metadata"]["aliases"]:
+        arr = semantic["curves"].get(meta["name"])
+        if arr is not None:
+            by_name[str(meta["name"]).upper()] = arr
+            by_name[str(meta["raw"]).upper()] = arr
+    return depth, by_name
+
+def _first_curve(by_name: dict, names):
+    for name in names:
+        arr = by_name.get(str(name).upper())
+        if arr is not None:
+            return arr
+    return None
+
+def _aligned(arr, n: int):
+    if arr is None:
+        return np.full(n, np.nan, dtype=np.float64)
+    arr = np.asarray(arr, dtype=np.float64)
+    if len(arr) == n:
+        return arr
+    out = np.full(n, np.nan, dtype=np.float64)
+    out[:min(len(arr), n)] = arr[:min(len(arr), n)]
+    return out
 
 def _safe_float(val, default=None):
     """Safely convert value to float, return default on failure."""
@@ -2641,33 +2672,26 @@ def compute_permeability(wid: int, data: dict, db: Session = Depends(get_db)):
     timur_a = float(data.get("timur_a", 0.136))
     sdr_a = float(data.get("sdr_a", 4.0))
 
-    depth_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
-    if not depth_cd:
+    depth, by_name = _semantic_curves(db, lr)
+    if depth.size == 0:
         raise HTTPException(404, "Depth curve not found")
-
-    phie_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == phie_curve).first()
-    sw_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == sw_curve).first()
-
-    depth = np.frombuffer(depth_cd.data_binary, dtype=np.float64).copy()
+    n = len(depth)
+    phie = by_name.get(str(phie_curve).upper())
+    sw = by_name.get(str(sw_curve).upper())
 
     # PHIE fallback from RHOB if needed
-    if phie_cd:
-        phie = np.frombuffer(phie_cd.data_binary, dtype=np.float64).copy()
-    else:
-        rho_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == rhob_curve).first()
-        if not rho_cd:
+    if phie is None:
+        rho_arr = by_name.get(str(rhob_curve).upper())
+        if rho_arr is None:
             raise HTTPException(404, f"Curve {phie_curve} not found and no {rhob_curve} for fallback")
-        rho_arr = np.frombuffer(rho_cd.data_binary, dtype=np.float64).copy()
-        rho_ma = grain_density
-        rho_f = 1.0
-        phie = density_porosity(rho_arr, rho_ma, rho_f, lo=0.0, hi=0.6)
+        rho_arr = _aligned(rho_arr, n)
+        phie = density_porosity(rho_arr, grain_density, 1.0, lo=0.0, hi=0.6)
         phie[np.isnan(rho_arr)] = np.nan
+    else:
+        phie = _aligned(phie, n)
 
     # Sw / Swir handling
-    if sw_cd:
-        sw = np.frombuffer(sw_cd.data_binary, dtype=np.float64).copy()
-    else:
-        sw = np.full_like(phie, np.nan)
+    sw = _aligned(sw, n) if sw is not None else np.full(n, np.nan)
 
     # User Swir takes priority. Else estimate Swir = Sw * (1 - water_cut)
     user_swir = data.get("swir")
@@ -3544,17 +3568,18 @@ def compute_dual_water(wid: int, data: dict, db: Session = Depends(get_db)):
     if not lr:
         raise HTTPException(404, "No log run")
 
-    rt_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["RT", "RESD", "RILD", "ILD"])).first()
-    nphi_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["NPHI", "NPHI_LS"])).first()
-    gr_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["GR", "SGR", "CGR"])).first()
-    dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
-    if not rt_cd or not nphi_cd:
+    dept, by_name = _semantic_curves(db, lr)
+    n = len(dept)
+    if n == 0:
+        raise HTTPException(400, "Log run has no depth samples")
+    rt = _first_curve(by_name, ["RT", "RESD", "RILD", "ILD"])
+    nphi = _first_curve(by_name, ["NPHI", "NPHI_LS"])
+    gr = _first_curve(by_name, ["GR", "SGR", "CGR"])
+    if rt is None or nphi is None:
         raise HTTPException(400, "Need RT and NPHI curves")
-
-    rt = np.frombuffer(rt_cd.data_binary, dtype=np.float64).copy()
-    nphi = np.frombuffer(nphi_cd.data_binary, dtype=np.float64).copy()
-    gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy() if gr_cd else np.zeros_like(rt)
-    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(rt)) * 0.5
+    rt = _aligned(rt, n)
+    nphi = _aligned(nphi, n)
+    gr = _aligned(gr, n)
 
     a_v = float(data.get("a", 1.0))
     m_v = float(data.get("m", 2.0))
@@ -3570,7 +3595,6 @@ def compute_dual_water(wid: int, data: dict, db: Session = Depends(get_db)):
     if gr_max == gr_min:
         gr_max = gr_min + 1
 
-    n = len(rt)
     sw = np.full(n, np.nan)
     vsh_arr = np.full(n, np.nan)
     phie_arr = np.full(n, np.nan)
@@ -3635,18 +3659,18 @@ def compute_vcl_models(wid: int, data: dict, db: Session = Depends(get_db)):
     if not lr:
         raise HTTPException(404, "No log run")
 
-    gr_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["GR", "SGR", "CGR"])).first()
-    dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
-    if not gr_cd:
+    dept, by_name = _semantic_curves(db, lr)
+    gr = _first_curve(by_name, ["GR", "SGR", "CGR"])
+    if gr is None:
         raise HTTPException(400, "GR curve required")
-
-    gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy()
-    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(gr)) * 0.5
+    n = len(dept)
+    if n == 0:
+        raise HTTPException(400, "Log run has no depth samples")
+    gr = _aligned(gr, n)
 
     gr_clean = float(data.get("gr_clean", 20))  # GR in clean sand
     gr_shale = float(data.get("gr_shale", 120))  # GR in shale
 
-    n = len(gr)
     results = {
         "depth": dept.tolist(),
         "igr": np.full(n, np.nan).tolist(),
@@ -3821,37 +3845,56 @@ def compute_saturation(wid: int, data: dict, db: Session = Depends(get_db)):
     if not lr:
         raise HTTPException(404, "No log run")
 
-    # Load curves with flexible names
+    # Load curves through the shared semantics layer.
+    semantic = apply_run_semantics(db, lr, as_arrays=True)
+    by_name = {}
+    for meta in semantic["metadata"]["aliases"]:
+        arr = semantic["curves"].get(meta["name"])
+        if arr is not None:
+            by_name[str(meta["name"]).upper()] = arr
+            by_name[str(meta["raw"]).upper()] = arr
+
     def _get_curve(names):
         for name in names:
-            cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == name).first()
-            if cd:
-                return cd
+            arr = by_name.get(name.upper())
+            if arr is not None:
+                return arr
         return None
 
-    rt_cd = _get_curve(["RT", "RESD", "RILD", "ILD"])
-    gr_cd = _get_curve(["GR", "SGR", "CGR"])
-    nphi_cd = _get_curve(["NPHI", "NPHI_LS"])
-    rhob_cd = _get_curve(["RHOB", "RHOZ", "DEN"])
-    dept_cd = _get_curve(["DEPT", "DEPTH"])
-    # Density quality control: the tool's own correction, and hole size vs bit.
-    drho_cd = _get_curve(["DRHO", "DCOR", "HDRA"])
-    cali_cd = _get_curve(["CAL", "CALI", "HCAL", "DCAL"])
-    bs_cd = _get_curve(["BS", "BIT", "BIT_SIZE"])
+    dept = np.asarray(semantic["depth"], dtype=np.float64)
+    if dept.size == 0:
+        raise HTTPException(400, "Log run has no depth samples")
+    rt = _get_curve(["RT", "RESD", "RILD", "ILD"])
+    gr = _get_curve(["GR", "SGR", "CGR"])
+    nphi = _get_curve(["NPHI", "NPHI_LS"])
+    rhob = _get_curve(["RHOB", "RHOZ", "DEN"])
+    drho = _get_curve(["DRHO", "DCOR", "HDRA"])
+    cali = _get_curve(["CAL", "CALI", "HCAL", "DCAL"])
+    bit_size = _get_curve(["BS", "BIT", "BIT_SIZE"])
 
-    if not rt_cd:
+    if rt is None:
         raise HTTPException(400, "RT curve required")
-    if not gr_cd:
+    if gr is None:
         raise HTTPException(400, "GR curve required for Vclay")
 
-    rt = np.frombuffer(rt_cd.data_binary, dtype=np.float64).copy()
-    gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy()
-    nphi = np.frombuffer(nphi_cd.data_binary, dtype=np.float64).copy() if nphi_cd else np.full_like(rt, np.nan)
-    rhob = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy() if rhob_cd else np.full_like(rt, np.nan)
-    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(rt)) * 0.5
-    drho = np.frombuffer(drho_cd.data_binary, dtype=np.float64).copy() if drho_cd else None
-    cali = np.frombuffer(cali_cd.data_binary, dtype=np.float64).copy() if cali_cd else None
-    bit_size = np.frombuffer(bs_cd.data_binary, dtype=np.float64).copy() if bs_cd else None
+    n = len(dept)
+    def _fit(arr):
+        if arr is None:
+            return np.full(n, np.nan)
+        arr = np.asarray(arr, dtype=np.float64)
+        if len(arr) == n:
+            return arr
+        out = np.full(n, np.nan)
+        out[:min(len(arr), n)] = arr[:min(len(arr), n)]
+        return out
+
+    rt = _fit(rt)
+    gr = _fit(gr)
+    nphi = _fit(nphi)
+    rhob = _fit(rhob)
+    drho = _fit(drho) if drho is not None else None
+    cali = _fit(cali) if cali is not None else None
+    bit_size = _fit(bit_size) if bit_size is not None else None
 
     # Parameters
     model = str(data.get("model", "archie")).lower()
@@ -4033,27 +4076,21 @@ def multimineral_solver(wid: int, data: dict, db: Session = Depends(get_db)):
     if not lr:
         raise HTTPException(404, "No log run")
 
-    def _get_curve(names):
-        for name in names:
-            cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == name).first()
-            if cd:
-                return cd
-        return None
+    dept, by_name = _semantic_curves(db, lr)
+    n_pts = len(dept)
+    if n_pts == 0:
+        raise HTTPException(400, "Log run has no depth samples")
+    rhob = _first_curve(by_name, ["RHOB", "RHOZ", "DEN"])
+    nphi = _first_curve(by_name, ["NPHI", "NPHI_LS"])
+    dt_arr = _first_curve(by_name, ["DT", "DTC", "DTCO"])
+    gr = _first_curve(by_name, ["GR", "SGR", "CGR"])
 
-    rhob_cd = _get_curve(["RHOB", "RHOZ", "DEN"])
-    nphi_cd = _get_curve(["NPHI", "NPHI_LS"])
-    dt_cd = _get_curve(["DT", "DTC", "DTCO"])
-    gr_cd = _get_curve(["GR", "SGR", "CGR"])
-    dept_cd = _get_curve(["DEPT", "DEPTH"])
-
-    if not rhob_cd or not nphi_cd:
+    if rhob is None or nphi is None:
         raise HTTPException(400, "Need RHOB and NPHI at minimum")
-
-    rhob = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy()
-    nphi = np.frombuffer(nphi_cd.data_binary, dtype=np.float64).copy()
-    dt_arr = np.frombuffer(dt_cd.data_binary, dtype=np.float64).copy() if dt_cd else None
-    gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy() if gr_cd else None
-    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(rhob))
+    rhob = _aligned(rhob, n_pts)
+    nphi = _aligned(nphi, n_pts)
+    dt_arr = _aligned(dt_arr, n_pts) if dt_arr is not None else None
+    gr = _aligned(gr, n_pts) if gr is not None else None
 
     # Endmember values (can be overridden via data)
     endmembers = {
@@ -4074,7 +4111,6 @@ def multimineral_solver(wid: int, data: dict, db: Session = Depends(get_db)):
     gr_min = float(np.nanmin(gr)) if gr is not None and not np.all(np.isnan(gr)) else 10
     gr_range = max(gr_max - gr_min, 1)
 
-    n_pts = len(rhob)
     result = {
         "v_quartz": np.full(n_pts, np.nan),
         "v_calcite": np.full(n_pts, np.nan),
@@ -4172,25 +4208,18 @@ def compute_permeability_multi(wid: int, data: dict, db: Session = Depends(get_d
     if not lr:
         raise HTTPException(404, "No log run")
 
-    def _get_curve(names):
-        for name in names:
-            cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == name).first()
-            if cd:
-                return cd
-        return None
-
-    gr_cd = _get_curve(["GR", "SGR", "CGR"])
-    nphi_cd = _get_curve(["NPHI", "NPHI_LS"])
-    rhob_cd = _get_curve(["RHOB", "RHOZ", "DEN"])
-    dept_cd = _get_curve(["DEPT", "DEPTH"])
-
-    if not nphi_cd:
+    dept, by_name = _semantic_curves(db, lr)
+    n_pts = len(dept)
+    if n_pts == 0:
+        raise HTTPException(400, "Log run has no depth samples")
+    nphi = _first_curve(by_name, ["NPHI", "NPHI_LS"])
+    rhob = _first_curve(by_name, ["RHOB", "RHOZ", "DEN"])
+    gr = _first_curve(by_name, ["GR", "SGR", "CGR"])
+    if nphi is None:
         raise HTTPException(400, "NPHI curve required")
-
-    nphi = np.frombuffer(nphi_cd.data_binary, dtype=np.float64).copy()
-    rhob = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy() if rhob_cd else np.full_like(nphi, np.nan)
-    gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy() if gr_cd else np.full_like(nphi, np.nan)
-    dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(nphi))
+    nphi = _aligned(nphi, n_pts)
+    rhob = _aligned(rhob, n_pts) if rhob is not None else np.full(n_pts, np.nan)
+    gr = _aligned(gr, n_pts) if gr is not None else np.full(n_pts, np.nan)
 
     # Porosity
     phi = np.where(np.isnan(rhob), nphi, density_porosity(rhob, lo=-0.15, hi=0.60))

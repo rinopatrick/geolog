@@ -9,9 +9,11 @@ from sqlalchemy.orm import Session
 try:
     from database import get_db
     from models import Well, LogRun, CurveData
+    from semantics import apply_run_semantics
 except ImportError:
     from backend.database import get_db
     from backend.models import Well, LogRun, CurveData
+    from backend.semantics import apply_run_semantics
 
 
 router = APIRouter(prefix="/api/wells/{wid}", tags=["qc"])
@@ -286,23 +288,20 @@ def _run_advanced_qc(wid: int, db: Session) -> Dict[str, Any]:
     if not lr.num_points or lr.num_points <= 0:
         raise HTTPException(status_code=400, detail="Log run has no data points")
 
-    depth_cd = db.query(CurveData).filter(
-        CurveData.log_run_id == lr.id,
-        CurveData.mnemonic.in_(["DEPT", "DEPTH", "MD", "TVD"]),
-    ).first()
-    if depth_cd and depth_cd.data_binary:
-        depth = np.frombuffer(depth_cd.data_binary, dtype=np.float64).copy()
-        if depth.size == 0:
-            depth = np.linspace(float(lr.start_depth), float(lr.stop_depth), int(lr.num_points))
-    else:
-        depth = np.linspace(float(lr.start_depth), float(lr.stop_depth), int(lr.num_points))
-    n_points = int(len(depth))
-    step = float(lr.step) if lr.step not in (None, 0) else float((lr.stop_depth - lr.start_depth) / max(1, n_points - 1))
-
-    cds = db.query(CurveData).filter(CurveData.log_run_id == lr.id).all()
-    curves: Dict[str, np.ndarray] = {}
-    for cd in cds:
-        curves[cd.mnemonic] = _curve_array(cd, n_points)
+    semantic = apply_run_semantics(db, lr, as_arrays=True)
+    depth = np.asarray(semantic["depth"], dtype=np.float64)
+    if depth.size == 0:
+        raise HTTPException(status_code=400, detail="Log run has no depth samples")
+    curves: Dict[str, np.ndarray] = {
+        name: np.asarray(values, dtype=np.float64)
+        for name, values in semantic["curves"].items()
+        if name not in {"DEPTH", "TVD"}
+    }
+    diffs = np.diff(depth)
+    diffs = diffs[np.isfinite(diffs)]
+    step = float(np.median(np.abs(diffs))) if diffs.size else float(lr.step or 0.5)
+    if not np.isfinite(step) or step <= 0:
+        step = float(lr.step or 0.5)
 
     curve_results: Dict[str, Any] = {}
     missing_all: List[Dict[str, Any]] = []
