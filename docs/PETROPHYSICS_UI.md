@@ -23,7 +23,8 @@ Reads `core/datasets`, `core/plugs`, `core/rock-types`, `core/flow-units`,
 - Phi–permeability canvas crossplot with FZI reference lines.
 - Pc canvas plot for the selected plug.
 - Summary strip: PC fit R², flow unit and QC interpretation.
-- Actions: CSV import, approve dataset, FZI clustering (`k=3`) and J-function fit.
+- Actions: CSV import with dry-run preview/conflict resolution, approve dataset, FZI clustering (`k=3`) and J-function fit.
+- Saturation-height model selector and `Apply SH` toggle: the Pc panel can switch between the plug Pc curve and a depth–Sw profile.
 - Approved datasets are immutable; the UI disables approval after it lands.
 
 ## Geomechanics
@@ -50,6 +51,7 @@ Reads/writes `image-assets` and `image-assets/{id}/dips`.
 - Raster upload (PNG/JPEG/TIFF/BMP) with depth range and radius; DLIS channel
   import remains an API/CLI concern.
 - All image requests use authenticated fetch, not unauthenticated `<img>` URLs.
+- Edit asset metadata/range/radius and delete an asset with its picks.
 
 ## Role gates
 
@@ -58,7 +60,7 @@ viewers by the existing role-gate path. Reads remain viewer-accessible.
 
 ## Limits
 
-- No bulk editing, CSV preview before import, or conflict-resolution dialog.
+- No bulk editing outside CSV import; no core-photo upload UI yet.
 - No DLIS upload UI; use `POST /image-assets/import-dlis`.
 - No auto dip picking, image conditioning, aperture or full coverage QC.
 - Canvas charts are screening-quality, not print-grade vector figures.

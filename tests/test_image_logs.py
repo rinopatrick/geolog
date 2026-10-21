@@ -46,6 +46,12 @@ def test_image_upload_and_dip_fit(make_well):
     detail = client.get(f"/api/wells/{wid}/image-assets/{aid}").json()
     assert detail["dip_rows"][0]["approved"] is True
 
+    edited = client.put(f"/api/wells/{wid}/image-assets/{aid}", headers=I,
+                        json={"image_type": "FMI-2", "source": "edited"})
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["image_type"] == "FMI-2"
+    assert edited.json()["source"] == "edited"
+
     direct = client.post(f"/api/wells/{wid}/image-assets/{aid}/dips", headers=I,
                          json={"depth": 1002, "dip_angle": 20, "dip_azimuth": 120})
     assert direct.status_code == 201

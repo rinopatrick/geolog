@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, the API is not yet stable.
 
+## [Unreleased]
+
+### Added
+
+- **Workbench interaction completion.** Core CSV dry-run preview with conflict
+  skip/update actions, saturation-height model apply/toggle, geomechanics
+  calibration editor, DLIS image-channel upload, and image asset edit/delete.
+
 ## [0.7.0] - 2026-10-21
 
 ### Added
