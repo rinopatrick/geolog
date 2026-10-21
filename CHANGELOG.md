@@ -10,6 +10,11 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
+- **Geomechanics screening v1.** Versioned well/zone models, calibration-gated
+  `Pp`/`Shmin`/`Shmax`, dynamic elastic moduli, generalized-Kirsch screening
+  hoop stress, mud window, Mohr-Coulomb/Hoek-Brown/Drucker-Prager flags,
+  sanding CDP, optional fracture-slip, JSON/CSV/PDF reports, migration
+  `e5f6a7b8c9d0`, and `docs/GEOMECHANICS.md`.
 - **Core/SCAL v1.** Core datasets/plugs/measurements, capillary pressure,
   relative permeability, photos/thin-section metadata, CSV import (dry-run and
   conflict reporting), FZI multi-resolution flow units, contacts, and J-function

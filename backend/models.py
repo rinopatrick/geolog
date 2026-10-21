@@ -58,6 +58,7 @@ class Well(Base):
     flow_units = relationship("FlowUnit", back_populates="well", cascade="all, delete-orphan")
     contacts = relationship("Contact", back_populates="well", cascade="all, delete-orphan")
     saturation_height_models = relationship("SaturationHeightModel", back_populates="well", cascade="all, delete-orphan")
+    geomechanics_models = relationship("GeomechanicsModel", back_populates="well", cascade="all, delete-orphan")
 
 
 class LogRun(Base):
@@ -547,6 +548,44 @@ class SaturationHeightModel(Base):
     approved_at = Column(DateTime, nullable=True)
 
     well = relationship("Well", back_populates="saturation_height_models")
+
+
+
+class GeomechanicsModel(Base):
+    """Versioned screening parameters/calibration for one well and optional zone."""
+    __tablename__ = "geomechanics_models"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, index=True)
+    zone_id = Column(Integer, ForeignKey("zones.id"), nullable=True, index=True)
+    version = Column(Integer, default=1)
+    status = Column(String(20), default="draft", index=True)
+    model_type = Column(String(50), default="screening")
+    params_json = Column(Text, default="{}")
+    calibration_json = Column(Text, default="{}")
+    input_hash = Column(String(64), default="")
+    created_by = Column(String(120), default="")
+    created_at = Column(DateTime, default=utcnow)
+    approved_by = Column(String(120), default="")
+    approved_at = Column(DateTime, nullable=True)
+
+    well = relationship("Well", back_populates="geomechanics_models")
+    runs = relationship("GeomechanicsRun", back_populates="model", cascade="all, delete-orphan")
+
+class GeomechanicsRun(Base):
+    __tablename__ = "geomechanics_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    model_id = Column(Integer, ForeignKey("geomechanics_models.id"), nullable=False, index=True)
+    log_run_id = Column(Integer, ForeignKey("log_runs.id"), nullable=False, index=True)
+    depth_top = Column(Float, nullable=True)
+    depth_bottom = Column(Float, nullable=True)
+    summary_json = Column(Text, default="{}")
+    warnings_json = Column(Text, default="[]")
+    provenance_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=utcnow)
+
+    model = relationship("GeomechanicsModel", back_populates="runs")
 
 class AuditLog(Base):
     """Track all user actions for audit trail."""
