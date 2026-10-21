@@ -2,8 +2,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import math
-import json
-import os
 
 try:
     from database import get_db
@@ -167,9 +165,10 @@ def apply_template(wid: int, data: dict, db: Session = Depends(get_db)):
 def template_preview(wid: int, data: dict, db: Session = Depends(get_db)):
     """Preview what a template would change without applying."""
     template_name = data.get("template_name") or ""
+    target = str(template_name).strip().lower()
     template = None
     for t in TEMPLATE_DB:
-        if t["name"].lower() == template_name.lower():
+        if t["name"].lower() == target:
             template = t
             break
     if not template:

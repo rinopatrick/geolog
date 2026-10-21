@@ -11,7 +11,6 @@ rest of the lifecycle.
 
 from __future__ import annotations
 
-import datetime
 import hashlib
 import json
 import os
@@ -19,14 +18,39 @@ import os
 from sqlalchemy.orm import Session
 
 try:
+    from filelock import interprocess_lock
+except ImportError:
+    from backend.filelock import interprocess_lock
+
+try:
     from timeutils import utcnow
 except ImportError:
     from backend.timeutils import utcnow
 
 try:
-    from models import PetroParams
+    from models import (
+        Annotation,
+        CorrelationMarker,
+        CorrelationProfile,
+        CurveAlias,
+        DeviationSurvey,
+        LogRun,
+        LogRunDepthShift,
+        PetroParams,
+        ProductionData,
+    )
 except ImportError:
-    from backend.models import PetroParams
+    from backend.models import (
+        Annotation,
+        CorrelationMarker,
+        CorrelationProfile,
+        CurveAlias,
+        DeviationSurvey,
+        LogRun,
+        LogRunDepthShift,
+        PetroParams,
+        ProductionData,
+    )
 
 
 # Snapshots and locks live on disk, not in the database.
@@ -106,16 +130,17 @@ def get_well_lock(wid: int) -> dict:
 
 
 def set_well_lock(wid: int, locked: bool, actor: str = "system", snapshot_id: str = None):
-    locks = load_locks()
-    current = locks.get(str(wid), {}) if isinstance(locks.get(str(wid), {}), dict) else {}
-    current.update({
-        "locked": bool(locked),
-        "actor": actor,
-        "snapshot_id": snapshot_id,
-        "updated_at": utcnow().isoformat() + "Z",
-    })
-    locks[str(wid)] = current
-    save_locks(locks)
+    with interprocess_lock(LOCK_FILE):
+        locks = load_locks()
+        current = locks.get(str(wid), {}) if isinstance(locks.get(str(wid), {}), dict) else {}
+        current.update({
+            "locked": bool(locked),
+            "actor": actor,
+            "snapshot_id": snapshot_id,
+            "updated_at": utcnow().isoformat() + "Z",
+        })
+        locks[str(wid)] = current
+        save_locks(locks)
 
 
 def get_template_lock(wid: int) -> dict:
@@ -128,15 +153,20 @@ def get_template_lock(wid: int) -> dict:
 
 
 def set_template_lock(wid: int, lock_payload: dict):
-    locks = load_locks()
-    entry = locks.get(str(wid), {}) if isinstance(locks.get(str(wid), {}), dict) else {}
-    entry["template_lock"] = lock_payload
-    locks[str(wid)] = entry
-    save_locks(locks)
+    with interprocess_lock(LOCK_FILE):
+        locks = load_locks()
+        entry = locks.get(str(wid), {}) if isinstance(locks.get(str(wid), {}), dict) else {}
+        entry["template_lock"] = lock_payload
+        locks[str(wid)] = entry
+        save_locks(locks)
 
 
 def snapshot_path(wid: int) -> str:
     return os.path.join(SNAPSHOT_DIR, f"well_{wid}.json")
+
+def snapshot_lock(wid: int):
+    """Cross-process lock for a read-modify-write of one well's snapshots."""
+    return interprocess_lock(os.path.join(SNAPSHOT_DIR, f"well_{wid}"), timeout=10.0)
 
 
 def load_snapshots(wid: int):
@@ -159,11 +189,57 @@ def save_snapshots(wid: int, snapshots):
         json.dump(snapshots, f, indent=2, default=str)
     os.replace(tmp, out)
 
+def mutate_snapshots(wid: int, fn):
+    """Read-modify-write one well's snapshot list under a cross-process lock."""
+    with snapshot_lock(wid):
+        snapshots = load_snapshots(wid)
+        result = fn(snapshots)
+        save_snapshots(wid, snapshots)
+        return result
+
 
 def snapshot_template_signature(db: Session, wid: int):
     payload = current_petro_params_payload(db, wid)
     return payload, compute_template_signature(payload)
 
+
+def delete_well_state(wid: int) -> None:
+    """Remove the lock entry and snapshot file for a well."""
+    with interprocess_lock(LOCK_FILE):
+        locks = load_locks()
+        if str(wid) in locks:
+            locks.pop(str(wid), None)
+            save_locks(locks)
+    try:
+        os.remove(snapshot_path(wid))
+    except FileNotFoundError:
+        pass
+
+def delete_well_data(db: Session, wid: int) -> None:
+    """Remove child rows that are not covered by ORM cascades.
+
+    Without this, deleting a well leaves annotations, production, deviation,
+    aliases, petro params and correlation markers behind. SQLite can then reuse
+    the freed well id, so the next well silently inherits the old data and the
+    old lock/snapshot files. Audit rows are intentionally kept.
+    """
+    run_ids = [row[0] for row in db.query(LogRun.id).filter(LogRun.well_id == wid).all()]
+    if run_ids:
+        db.query(LogRunDepthShift).filter(
+            LogRunDepthShift.log_run_id.in_(run_ids)
+        ).delete(synchronize_session=False)
+    db.query(Annotation).filter(Annotation.well_id == wid).delete(synchronize_session=False)
+    db.query(ProductionData).filter(ProductionData.well_id == wid).delete(synchronize_session=False)
+    db.query(DeviationSurvey).filter(DeviationSurvey.well_id == wid).delete(synchronize_session=False)
+    db.query(CurveAlias).filter(CurveAlias.well_id == wid).delete(synchronize_session=False)
+    db.query(PetroParams).filter(PetroParams.well_id == wid).delete(synchronize_session=False)
+    db.query(CorrelationMarker).filter(
+        (CorrelationMarker.well_a_id == wid) | (CorrelationMarker.well_b_id == wid)
+    ).delete(synchronize_session=False)
+    db.query(CorrelationProfile).filter(
+        (CorrelationProfile.well_a_id == wid) | (CorrelationProfile.well_b_id == wid)
+    ).delete(synchronize_session=False)
+    delete_well_state(wid)
 
 # Aliases matching the names main.py used before these moved, so no call site in
 # main.py had to change.
@@ -180,3 +256,7 @@ _snapshot_template_signature = snapshot_template_signature
 _compute_template_signature = compute_template_signature
 _default_template_lock = default_template_lock
 _current_petro_params_payload = current_petro_params_payload
+_delete_well_data = delete_well_data
+_delete_well_state = delete_well_state
+_snapshot_lock = snapshot_lock
+_mutate_snapshots = mutate_snapshots

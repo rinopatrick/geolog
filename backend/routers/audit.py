@@ -7,7 +7,6 @@ verification. The signing and chain helpers live in backend/audit.py because the
 
 from __future__ import annotations
 
-import datetime
 import hashlib
 import hmac
 import json

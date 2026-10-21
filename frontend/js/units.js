@@ -34,7 +34,7 @@ class UnitNormalizationPanel {
     async _loadUnitMap() {
         try {
             const resp = await fetch(`${this.apiBase}/wells/${this.wellId}/unit-map`, {
-                headers: { 'X-User-Role': (window.app?.currentRole || 'admin') },
+                headers: window.geologAuthHeaders(),
             });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             this.unitMap = await resp.json();
@@ -76,10 +76,10 @@ class UnitNormalizationPanel {
                 ? `<span style="background:#d2992230;color:#d29922;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:4px">alias</span>`
                 : '';
             html += `<tr style="border-bottom:1px solid #21262d">
-                <td style="padding:5px 8px;font-weight:600">${c.mnemonic}${aliasBadge}</td>
-                <td style="padding:5px 8px;color:#8b949e">${c.unit || '—'}</td>
-                <td style="padding:5px 8px">${c.canonical}</td>
-                <td style="padding:5px 8px"><span style="color:${color}">●</span> ${c.category}</td>
+                <td style="padding:5px 8px;font-weight:600">${window.escapeHtml(c.mnemonic)}${aliasBadge}</td>
+                <td style="padding:5px 8px;color:#8b949e">${window.escapeHtml(c.unit || '—')}</td>
+                <td style="padding:5px 8px">${window.escapeHtml(c.canonical)}</td>
+                <td style="padding:5px 8px"><span style="color:${color}">●</span> ${window.escapeHtml(c.category)}</td>
                 <td style="padding:5px 8px;font-size:11px;color:#58a6ff">${convStr}</td>
             </tr>`;
         }
@@ -91,7 +91,7 @@ class UnitNormalizationPanel {
         try {
             const resp = await fetch(`${this.apiBase}/wells/${this.wellId}/normalize-units`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-User-Role': (window.app?.currentRole || 'admin') },
+                headers: { 'Content-Type': 'application/json', ...window.geologAuthHeaders() },
                 body: JSON.stringify({ target: 'field' }),
             });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -103,7 +103,7 @@ class UnitNormalizationPanel {
                 let note = '<div style="margin-top:12px;padding:10px;background:#161b22;border:1px solid #30363d;border-radius:6px;font-size:12px">';
                 note += '<strong style="color:#d29922">Available Conversions:</strong><br>';
                 for (const cv of result.conversions) {
-                    note += `<div style="margin-top:4px">${cv.mnemonic}: ${cv.from_unit} → ${cv.to_unit} (factor: ${cv.factor}) — ${cv.action}</div>`;
+                    note += `<div style="margin-top:4px">${window.escapeHtml(cv.mnemonic)}: ${window.escapeHtml(cv.from_unit)} → ${window.escapeHtml(cv.to_unit)} (factor: ${window.escapeHtml(cv.factor)}) — ${window.escapeHtml(cv.action)}</div>`;
                 }
                 note += '</div>';
                 el.innerHTML += note;
@@ -117,7 +117,7 @@ class UnitNormalizationPanel {
         try {
             const resp = await fetch(`${this.apiBase}/wells/${this.wellId}/resolve-aliases`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-User-Role': (window.app?.currentRole || 'admin') },
+                headers: { 'Content-Type': 'application/json', ...window.geologAuthHeaders() },
                 body: JSON.stringify({ auto: true }),
             });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);

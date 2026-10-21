@@ -379,17 +379,21 @@ class ShiftStretchControls {
   }
 }
 
+function _corrAuthHeaders() {
+  return window.geologAuthHeaders ? window.geologAuthHeaders() : { 'X-User-Role': 'viewer' };
+}
+
 async function fetchCrossSection(baseUrl, wellIds = [], curve = 'GR') {
   const ids = (wellIds || []).map(Number).filter(Number.isFinite);
   const qs = new URLSearchParams({ well_ids: ids.join(','), curve });
-  const r = await fetch(`${baseUrl}/api/correlation/cross-section?${qs.toString()}`);
+  const r = await fetch(`${baseUrl}/api/correlation/cross-section?${qs.toString()}`, { headers: _corrAuthHeaders() });
   if (!r.ok) throw new Error(`Cross-section fetch failed: ${r.status}`);
   return r.json();
 }
 
 async function fetchTieLines(baseUrl, wellAId, wellBId) {
   const qs = new URLSearchParams({ well_a_id: String(wellAId), well_b_id: String(wellBId) });
-  const r = await fetch(`${baseUrl}/api/correlation/tie-lines?${qs.toString()}`);
+  const r = await fetch(`${baseUrl}/api/correlation/tie-lines?${qs.toString()}`, { headers: _corrAuthHeaders() });
   if (!r.ok) throw new Error(`Tie-lines fetch failed: ${r.status}`);
   return r.json();
 }
@@ -397,7 +401,7 @@ async function fetchTieLines(baseUrl, wellAId, wellBId) {
 async function autoCorrelate(baseUrl, payload) {
   const r = await fetch(`${baseUrl}/api/correlation/auto-correlate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ..._corrAuthHeaders() },
     body: JSON.stringify(payload || {}),
   });
   if (!r.ok) throw new Error(`Auto-correlate failed: ${r.status}`);

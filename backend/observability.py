@@ -7,11 +7,15 @@ latencies, and status distributions.
 
 from __future__ import annotations
 
-import datetime
 import json
 import os
 from threading import Lock
 from typing import Any
+
+try:
+    from filelock import interprocess_lock
+except ImportError:
+    from backend.filelock import interprocess_lock
 
 try:
     from timeutils import utcnow
@@ -72,6 +76,18 @@ def _save_metrics(data: dict[str, Any]) -> None:
         json.dump(data, f)
     os.replace(tmp_path, METRICS_FILE)
 
+def refresh_metrics() -> None:
+    """Reload shared counters so a worker sees requests handled by its peers."""
+    with OBS_METRICS_LOCK:
+        data = _load_metrics()
+        OBS_METRICS.clear()
+        OBS_METRICS.update(data)
+
+def current_metrics() -> dict[str, Any]:
+    """Return the persisted counters, not just this worker's copy."""
+    with OBS_METRICS_LOCK:
+        return _load_metrics()
+
 
 def record_request(
     method: str,
@@ -83,30 +99,34 @@ def record_request(
 ) -> None:
     """Record one completed request and persist state across worker processes."""
     with OBS_METRICS_LOCK:
-        metrics = _load_metrics()
-        metrics["requests_total"] = int(metrics.get("requests_total", 0)) + 1
-        metrics["latency_ms_sum"] = float(metrics.get("latency_ms_sum", 0.0)) + elapsed_ms
-        metrics["latency_ms_count"] = int(metrics.get("latency_ms_count", 0)) + 1
+        with interprocess_lock(METRICS_FILE):
+            metrics = _load_metrics()
+            metrics["requests_total"] = int(metrics.get("requests_total", 0)) + 1
+            metrics["latency_ms_sum"] = float(metrics.get("latency_ms_sum", 0.0)) + elapsed_ms
+            metrics["latency_ms_count"] = int(metrics.get("latency_ms_count", 0)) + 1
 
-        by_method = metrics.setdefault("requests_by_method", {})
-        by_status = metrics.setdefault("requests_by_status", {})
-        by_method[method] = int(by_method.get(method, 0)) + 1
-        by_status[str(status)] = int(by_status.get(str(status), 0)) + 1
+            by_method = metrics.setdefault("requests_by_method", {})
+            by_status = metrics.setdefault("requests_by_status", {})
+            by_method[method] = int(by_method.get(method, 0)) + 1
+            by_status[str(status)] = int(by_status.get(str(status), 0)) + 1
 
-        recent = metrics.setdefault("recent_events", [])
-        if isinstance(recent, list):
-            recent.append({
-                "ts": utcnow().isoformat() + "Z",
-                "request_id": request_id,
-                "trace_id": trace_id,
-                "method": method,
-                "path": path,
-                "status": int(status),
-                "latency_ms": round(elapsed_ms, 2),
-            })
-            if len(recent) > RECENT_EVENT_LIMIT:
-                del recent[:-RECENT_EVENT_LIMIT]
+            recent = metrics.setdefault("recent_events", [])
+            if isinstance(recent, list):
+                recent.append({
+                    "ts": utcnow().isoformat() + "Z",
+                    "request_id": request_id,
+                    "trace_id": trace_id,
+                    "method": method,
+                    "path": path,
+                    "status": int(status),
+                    "latency_ms": round(elapsed_ms, 2),
+                })
+                if len(recent) > RECENT_EVENT_LIMIT:
+                    del recent[:-RECENT_EVENT_LIMIT]
 
-        _save_metrics(metrics)
-        OBS_METRICS.clear()
-        OBS_METRICS.update(metrics)
+            _save_metrics(metrics)
+            OBS_METRICS.clear()
+            OBS_METRICS.update(metrics)
+
+# Load existing counters at worker start so /api/ops sees earlier traffic too.
+OBS_METRICS.update(_load_metrics())

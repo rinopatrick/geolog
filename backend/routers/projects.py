@@ -34,6 +34,7 @@ try:
         Well,
         Zone,
     )
+    from well_state import delete_well_data as _delete_well_data
 except ImportError:
     from backend.database import SessionLocal, get_db
     from backend.deps import require_interpreter
@@ -53,6 +54,7 @@ except ImportError:
         Well,
         Zone,
     )
+    from backend.well_state import delete_well_data as _delete_well_data
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -90,6 +92,8 @@ def delete_project(pid: int, db: Session = Depends(get_db)):
     p = db.query(Project).filter(Project.id == pid).first()
     if not p:
         raise HTTPException(404, "Project not found")
+    for well in p.wells:
+        _delete_well_data(db, well.id)
     db.delete(p)
     db.commit()
 
@@ -397,8 +401,6 @@ def project_summary(pid: int, db: Session = Depends(get_db)):
         avg_thickness = (gross_ft / zones_count) if zones_count > 0 else 0.0
         net_ft = float(zones_count) * avg_thickness
 
-        petro = db.query(PetroParams).filter(PetroParams.well_id == w.id).first()
-        _avg_porosity = float(petro.phie_cutoff) if petro and petro.phie_cutoff is not None else None
 
         total_log_runs += log_runs_count
         total_tops += tops_count

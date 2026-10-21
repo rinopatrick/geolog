@@ -28,7 +28,7 @@ class TemplateWorkflowPanel {
     async _loadTemplates() {
         try {
             const resp = await fetch(`${this.apiBase}/templates`, {
-                headers: { 'X-User-Role': (window.app?.currentRole || 'admin') },
+                headers: window.geologAuthHeaders(),
             });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();
@@ -82,7 +82,7 @@ class TemplateWorkflowPanel {
         try {
             const resp = await fetch(`${this.apiBase}/wells/${this.wellId}/template-preview`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-User-Role': (window.app?.currentRole || 'admin') },
+                headers: { 'Content-Type': 'application/json', ...window.geologAuthHeaders() },
                 body: JSON.stringify({ template_name: name }),
             });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -132,7 +132,7 @@ class TemplateWorkflowPanel {
         try {
             const resp = await fetch(`${this.apiBase}/wells/${this.wellId}/apply-template`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-User-Role': (window.app?.currentRole || 'admin') },
+                headers: { 'Content-Type': 'application/json', ...window.geologAuthHeaders() },
                 body: JSON.stringify({ template_name: name }),
             });
             if (!resp.ok) {
@@ -151,7 +151,7 @@ class TemplateWorkflowPanel {
     async _loadComparison() {
         try {
             const resp = await fetch(`${this.apiBase}/wells/${this.wellId}/template-comparison`, {
-                headers: { 'X-User-Role': (window.app?.currentRole || 'admin') },
+                headers: window.geologAuthHeaders(),
             });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const result = await resp.json();

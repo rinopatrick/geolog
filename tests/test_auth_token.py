@@ -38,7 +38,8 @@ def test_create_access_token_and_decode():
     assert ctx.source == "jwt"
 
 
-def test_issue_token_endpoint():
+def test_issue_token_endpoint(monkeypatch):
+    monkeypatch.setenv("AUTH_JWT_SECRET", "test-secret-for-token-issuance-12345")
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.username == "auth_test_user").first()
@@ -69,3 +70,33 @@ def test_issue_token_endpoint():
     assert data["token_type"] == "bearer"
     assert "access_token" in data
     assert data["role"] == "admin"
+
+def test_issue_token_rejects_empty_registered_token(monkeypatch):
+    monkeypatch.setenv("AUTH_JWT_SECRET", "test-secret-for-token-issuance-12345")
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == "auth_empty_user").first()
+        if not user:
+            user = User(username="auth_empty_user", display_name="Empty", role="admin", token="")
+            db.add(user)
+            db.commit()
+    finally:
+        db.close()
+
+    r = client.post("/api/users/token", json={"username": "auth_empty_user", "token": "anything"})
+    assert r.status_code == 401, r.text
+
+def test_issue_token_requires_configured_secret(monkeypatch):
+    monkeypatch.delenv("AUTH_JWT_SECRET", raising=False)
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == "auth_no_secret_user").first()
+        if not user:
+            user = User(username="auth_no_secret_user", role="viewer", token="secret")
+            db.add(user)
+            db.commit()
+    finally:
+        db.close()
+
+    r = client.post("/api/users/token", json={"username": "auth_no_secret_user", "token": "secret"})
+    assert r.status_code == 503, r.text

@@ -34,10 +34,21 @@ except ImportError:
     from backend.models import AuditLog
     from backend.validation import canonical_json
 
+try:
+    from filelock import interprocess_lock
+except ImportError:
+    from backend.filelock import interprocess_lock
+
+try:
+    from well_state import ARTIFACT_DIR
+except ImportError:
+    from backend.well_state import ARTIFACT_DIR
+
 # Serialises the read-previous-hash / insert pair. Without it two concurrent
 # writes can both chain onto the same predecessor, producing two rows claiming
 # the same prev_hash and a chain that fails its own verification.
 _CHAIN_LOCK = Lock()
+AUDIT_LOCK_FILE = os.path.join(ARTIFACT_DIR, "audit.lock")
 
 
 def _canonical_payload(
@@ -95,7 +106,7 @@ def append_audit_entry(
     The only writer of `audit_log`. Reads the previous entry's hash and inserts
     under a lock, so the chain cannot fork.
     """
-    with _CHAIN_LOCK:
+    with _CHAIN_LOCK, interprocess_lock(AUDIT_LOCK_FILE):
         previous = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
         prev_hash = (getattr(previous, "entry_hash", "") or "") if previous else ""
 
@@ -134,6 +145,7 @@ def append_audit_entry(
         if commit:
             db.commit()
         return entry_hash
+
 
 
 def log_audit(db: Session, action: str, entity_type: str = "", entity_id: int = None,

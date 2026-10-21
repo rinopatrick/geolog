@@ -24,11 +24,13 @@ try:
     from deps import SafeJSONResponse
     from las_parser import CURVE_TRACKS
     from models import CurveData, LogRun, LogRunDepthShift
+    from validation import optional_float, optional_str
 except ImportError:
     from backend.database import get_db
     from backend.deps import SafeJSONResponse
     from backend.las_parser import CURVE_TRACKS
     from backend.models import CurveData, LogRun, LogRunDepthShift
+    from backend.validation import optional_float, optional_str
 
 router = APIRouter(prefix="/api/log-runs", tags=["log-runs"])
 
@@ -583,17 +585,22 @@ def get_depth_shift(lr_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{lr_id}/depth-shift")
 def save_depth_shift(lr_id: int, data: dict, db: Session = Depends(get_db)):
+    shift = optional_float(data, "shift", 0.0)
+    stretch = optional_float(data, "stretch", 1.0)
+    notes = optional_str(data, "notes")
+    if stretch == 0:
+        raise HTTPException(400, "stretch must not be zero")
     existing = db.query(LogRunDepthShift).filter(LogRunDepthShift.log_run_id == lr_id).first()
     if existing:
-        existing.shift = float(data.get("shift", 0))
-        existing.stretch = float(data.get("stretch", 1))
-        existing.notes = str(data.get("notes", ""))
+        existing.shift = shift
+        existing.stretch = stretch
+        existing.notes = notes
     else:
         db.add(LogRunDepthShift(
             log_run_id=lr_id,
-            shift=float(data.get("shift", 0)),
-            stretch=float(data.get("stretch", 1)),
-            notes=str(data.get("notes", "")),
+            shift=shift,
+            stretch=stretch,
+            notes=notes,
         ))
     db.commit()
     return {"status": "ok"}
@@ -619,31 +626,29 @@ def filter_curve(lr_id: int, data: dict, db: Session = Depends(get_db)):
     valid_idx = ~np.isnan(arr)
     vals = arr[valid_idx]
 
-    if filter_type == "despike":
-        # Median filter
-        half = window // 2
+    half = window // 2
+    if len(vals) == 0:
+        filtered = vals
+    elif filter_type == "despike":
+        padded = np.pad(vals, (half, half), mode="edge")
+        windows = np.lib.stride_tricks.sliding_window_view(padded, window)
+        med = np.median(windows, axis=1)
+        spread = np.std(windows, axis=1)
+        replace = np.abs(vals - med) > 2 * spread
+        if half > 0:
+            replace[:half] = False
+            replace[len(vals) - half:] = False
         filtered = vals.copy()
-        for i in range(half, len(vals) - half):
-            neighbors = vals[max(0, i - half):i + half + 1]
-            med = np.median(neighbors)
-            if abs(vals[i] - med) > 2 * np.std(neighbors):
-                filtered[i] = med
-        result[valid_idx] = filtered
+        filtered[replace] = med[replace]
     else:
-        # Moving average
-        half = window // 2
-        filtered = vals.copy()
-        for i in range(len(vals)):
-            start = max(0, i - half)
-            end = min(len(vals), i + half + 1)
-            filtered[i] = np.mean(vals[start:end])
-        result[valid_idx] = filtered
+        padded = np.pad(vals, (half, half), mode="edge")
+        filtered = np.convolve(padded, np.ones(window) / window, mode="valid")
+    result[valid_idx] = filtered
 
     # Create new curve with suffix
     new_mnemonic = f"{mnemonic}_{'D' if filter_type == 'despike' else 'S'}{window}"
     valid = result[~np.isnan(result)]
 
-    lr = db.query(LogRun).filter(LogRun.id == lr_id).first()
     # Check if filtered curve already exists
     existing = db.query(CurveData).filter(CurveData.log_run_id == lr_id, CurveData.mnemonic == new_mnemonic).first()
     if existing:

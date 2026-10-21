@@ -6,7 +6,6 @@ import numpy as np
 import io
 import csv
 import math
-import datetime
 
 try:
     from timeutils import utcnow
@@ -36,7 +35,7 @@ def _extract_curve(db, lr_id, mnemonics):
             CurveData.log_run_id == lr_id, CurveData.mnemonic == mn
         ).first()
         if cd and cd.data_binary:
-            arr = np.frombuffer(cd.data_binary, dtype=np.float32).copy()
+            arr = np.frombuffer(cd.data_binary, dtype=np.float64).copy()
             if len(arr) > 0:
                 return arr, mn
     return None, None
@@ -134,6 +133,33 @@ def _compute_zone_stats(intervals, depth, vsh, phie, sw, step):
     return zones
 
 
+def _find_gr_valleys(values: np.ndarray, distance: int = 100, prominence: float = 0.0, max_count: int = 10):
+    """Local minima in a smoothed GR curve, spaced at least `distance` samples apart."""
+    vals = np.asarray(values, dtype=np.float64)
+    if vals.size < 3:
+        return []
+    kernel = np.ones(21) / 21
+    smooth = np.convolve(vals, kernel, mode="same")
+    candidates = np.where((smooth[1:-1] <= smooth[:-2]) & (smooth[1:-1] <= smooth[2:]))[0] + 1
+    candidates = candidates[np.isfinite(smooth[candidates])]
+    if candidates.size == 0:
+        return []
+
+    half = max(1, int(distance) // 2)
+    accepted: list[int] = []
+    for idx in candidates[np.argsort(smooth[candidates])]:
+        idx = int(idx)
+        if any(abs(idx - other) < distance for other in accepted):
+            continue
+        lo = max(0, idx - half)
+        hi = min(vals.size, idx + half + 1)
+        local_max = np.nanmax(smooth[lo:hi])
+        if np.isfinite(local_max) and local_max - smooth[idx] >= prominence:
+            accepted.append(idx)
+        if len(accepted) >= max_count:
+            break
+    return sorted(accepted)
+
 @router.post("/auto-zone")
 def auto_zone(wid: int, data: dict, db: Session = Depends(get_db)):
     """Auto-generate zones from petrophysical cutoffs."""
@@ -143,7 +169,14 @@ def auto_zone(wid: int, data: dict, db: Session = Depends(get_db)):
     if not lr.num_points or lr.num_points < 2:
         raise HTTPException(400, "Log run has insufficient data")
 
-    depth = np.linspace(lr.start_depth, lr.stop_depth, lr.num_points)
+    depth_cd = db.query(CurveData).filter(
+        CurveData.log_run_id == lr.id,
+        CurveData.mnemonic.in_(["DEPT", "DEPTH", "MD", "TVD"]),
+    ).first()
+    if depth_cd and depth_cd.data_binary:
+        depth = np.frombuffer(depth_cd.data_binary, dtype=np.float64).copy()
+    else:
+        depth = np.linspace(float(lr.start_depth), float(lr.stop_depth), int(lr.num_points))
     step = abs(float(depth[1] - depth[0])) if len(depth) > 1 else 1.0
 
     # Cutoffs from request or saved PetroParams
@@ -186,7 +219,13 @@ def auto_zone(wid: int, data: dict, db: Session = Depends(get_db)):
     if sw_arr is None:
         raise HTTPException(400, "No SW/RT curve found — cannot compute zones")
 
-    # Build pay mask
+    # Build pay mask. Curves loaded from disk may have different lengths;
+    # align them to the shortest array and the stored depth.
+    n = min(len(depth), len(vsh_arr), len(phie_arr), len(sw_arr))
+    depth = depth[:n]
+    vsh_arr = vsh_arr[:n]
+    phie_arr = phie_arr[:n]
+    sw_arr = sw_arr[:n]
     pay_mask = (
         (vsh_arr < vsh_max) &
         (phie_arr > phie_min) &
@@ -251,21 +290,22 @@ def auto_zone_from_tops(wid: int, db: Session = Depends(get_db)):
             if gr_cd and depth_cd:
                 gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy()
                 depth = np.frombuffer(depth_cd.data_binary, dtype=np.float64).copy()
-                # Find significant peaks/valleys in GR
-                from scipy.signal import find_peaks
-                # Smooth GR for robust peak detection
-                kernel = np.ones(21) / 21
-                gr_smooth = np.convolve(gr, kernel, mode='same')
-                # Find peaks (sand tops = low GR)
-                valleys, _ = find_peaks(-gr_smooth, prominence=np.nanstd(gr) * 0.5, distance=100)
+                n = min(len(gr), len(depth))
+                gr, depth = gr[:n], depth[:n]
+                gr_std = float(np.nanstd(gr)) if n else 0.0
+                if not np.isfinite(gr_std):
+                    gr_std = 0.0
+                valleys = _find_gr_valleys(gr, distance=100, prominence=gr_std * 0.5)
                 if len(valleys) >= 2:
-                    for vi, v in enumerate(valleys[:10]):
+                    palette = ['#1f6feb', '#238636', '#9e6a03', '#8957e5', '#da3633',
+                               '#f78166', '#3fb950', '#58a6ff', '#d29922', '#f0883e']
+                    for vi, v in enumerate(valleys):
                         ft = FormationTop(
                             well_id=wid,
                             formation_name=f"Auto_Top_{vi+1}",
                             depth=float(depth[v]),
                             depth_unit="FT",
-                            color=f"#{hash(str(vi)) % 0xFFFFFF:06x}",
+                            color=palette[vi % len(palette)],
                         )
                         db.add(ft)
                     db.commit()
@@ -315,7 +355,6 @@ def zone_report(wid: int, db: Session = Depends(get_db)):
     zones = db.query(Zone).filter(Zone.well_id == wid).order_by(Zone.sort_order, Zone.top_depth).all()
     zone_list = []
     total_gross = 0
-    total_net = 0
     for z in zones:
         gross = abs(z.bottom_depth - z.top_depth)
         total_gross += gross

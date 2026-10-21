@@ -61,7 +61,7 @@ class ZoneReportPanel {
 
             const resp = await fetch(`${this.apiBase}/${this.wellId}/auto-zone`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-User-Role': (window.app?.currentRole || 'admin') },
+                headers: { 'Content-Type': 'application/json', ...window.geologAuthHeaders() },
                 body: JSON.stringify({ vsh_max, phie_min, sw_max, gap_merge_ft }),
             });
             if (!resp.ok) {
@@ -125,7 +125,7 @@ class ZoneReportPanel {
         for (const z of zones) {
             const color = z.ntg > 0.5 ? '#3fb950' : z.ntg > 0.2 ? '#d29922' : '#f85149';
             html += `<tr style="border-bottom:1px solid #21262d">
-                <td style="padding:5px 8px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px"></span>${z.name}</td>
+                <td style="padding:5px 8px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px"></span>${window.escapeHtml(z.name)}</td>
                 <td style="padding:5px 8px">${fmt(z.top_depth)}</td>
                 <td style="padding:5px 8px">${fmt(z.bottom_depth)}</td>
                 <td style="padding:5px 8px;text-align:right">${fmt(z.gross_ft)}</td>
@@ -154,8 +154,20 @@ class ZoneReportPanel {
         a.click();
     }
 
-    _downloadPDF() {
-        window.open(`${this.apiBase}/${this.wellId}/zone-report/pdf`, '_blank');
+    async _downloadPDF() {
+        const resp = await fetch(`${this.apiBase}/${this.wellId}/zone-report/pdf`, {
+            headers: window.geologAuthHeaders(),
+        });
+        if (!resp.ok) {
+            if (window.GeoToast) GeoToast.error(`PDF export failed: ${resp.status}`);
+            return;
+        }
+        const url = URL.createObjectURL(await resp.blob());
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `zone_report_well_${this.wellId}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
     }
 }
 

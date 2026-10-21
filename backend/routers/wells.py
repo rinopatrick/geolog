@@ -14,12 +14,11 @@ import csv
 import datetime
 import io
 import json
-import re
 import uuid
 import zipfile
 
 import numpy as np
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
@@ -39,7 +38,7 @@ try:
     )
     from audit import log_audit as _log_audit
     from database import SessionLocal, get_db
-    from deps import SafeJSONResponse, require_interpreter
+    from deps import SafeJSONResponse, require_admin, require_interpreter
     from dlis_lis_parser import parse_dlis_content, parse_lis_content
     from jobs import (
         JOB_EXECUTOR,
@@ -59,16 +58,18 @@ try:
         LogRun,
         PetroParams,
         ProductionData,
+        Project,
         RFTPoint,
         Well,
         Zone,
     )
     from well_state import (
         default_template_lock as _default_template_lock,
+        delete_well_data as _delete_well_data,
         get_template_lock as _get_template_lock,
         get_well_lock as _get_well_lock,
         load_snapshots as _load_snapshots,
-        save_snapshots as _save_snapshots,
+        mutate_snapshots as _mutate_snapshots,
         set_template_lock as _set_template_lock,
         set_well_lock as _set_well_lock,
         snapshot_template_signature as _snapshot_template_signature,
@@ -92,7 +93,7 @@ except ImportError:
     )
     from backend.audit import log_audit as _log_audit
     from backend.database import SessionLocal, get_db
-    from backend.deps import SafeJSONResponse, require_interpreter
+    from backend.deps import SafeJSONResponse, require_admin, require_interpreter
     from backend.dlis_lis_parser import parse_dlis_content, parse_lis_content
     from backend.jobs import (
         JOB_EXECUTOR,
@@ -112,16 +113,18 @@ except ImportError:
         LogRun,
         PetroParams,
         ProductionData,
+        Project,
         RFTPoint,
         Well,
         Zone,
     )
     from backend.well_state import (
         default_template_lock as _default_template_lock,
+        delete_well_data as _delete_well_data,
         get_template_lock as _get_template_lock,
         get_well_lock as _get_well_lock,
         load_snapshots as _load_snapshots,
-        save_snapshots as _save_snapshots,
+        mutate_snapshots as _mutate_snapshots,
         set_template_lock as _set_template_lock,
         set_well_lock as _set_well_lock,
         snapshot_template_signature as _snapshot_template_signature,
@@ -143,6 +146,9 @@ COMPLETION_COMPONENT_TYPES = [
 ]
 
 router = APIRouter(prefix="/api/wells", tags=["wells"])
+
+# NumPy 2 removed np.trapz; 1.x has only trapz. Use whichever exists.
+_trapezoid = getattr(np, "trapezoid", None) or getattr(np, "trapz")
 
 
 def _to_float_or_none(value):
@@ -365,7 +371,7 @@ def _compute_eur(best_fit, days_to_limit=3650.0, q_limit=1.0):
     if np.any(mask):
         t = t[mask]
         q = q[mask]
-    eur = float(np.trapz(q, t))
+    eur = float(_trapezoid(q, t))
     return eur
 
 
@@ -503,8 +509,11 @@ def list_wells(project_id: int = None, db: Session = Depends(get_db)):
 def create_well(data: dict, db: Session = Depends(get_db)):
     # Was Well(**data), which let a client choose the primary key and write any
     # column. Only these fields are part of the request contract.
+    project_id = require_int(data, "project_id")
+    if not db.query(Project.id).filter(Project.id == project_id).first():
+        raise HTTPException(400, "project_id does not exist")
     w = Well(
-        project_id=require_int(data, "project_id"),
+        project_id=project_id,
         name=require_str(data, "name"),
         uwi=optional_str(data, "uwi"),
         api_number=optional_str(data, "api_number"),
@@ -539,6 +548,7 @@ def delete_well(wid: int, db: Session = Depends(get_db)):
     w = db.query(Well).filter(Well.id == wid).first()
     if not w:
         raise HTTPException(404, "Well not found")
+    _delete_well_data(db, wid)
     db.delete(w)
     db.commit()
 
@@ -693,6 +703,7 @@ async def upload_dlis(wid: int, file: UploadFile = File(...), db: Session = Depe
         "stop_depth": primary.stop_depth,
         "step": primary.step,
         "version": primary.version,
+        "warnings": list(getattr(parsed, "warnings", [])),
     }
 
 
@@ -733,6 +744,7 @@ async def upload_lis(wid: int, file: UploadFile = File(...), db: Session = Depen
         "stop_depth": primary.stop_depth,
         "step": primary.step,
         "version": primary.version,
+        "warnings": list(getattr(parsed, "warnings", [])),
     }
 
 
@@ -773,9 +785,16 @@ def list_zones(wid: int, db: Session = Depends(get_db)):
 def replace_zones(wid: int, data: dict, db: Session = Depends(get_db)):
     zones = data.get("zones", [])
     db.query(Zone).filter(Zone.well_id == wid).delete()
+    if not isinstance(zones, list):
+        raise HTTPException(400, "zones must be a list")
     for i, z in enumerate(zones):
-        top = float(z.get("top", z.get("top_depth", 0)))
-        bottom = float(z.get("bottom", z.get("bottom_depth", 0)))
+        if not isinstance(z, dict):
+            raise HTTPException(400, f"zones[{i}] must be an object")
+        try:
+            top = float(z.get("top", z.get("top_depth", 0)))
+            bottom = float(z.get("bottom", z.get("bottom_depth", 0)))
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"zones[{i}] requires numeric top and bottom")
         if bottom <= top:
             continue
         db.add(Zone(
@@ -810,7 +829,6 @@ def create_snapshot(wid: int, data: dict = None, db: Session = Depends(get_db)):
     well = db.query(Well).filter(Well.id == wid).first()
     if not well:
         raise HTTPException(404, "Well not found")
-    snapshots = _load_snapshots(wid)
     snap_id = str(uuid.uuid4())
 
     tops = [{c.name: getattr(t, c.name) for c in FormationTop.__table__.columns}
@@ -820,26 +838,27 @@ def create_snapshot(wid: int, data: dict = None, db: Session = Depends(get_db)):
     params = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
     params_dict = {c.name: getattr(params, c.name) for c in PetroParams.__table__.columns} if params else {}
 
-    payload = {
-        "snapshot_id": snap_id,
-        "well_id": wid,
-        "well_name": well.name,
-        "created_at": utcnow().isoformat() + "Z",
-        "label": (data or {}).get("label", f"snapshot-{len(snapshots)+1}"),
-        "snapshot_version": 1,
-        "approved": False,
-        "approved_by": None,
-        "approved_at": None,
-        "approval_status": "pending",
-        "approval_history": [],
-        "tops": tops,
-        "zones": zones,
-        "petro_params": params_dict,
-    }
-    snapshots.append(payload)
-    _save_snapshots(wid, snapshots)
-    return payload
+    def _append(snapshots):
+        payload = {
+            "snapshot_id": snap_id,
+            "well_id": wid,
+            "well_name": well.name,
+            "created_at": utcnow().isoformat() + "Z",
+            "label": (data or {}).get("label", f"snapshot-{len(snapshots)+1}"),
+            "snapshot_version": 1,
+            "approved": False,
+            "approved_by": None,
+            "approved_at": None,
+            "approval_status": "pending",
+            "approval_history": [],
+            "tops": tops,
+            "zones": zones,
+            "petro_params": params_dict,
+        }
+        snapshots.append(payload)
+        return payload
 
+    return _mutate_snapshots(wid, _append)
 
 @router.get("/{wid}/snapshots")
 def list_snapshots(wid: int):
@@ -866,12 +885,8 @@ def template_lock_status(wid: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{wid}/template-lock")
-def lock_template(wid: int, data: dict = None, db: Session = Depends(get_db), x_user_role: str = Header(default="viewer")):
-    role = (x_user_role or "viewer").lower()
-    if role not in {"admin", "interpreter"}:
-        raise HTTPException(403, "interpreter/admin role required")
-
-    actor = (data or {}).get("actor", role)
+def lock_template(wid: int, data: dict = None, db: Session = Depends(get_db), _role: str = Depends(require_interpreter)):
+    actor = (data or {}).get("actor", _role)
     reason = (data or {}).get("reason", "Template QA signed")
     payload, signature = _snapshot_template_signature(db, wid)
 
@@ -891,12 +906,8 @@ def lock_template(wid: int, data: dict = None, db: Session = Depends(get_db), x_
 
 
 @router.post("/{wid}/template-unlock")
-def unlock_template(wid: int, data: dict = None, db: Session = Depends(get_db), x_user_role: str = Header(default="viewer")):
-    role = (x_user_role or "viewer").lower()
-    if role != "admin":
-        raise HTTPException(403, "admin role required")
-
-    actor = (data or {}).get("actor", "admin")
+def unlock_template(wid: int, data: dict = None, db: Session = Depends(get_db), _role: str = Depends(require_admin)):
+    actor = (data or {}).get("actor", _role)
     cleared = _default_template_lock()
     _set_template_lock(wid, cleared)
     _log_audit(db, "template_unlock", "well", entity_id=wid, well_id=wid, details=f"unlocked_by={actor}")
@@ -904,11 +915,8 @@ def unlock_template(wid: int, data: dict = None, db: Session = Depends(get_db), 
 
 
 @router.post("/{wid}/unlock")
-def unlock_well(wid: int, data: dict = None, x_user_role: str = Header(default="viewer")):
-    role = (x_user_role or "viewer").lower()
-    if role != "admin":
-        raise HTTPException(403, "admin role required")
-    actor = (data or {}).get("actor", "admin")
+def unlock_well(wid: int, data: dict = None, _role: str = Depends(require_admin)):
+    actor = (data or {}).get("actor", _role)
     _set_well_lock(wid, False, actor=actor, snapshot_id=None)
     return _get_well_lock(wid)
 
@@ -927,17 +935,15 @@ def approve_snapshot(
     wid: int,
     snapshot_id: str,
     data: dict = None,
-    x_user_role: str = Header(default="viewer"),
+    _role: str = Depends(require_interpreter),
 ):
-    role = (x_user_role or "viewer").lower()
-    if role not in {"admin", "interpreter"}:
-        raise HTTPException(403, "interpreter/admin role required")
-
-    actor = (data or {}).get("approved_by", role)
+    actor = (data or {}).get("approved_by", _role)
     expected_version = (data or {}).get("expected_version")
-    snaps = _load_snapshots(wid)
-    for s in snaps:
-        if s.get("snapshot_id") == snapshot_id:
+
+    def _approve(snaps):
+        for s in snaps:
+            if s.get("snapshot_id") != snapshot_id:
+                continue
             current_version = int(s.get("snapshot_version") or 1)
             if expected_version is not None and int(expected_version) != current_version:
                 raise HTTPException(
@@ -967,11 +973,14 @@ def approve_snapshot(
                 }
             )
             s["approval_history"] = history
-            _save_snapshots(wid, snaps)
-            _set_well_lock(wid, True, actor=actor, snapshot_id=snapshot_id)
             return s
-    raise HTTPException(404, "Snapshot not found")
+        return None
 
+    result = _mutate_snapshots(wid, _approve)
+    if result is None:
+        raise HTTPException(404, "Snapshot not found")
+    _set_well_lock(wid, True, actor=actor, snapshot_id=snapshot_id)
+    return result
 
 @router.get("/{wid}/snapshots/{base_id}/diff/{target_id}")
 def diff_snapshot(wid: int, base_id: str, target_id: str):
@@ -1072,23 +1081,16 @@ def save_petro_params(wid: int, data: dict, db: Session = Depends(get_db)):
         raise HTTPException(423, "Template is locked; unlock required before edits")
 
     existing = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
-    fields = ["saturation_model", "a", "m", "n", "rw", "vsh_cutoff", "phie_cutoff", "sw_cutoff", "template"]
+    values = pick_typed(
+        data,
+        strings=("saturation_model", "template"),
+        floats=("a", "m", "n", "rw", "vsh_cutoff", "phie_cutoff", "sw_cutoff"),
+    )
     if existing:
-        for f in fields:
-            if f in data:
-                val = data[f]
-                if f in ("a", "m", "n", "rw", "vsh_cutoff", "phie_cutoff", "sw_cutoff"):
-                    val = float(val)
-                setattr(existing, f, val)
+        for field, value in values.items():
+            setattr(existing, field, value)
     else:
-        kwargs = {"well_id": wid}
-        for f in fields:
-            if f in data:
-                val = data[f]
-                if f in ("a", "m", "n", "rw", "vsh_cutoff", "phie_cutoff", "sw_cutoff"):
-                    val = float(val)
-                kwargs[f] = val
-        db.add(PetroParams(**kwargs))
+        db.add(PetroParams(well_id=wid, **values))
     db.commit()
     _, signature_after = _snapshot_template_signature(db, wid)
     _log_audit(db, "save_petro_params", "well", entity_id=wid, well_id=wid,
@@ -1422,12 +1424,13 @@ def sensitivity_analysis(wid: int, data: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/{wid}/bulk-upload")
-async def bulk_upload_las(wid: int, files: list = [], db: Session = Depends(get_db)):
+async def bulk_upload_las(wid: int, files: list[UploadFile] = File(...), db: Session = Depends(get_db)):
     """Upload multiple LAS files to a well."""
     well = db.query(Well).filter(Well.id == wid).first()
     if not well:
         raise HTTPException(404, "Well not found")
     results = []
+    next_run = len(well.log_runs) + 1
     for file in files:
         try:
             content = await file.read()
@@ -1438,7 +1441,7 @@ async def bulk_upload_las(wid: int, files: list = [], db: Session = Depends(get_
             las = LASParser.parse_string(text)
             curves_def = [{"mnemonic": c.mnemonic, "unit": c.unit, "description": c.description} for c in las.curves]
             lr = LogRun(
-                well_id=wid, run_number=len(well.log_runs) + 1,
+                well_id=wid, run_number=next_run,
                 filename=file.filename or "unknown.las", las_version=las.version,
                 start_depth=las.well.start, stop_depth=las.well.stop,
                 step=las.well.step, null_value=las.well.null, num_points=len(las.depth),
@@ -1459,10 +1462,12 @@ async def bulk_upload_las(wid: int, files: list = [], db: Session = Depends(get_
                         data_binary=arr.tobytes(),
                     ))
             db.flush()
+            db.commit()
+            next_run += 1
             results.append({"filename": file.filename, "status": "ok", "log_run_id": lr.id, "curves": len(las.curves), "points": len(las.depth)})
         except Exception as e:
+            db.rollback()
             results.append({"filename": file.filename, "status": "error", "reason": str(e)[:200]})
-    db.commit()
     return {"uploaded": len([r for r in results if r["status"] == "ok"]), "results": results}
 
 
@@ -1859,18 +1864,18 @@ def create_production_row(wid: int, data: dict, db: Session = Depends(get_db)):
     row = ProductionData(
         well_id=wid,
         date=d,
-        oil_rate=float(data["oil_rate"]) if data.get("oil_rate") not in (None, "") else None,
-        gas_rate=float(data["gas_rate"]) if data.get("gas_rate") not in (None, "") else None,
-        water_rate=float(data["water_rate"]) if data.get("water_rate") not in (None, "") else None,
-        water_cut=float(data["water_cut"]) if data.get("water_cut") not in (None, "") else None,
-        gor=float(data["gor"]) if data.get("gor") not in (None, "") else None,
-        bhp=float(data["bhp"]) if data.get("bhp") not in (None, "") else None,
-        whp=float(data["whp"]) if data.get("whp") not in (None, "") else None,
-        choke_size=float(data["choke_size"]) if data.get("choke_size") not in (None, "") else None,
-        cumulative_oil=float(data["cumulative_oil"]) if data.get("cumulative_oil") not in (None, "") else None,
-        cumulative_gas=float(data["cumulative_gas"]) if data.get("cumulative_gas") not in (None, "") else None,
-        cumulative_water=float(data["cumulative_water"]) if data.get("cumulative_water") not in (None, "") else None,
-        notes=str(data.get("notes", "")),
+        oil_rate=optional_float(data, "oil_rate"),
+        gas_rate=optional_float(data, "gas_rate"),
+        water_rate=optional_float(data, "water_rate"),
+        water_cut=optional_float(data, "water_cut"),
+        gor=optional_float(data, "gor"),
+        bhp=optional_float(data, "bhp"),
+        whp=optional_float(data, "whp"),
+        choke_size=optional_float(data, "choke_size"),
+        cumulative_oil=optional_float(data, "cumulative_oil"),
+        cumulative_gas=optional_float(data, "cumulative_gas"),
+        cumulative_water=optional_float(data, "cumulative_water"),
+        notes=optional_str(data, "notes"),
     )
     db.add(row)
     db.commit()
@@ -1997,12 +2002,19 @@ def list_aliases(wid: int, db: Session = Depends(get_db)):
 
 @router.post("/{wid}/aliases")
 def save_aliases(wid: int, data: dict, db: Session = Depends(get_db)):
-    items = data.get("aliases", data if isinstance(data, list) else [])
+    items = data.get("aliases", [])
+    if not isinstance(items, list):
+        raise HTTPException(400, "aliases must be a list")
+    prepared = []
+    for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise HTTPException(400, f"aliases[{i}] must be an object")
+        prepared.append((require_str(item, "original"), require_str(item, "alias")))
     db.query(CurveAlias).filter(CurveAlias.well_id == wid).delete()
-    for item in items:
-        db.add(CurveAlias(well_id=wid, original_mnemonic=item["original"], alias_mnemonic=item["alias"]))
+    for original, alias in prepared:
+        db.add(CurveAlias(well_id=wid, original_mnemonic=original, alias_mnemonic=alias))
     db.commit()
-    return {"status": "ok", "count": len(items)}
+    return {"status": "ok", "count": len(prepared)}
 
 
 @router.post("/{wid}/splice")
@@ -2058,12 +2070,26 @@ def splice_curves(wid: int, data: dict, db: Session = Depends(get_db)):
         src = run_data.get(src_id)
         if not src:
             continue
-        for i in range(len(composite_depth)):
-            if composite_depth[i] >= start and composite_depth[i] <= end:
-                # Find nearest in source
-                idx = np.argmin(np.abs(src["depth"] - composite_depth[i]))
-                if abs(src["depth"][idx] - composite_depth[i]) < (src["step"] * 2):
-                    composite_values[i] = src["values"][idx]
+        idxs = np.where((composite_depth >= start) & (composite_depth <= end))[0]
+        if len(idxs) == 0:
+            continue
+        source_depth = np.asarray(src["depth"], dtype=np.float64)
+        source_values = np.asarray(src["values"], dtype=np.float64)
+        order = np.argsort(source_depth)
+        source_depth = source_depth[order]
+        source_values = source_values[order]
+        if len(source_depth) == 0:
+            continue
+        target_depth = composite_depth[idxs]
+        pos = np.clip(np.searchsorted(source_depth, target_depth), 0, len(source_depth) - 1)
+        left = np.clip(pos - 1, 0, len(source_depth) - 1)
+        right = pos
+        choose = np.where(
+            np.abs(target_depth - source_depth[left]) <= np.abs(target_depth - source_depth[right]),
+            left, right,
+        )
+        within = np.abs(source_depth[choose] - target_depth) < (src["step"] * 2)
+        composite_values[idxs[within]] = source_values[choose[within]]
 
     # Create new log run
     curves_def = [{"mnemonic": "DEPT", "unit": "FT", "description": "Depth"}, {"mnemonic": mnemonic, "unit": "", "description": f"Spliced {mnemonic}"}]
@@ -2169,7 +2195,6 @@ def compute_electrofacies(wid: int, data: dict, db: Session = Depends(get_db)):
     # Normalize RT to log scale
     X = np.column_stack([np.log10(curves_data[k]) if k in ("RT", "RESD", "ILD") else curves_data[k] for k in keys])
     X = X[valid_mask]
-    depth_valid = dept[valid_mask]
 
     if len(X) < n_clusters * 10:
         raise HTTPException(400, f"Not enough valid data ({len(X)} pts) for {n_clusters} clusters")
@@ -2323,7 +2348,6 @@ def auto_pick_tops(wid: int, data: dict, db: Session = Depends(get_db), _role: s
     if len(grad_valid) < 10:
         raise HTTPException(400, "Not enough valid data")
 
-    mean_g = np.mean(np.abs(grad_valid))
     std_g = np.std(np.abs(grad_valid))
     if std_g == 0:
         raise HTTPException(400, "Curve has no variation")
@@ -2351,16 +2375,20 @@ def auto_pick_tops(wid: int, data: dict, db: Session = Depends(get_db), _role: s
 def save_picks(wid: int, data: dict, db: Session = Depends(get_db)):
     """Save auto-picked or edited tops to database."""
     picks = data.get("picks", [])
+    if not isinstance(picks, list):
+        raise HTTPException(400, "picks must be a list")
     count = 0
-    for p in picks:
-        name = p.get("formation_name", "")
-        depth = float(p.get("depth", 0))
+    for i, p in enumerate(picks):
+        if not isinstance(p, dict):
+            raise HTTPException(400, f"picks[{i}] must be an object")
+        name = optional_str(p, "formation_name")
+        depth = optional_float(p, "depth", 0)
         if not name or depth <= 0:
             continue
         db.add(FormationTop(
             well_id=wid, formation_name=name, depth=depth,
-            color=p.get("color", "#888888"),
-            lithology=p.get("lithology", ""),
+            color=optional_str(p, "color", "#888888"),
+            lithology=optional_str(p, "lithology"),
         ))
         count += 1
     db.commit()
@@ -2462,11 +2490,17 @@ def save_trajectory(wid: int, data: dict, db: Session = Depends(get_db)):
         md_arr = data["md"]
         inc_arr = data["inc"]
         azi_arr = data["azi"]
-        if not (len(md_arr) == len(inc_arr) == len(azi_arr)):
+        try:
+            same_length = len(md_arr) == len(inc_arr) == len(azi_arr)
+        except TypeError:
+            raise HTTPException(400, "md, inc, azi must be arrays")
+        if not same_length:
             raise HTTPException(400, "md, inc, azi arrays must have equal length")
         points = [{"md": md_arr[i], "inc": inc_arr[i], "azi": azi_arr[i]} for i in range(len(md_arr))]
     if not points:
         raise HTTPException(400, "No points provided")
+    if not isinstance(points, list):
+        raise HTTPException(400, "points must be a list")
 
     # Clear existing
     db.query(DeviationSurvey).filter(DeviationSurvey.well_id == wid).delete()
@@ -2481,9 +2515,14 @@ def save_trajectory(wid: int, data: dict, db: Session = Depends(get_db)):
     prev_azi = 0.0
 
     for i, p in enumerate(points):
-        md = float(p["md"])
-        inc = float(p["inc"])  # degrees
-        azi = float(p["azi"])  # degrees
+        if not isinstance(p, dict):
+            raise HTTPException(400, f"points[{i}] must be an object")
+        try:
+            md = float(p["md"])
+            inc = float(p["inc"])  # degrees
+            azi = float(p["azi"])  # degrees
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(400, f"points[{i}] requires numeric md, inc and azi")
 
         if i > 0:
             dmd = md - prev_md
@@ -2856,7 +2895,6 @@ def probability_plot(wid: int, data: dict, db: Session = Depends(get_db)):
         }
 
     sorted_vals = np.sort(valid)
-    percentiles = (np.arange(1, len(sorted_vals) + 1) / (len(sorted_vals) + 1)) * 100.0
 
     # Return binned/sampled cumulative values using requested bin count
     q = np.linspace(1.0, 99.0, n_bins)
@@ -3518,7 +3556,6 @@ def compute_dual_water(wid: int, data: dict, db: Session = Depends(get_db)):
     rw = float(data.get("rw", 0.1))
     rwb = float(data.get("rwb", 0.03))  # bound water resistivity
     phi_sh = float(data.get("phi_sh", 0.30))  # shale porosity
-    vsh_cutoff = float(data.get("vsh_cutoff", 0.35))
 
     # Vsh from GR
     gr_valid = gr[~np.isnan(gr) & (gr > 0)]
@@ -3638,7 +3675,6 @@ def compute_vcl_models(wid: int, data: dict, db: Session = Depends(get_db)):
         results["steiber"][i] = round(max(0, min(1, vcl_s)), 4)
 
     # Summary stats
-    valid_igr = [v for v in results["igr"] if v is not None and not np.isnan(v)]
     summary = {}
     for model in ["igr", "larionov_tertiary", "larionov_old", "clavier", "steiber"]:
         vals = [v for v in results[model] if v is not None and not np.isnan(v)]
@@ -3697,8 +3733,6 @@ def classify_lithology(wid: int, data: dict, db: Session = Depends(get_db)):
 
         # Vcl models from GR (Larionov tertiary default)
         vcl_larionov_tertiary = 0.083 * (2 ** (3.7 * igr) - 1)
-        _vcl_clavier = 0.33 * (2 ** (2 * igr) - 1)
-        _vcl_linear = igr
         vcl = max(0.0, min(1.0, float(vcl_larionov_tertiary)))
         vcl_array[i] = vcl
 
@@ -3793,7 +3827,6 @@ def compute_saturation(wid: int, data: dict, db: Session = Depends(get_db)):
     gr_cd = _get_curve(["GR", "SGR", "CGR"])
     nphi_cd = _get_curve(["NPHI", "NPHI_LS"])
     rhob_cd = _get_curve(["RHOB", "RHOZ", "DEN"])
-    dt_cd = _get_curve(["DT", "DTC", "DTCO"])
     dept_cd = _get_curve(["DEPT", "DEPTH"])
     # Density quality control: the tool's own correction, and hole size vs bit.
     drho_cd = _get_curve(["DRHO", "DCOR", "HDRA"])
@@ -3809,7 +3842,6 @@ def compute_saturation(wid: int, data: dict, db: Session = Depends(get_db)):
     gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy()
     nphi = np.frombuffer(nphi_cd.data_binary, dtype=np.float64).copy() if nphi_cd else np.full_like(rt, np.nan)
     rhob = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy() if rhob_cd else np.full_like(rt, np.nan)
-    dt = np.frombuffer(dt_cd.data_binary, dtype=np.float64).copy() if dt_cd else np.full_like(rt, np.nan)
     dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(rt)) * 0.5
     drho = np.frombuffer(drho_cd.data_binary, dtype=np.float64).copy() if drho_cd else None
     cali = np.frombuffer(cali_cd.data_binary, dtype=np.float64).copy() if cali_cd else None
@@ -4031,7 +4063,6 @@ def multimineral_solver(wid: int, data: dict, db: Session = Depends(get_db)):
 
     # Use 3 or 4 minerals depending on available curves
     use_dt = dt_arr is not None
-    n_params = 5 if use_dt else 4  # 4 minerals + porosity
 
     gr_max = float(np.nanmax(gr)) if gr is not None and not np.all(np.isnan(gr)) else 150
     gr_min = float(np.nanmin(gr)) if gr is not None and not np.all(np.isnan(gr)) else 10
@@ -4142,7 +4173,6 @@ def compute_permeability_multi(wid: int, data: dict, db: Session = Depends(get_d
                 return cd
         return None
 
-    rt_cd = _get_curve(["RT", "RESD", "RILD"])
     gr_cd = _get_curve(["GR", "SGR", "CGR"])
     nphi_cd = _get_curve(["NPHI", "NPHI_LS"])
     rhob_cd = _get_curve(["RHOB", "RHOZ", "DEN"])
@@ -4175,7 +4205,6 @@ def compute_permeability_multi(wid: int, data: dict, db: Session = Depends(get_d
     # Use simple relationship: Swirr ≈ Vsh * phi_sh / phi + 0.04
     swirr = np.clip(vsh * 0.30 / np.maximum(phie, 0.01) + 0.04, 0.04, 0.95)
 
-    n_pts = len(nphi)
     C_coates = float(data.get("c_coates", 10000))
     a_timur = float(data.get("a_timur", 31.6))
     b_timur = float(data.get("b_timur", 4.4))
@@ -4403,12 +4432,19 @@ def core_calibration(wid: int, data: dict, db: Session = Depends(get_db)):
     # Match core depths to nearest log values
     matched_log = []
     matched_core = []
+    matched_depth = []
     for d, phi in zip(core_depth, core_phi):
-        idx = np.argmin(np.abs(dept_arr - d))
-        if abs(dept_arr[idx] - d) < 2.0:  # within 2 ft tolerance
+        try:
+            core_d = float(d)
+            core_phi_v = float(phi)
+        except (TypeError, ValueError):
+            continue
+        idx = np.argmin(np.abs(dept_arr - core_d))
+        if abs(dept_arr[idx] - core_d) < 2.0:  # within 2 ft tolerance
             if not np.isnan(log_arr[idx]):
                 matched_log.append(float(log_arr[idx]))
-                matched_core.append(float(phi))
+                matched_core.append(core_phi_v)
+                matched_depth.append(core_d)
 
     if len(matched_log) < 3:
         raise HTTPException(400, f"Only {len(matched_log)} core points matched to log (need ≥3)")
@@ -4476,7 +4512,7 @@ def core_calibration(wid: int, data: dict, db: Session = Depends(get_db)):
         "r_squared": round(float(r_squared), 4),
         "rmse": round(float(rmse), 6),
         "equation": f"{log_curve}_core = {intercept:.4f} + {slope:.4f} × {log_curve}_log",
-        "matched_depth": [core_depth[i] for i in range(len(core_depth)) if i < len(matched_log)],
+        "matched_depth": matched_depth,
         "matched_core": matched_core,
         "matched_log": matched_log,
         "predicted": [round(float(v), 4) for v in y_pred.tolist()],
@@ -4640,13 +4676,13 @@ def export_las(wid: int, db: Session = Depends(get_db)):
     las += "VERS.                  2.0:   CWLS Log ASCII Standard - VERSION 2.0\n"
     las += "WRAP.                  NO:    One line per depth step\n"
     las += "~Well Information\n"
-    las += f"#MNEM.UNIT       DATA                   DESCRIPTION\n"
-    las += f"#----.----      -----                   -----------\n"
+    las += "#MNEM.UNIT       DATA                   DESCRIPTION\n"
+    las += "#----.----      -----                   -----------\n"
     las += f"WELL.                 {well.name}:    Well Name\n"
     las += f"UWI.                  {well.uwi or 'N/A'}:    Unique Well Identifier\n"
     las += f"COMP.                 {well.operator or 'N/A'}:    Company\n"
     las += f"FLD.                  {well.field_name or 'N/A'}:    Field\n"
-    las += f"SRVC.                 GeoLog:    Service Company\n"
+    las += "SRVC.                 GeoLog:    Service Company\n"
     las += f"DATE.                 {datetime.datetime.now().strftime('%Y-%m-%d')}:    Date\n"
     las += f"STRT.{well.depth_unit or 'FT'}         {lr.start_depth or 0:.4f}                  START DEPTH\n"
     las += f"STOP.{well.depth_unit or 'FT'}         {lr.stop_depth or 0:.4f}                  STOP DEPTH\n"
@@ -4705,7 +4741,7 @@ def image_log(wid: int, data: dict, db: Session = Depends(get_db)):
         # Try alternatives
         cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["RT", "RESD", "RILD", "ILD"])).first()
     if not cd:
-        raise HTTPException(400, f"No resistivity curve found")
+        raise HTTPException(400, "No resistivity curve found")
 
     dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
     arr = np.frombuffer(cd.data_binary, dtype=np.float64).copy()
@@ -4931,8 +4967,8 @@ def export_client_bundle(wid: int, db: Session = Depends(get_db)):
                 f"STRT. {float(lr.start_depth or 0):>10.2f} {getattr(lr, 'depth_unit', 'FT')}:   Start Depth",
                 f"STOP. {float(lr.stop_depth or 0):>10.2f} {getattr(lr, 'depth_unit', 'FT')}:   Stop Depth",
                 f"STEP. {float(lr.step or 1):>10.4f} {getattr(lr, 'depth_unit', 'FT')}:   Step",
-                f"NULL.              -999.25:   Null Value",
-                f"COMP.                  GeoLog:   Company",
+                "NULL.              -999.25:   Null Value",
+                "COMP.                  GeoLog:   Company",
                 f"DATE.          {__import__('datetime').date.today()}:   Date",
                 "~Curve Information",
             ]
@@ -4942,7 +4978,6 @@ def export_client_bundle(wid: int, db: Session = Depends(get_db)):
             depth_arr = None
             curve_arrays = {}
             for c in cds:
-                import numpy as np
                 arr = np.frombuffer(c.data_binary, dtype=np.float64)
                 if c.mnemonic in ('DEPT', 'DEPTH'):
                     depth_arr = arr
