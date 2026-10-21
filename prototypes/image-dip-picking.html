@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GeoLog — Image Log Dip Picking Prototype</title>
+<style>
+  :root{--bg:#0d1117;--panel:#161b22;--line:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--danger:#f85149}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:13px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
+  header{display:flex;align-items:center;gap:16px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:15px;margin:0;font-weight:600}
+  header span{color:var(--muted);font-size:12px}
+  main{display:grid;grid-template-columns:240px 1fr 300px;gap:12px;padding:12px;height:calc(100vh - 48px)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto}
+  .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 10px}
+  label{display:block;font-size:11px;color:var(--muted);margin:8px 0 3px}
+  input,select,button{font:inherit;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:5px;padding:5px 7px;width:100%}
+  button{cursor:pointer;background:#21262d}
+  button.primary{background:#1f6feb;border-color:#1f6feb}
+  button.danger{color:var(--danger)}
+  button:hover{border-color:var(--accent)}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .track{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:auto;padding:4px}
+  canvas{display:block;max-width:100%}
+  #picks{width:100%;border-collapse:collapse;font-size:11px;margin-top:8px}
+  #picks th,#picks td{border-bottom:1px solid var(--line);padding:4px;text-align:left}
+  #picks tr{cursor:pointer}
+  #picks tr.sel{background:#1f6feb33}
+  .hint{font-size:11px;color:var(--muted);margin-top:8px}
+  pre{white-space:pre-wrap;font-size:10px;color:var(--muted);background:var(--bg);padding:8px;border-radius:6px;border:1px solid var(--line)}
+  .legend{display:flex;gap:10px;font-size:11px;color:var(--muted);margin-top:6px}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Borehole Image — Dip Picking</h1>
+  <span>click image to add a pick · edit fields · prototype only</span>
+</header>
+<main>
+  <section class="panel">
+    <h2>Image</h2>
+    <label>Normalisation</label>
+    <select id="norm"><option value="dynamic">dynamic</option><option value="static">static</option></select>
+    <label>Dip (°)</label>
+    <input id="dip" type="number" min="0" max="90" step="1" value="20">
+    <label>Azimuth (°)</label>
+    <input id="azimuth" type="number" min="0" max="359" step="1" value="90">
+    <label>Feature type</label>
+    <select id="feature">
+      <option>bedding</option><option>fracture</option><option>fault</option>
+      <option>contact</option><option>breakout</option><option>induced</option>
+    </select>
+    <label>Quality</label>
+    <select id="quality"><option>A</option><option selected>B</option><option>C</option></select>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="add">Add pick</button>
+      <button class="danger" id="del">Delete</button>
+    </div>
+    <div class="hint">Click the image to set depth + azimuth, then Add. Select a table row to edit.</div>
+    <h2 style="margin-top:18px">Picks</h2>
+    <table id="picks"><thead><tr><th>Depth</th><th>Dip</th><th>Azi</th><th>Type</th><th>Q</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section class="track">
+    <canvas id="image" width="760" height="760"></canvas>
+    <div class="legend"><span><span class="dot" style="background:#f85149"></span>pick</span><span><span class="dot" style="background:#58a6ff"></span>selected</span><span>pad gaps shown in grey</span></div>
+  </section>
+
+  <section class="panel">
+    <h2>Tadpole</h2>
+    <canvas id="tadpole" width="280" height="760"></canvas>
+    <h2 style="margin-top:18px">API contract</h2>
+    <pre>POST /api/wells/{wid}/image-assets
+GET  /api/image-assets/{id}/raster?top=&amp;bottom=&amp;norm=
+GET  /api/image-assets/{id}/dips
+POST /api/image-assets/{id}/dips
+PATCH /api/image-assets/{id}/dips/{pickId}
+DELETE /api/image-assets/{id}/dips/{pickId}
+POST /api/image-assets/{id}/auto-pick  -&gt; job</pre>
+    <div class="hint">A real implementation stores the raster decimated for display and keeps the raw channel immutable. Every pick stores the sinusoid fit (offset, amplitude, phase) plus apparent/true orientation.</div>
+  </section>
+</main>
+<script>
+const D0 = 1000, D1 = 1100;
+const img = document.getElementById('image');
+const ictx = img.getContext('2d');
+const tad = document.getElementById('tadpole');
+const tctx = tad.getContext('2d');
+const picks = [];
+let selected = -1;
+let pending = null;
+
+const M = {left:56, top:34, right:16, bottom:30};
+const IW = img.width - M.left - M.right;
+const IH = img.height - M.top - M.bottom;
+
+const depthToY = d => M.top + (d - D0) / (D1 - D0) * IH;
+const yToDepth = y => D0 + (y - M.top) / IH * (D1 - D0);
+const azToX = a => M.left + (a / 360) * IW;
+const xToAz = x => Math.max(0, Math.min(359.9, (x - M.left) / IW * 360));
+
+function drawImage(){
+  const dynamic = document.getElementById('norm').value === 'dynamic';
+  const data = ictx.createImageData(IW, IH);
+  const d = data.data;
+  for (let y=0; y<IH; y++){
+    const depth = D0 + (y / IH) * (D1 - D0);
+    for (let x=0; x<IW; x++){
+      const az = (x / IW) * 360;
+      const gap = [0,90,180,270].some(g => Math.abs(((az - g + 540) % 360) - 180) > 174);
+      let v = 0.5 + 0.28*Math.sin((az*Math.PI/180)*3 + depth*0.65)
+                  + 0.18*Math.sin((az*Math.PI/180)*7 - depth*0.25)
+                  + 0.08*Math.sin((az*Math.PI/180)*13 + depth*0.9);
+      if (gap) v = 0.18;
+      if (dynamic) v = 0.5 + (v - 0.5) * (1.0 + 0.9 * Math.sin(depth*0.11));
+      const g = Math.max(0, Math.min(255, Math.round(v*255)));
+      const i = (y*IW + x)*4;
+      d[i]=g*0.85; d[i+1]=g*0.95; d[i+2]=g; d[i+3]=255;
+    }
+  }
+  ictx.putImageData(data, M.left, M.top);
+  ictx.strokeStyle='#30363d'; ictx.lineWidth=1;
+  ictx.strokeRect(M.left, M.top, IW, IH);
+  ictx.fillStyle='#8b949e'; ictx.font='10px system-ui';
+  for (let d=1000; d<=1100; d+=10){
+    const y=depthToY(d);
+    ictx.beginPath(); ictx.moveTo(M.left-4,y); ictx.lineTo(M.left,y); ictx.stroke();
+    ictx.fillText(String(d), 6, y+3);
+  }
+  for (let a=0; a<360; a+=90){
+    const x=azToX(a);
+    ictx.beginPath(); ictx.moveTo(x,M.top-4); ictx.lineTo(x,M.top); ictx.stroke();
+    ictx.fillText(a+'°', x-8, M.top-10);
+  }
+  picks.forEach((p, i)=>drawPick(p, i===selected));
+  if (pending) drawPending(pending);
+}
+
+function sinusoidY(p, az){
+  const amp = (p.dip/90) * 28;
+  return depthToY(p.depth) + amp * Math.sin((az - p.azimuth) * Math.PI/180);
+}
+function drawPick(p, sel){
+  ictx.strokeStyle = sel ? '#58a6ff' : '#f85149';
+  ictx.lineWidth = sel ? 2 : 1.4;
+  ictx.beginPath();
+  for (let a=0; a<=360; a+=2){
+    const x=azToX(a), y=sinusoidY(p,a);
+    if (a===0) ictx.moveTo(x,y); else ictx.lineTo(x,y);
+  }
+  ictx.stroke();
+  ictx.fillStyle = sel ? '#58a6ff' : '#f85149';
+  ictx.fillText(p.feature[0].toUpperCase(), azToX(p.azimuth)-4, sinusoidY(p,p.azimuth)-6);
+}
+function drawPending(p){
+  ictx.strokeStyle='#d29922'; ictx.setLineDash([4,3]); ictx.lineWidth=1;
+  ictx.beginPath();
+  for (let a=0; a<=360; a+=3){
+    const x=azToX(a), y=sinusoidY(p,a);
+    if (a===0) ictx.moveTo(x,y); else ictx.lineTo(x,y);
+  }
+  ictx.stroke(); ictx.setLineDash([]);
+}
+
+function drawTadpole(){
+  tctx.clearRect(0,0,tad.width,tad.height);
+  const left=34, top=20, right=10, bottom=24;
+  const w=tad.width-left-right, h=tad.height-top-bottom;
+  const xDip = d => left + (d/90)*w;
+  const yDep = d => top + (d-D0)/(D1-D0)*h;
+  tctx.strokeStyle='#30363d'; tctx.strokeRect(left,top,w,h);
+  tctx.fillStyle='#8b949e'; tctx.font='10px system-ui';
+  for (let d=0; d<=90; d+=15){ const x=xDip(d); tctx.fillText(d+'°', x-6, tad.height-8); }
+  for (let d=1000; d<=1100; d+=20){ const y=yDep(d); tctx.fillText(String(d), 2, y+3); }
+  tctx.fillText('dip', left+w/2-8, 12);
+  picks.forEach((p,i)=>{
+    const x=xDip(p.dip), y=yDep(p.depth);
+    const rad=(p.azimuth-90)*Math.PI/180, len=16;
+    tctx.strokeStyle=i===selected?'#58a6ff':'#f85149'; tctx.fillStyle=tctx.strokeStyle;
+    tctx.beginPath(); tctx.moveTo(x,y); tctx.lineTo(x+Math.cos(rad)*len, y+Math.sin(rad)*len); tctx.stroke();
+    tctx.beginPath(); tctx.arc(x,y,3,0,Math.PI*2); tctx.fill();
+  });
+}
+
+function renderTable(){
+  const tb=document.querySelector('#picks tbody'); tb.innerHTML='';
+  picks.forEach((p,i)=>{
+    const tr=document.createElement('tr'); if(i===selected) tr.className='sel';
+    tr.innerHTML=`<td>${p.depth.toFixed(1)}</td><td>${p.dip}</td><td>${p.azimuth}</td><td>${p.feature}</td><td>${p.quality}</td>`;
+    tr.onclick=()=>{ selected=i; syncForm(); drawImage(); drawTadpole(); renderTable(); };
+    tb.appendChild(tr);
+  });
+}
+function syncForm(){
+  const p=picks[selected]; if(!p) return;
+  document.getElementById('dip').value=p.dip;
+  document.getElementById('azimuth').value=p.azimuth;
+  document.getElementById('feature').value=p.feature;
+  document.getElementById('quality').value=p.quality;
+}
+function readForm(){
+  return {
+    dip: Math.max(0, Math.min(90, Number(document.getElementById('dip').value)||0)),
+    azimuth: ((Number(document.getElementById('azimuth').value)||0)%360+360)%360,
+    feature: document.getElementById('feature').value,
+    quality: document.getElementById('quality').value,
+  };
+}
+function addPick(depth, azimuth){
+  picks.push({depth, azimuth, ...readForm()});
+  selected=picks.length-1; pending=null;
+  drawImage(); drawTadpole(); renderTable();
+}
+img.addEventListener('click', e=>{
+  const r=img.getBoundingClientRect();
+  const x=(e.clientX-r.left)*(img.width/r.width);
+  const y=(e.clientY-r.top)*(img.height/r.height);
+  if(x<M.left||x>M.left+IW||y<M.top||y>M.top+IH) return;
+  const depth=yToDepth(y), azimuth=xToAz(x);
+  document.getElementById('azimuth').value=Math.round(azimuth);
+  pending={depth, azimuth, ...readForm()};
+  drawImage();
+});
+document.getElementById('add').onclick=()=>{
+  if(pending){ addPick(pending.depth, pending.azimuth); return; }
+  if(selected>=0){ Object.assign(picks[selected], readForm()); drawImage(); drawTadpole(); renderTable(); }
+};
+document.getElementById('del').onclick=()=>{
+  if(selected>=0){ picks.splice(selected,1); selected=Math.min(selected,picks.length-1); drawImage(); drawTadpole(); renderTable(); }
+};
+['dip','azimuth','feature','quality'].forEach(id=>document.getElementById(id).addEventListener('change',()=>{
+  if(selected>=0){ Object.assign(picks[selected], readForm()); drawImage(); drawTadpole(); renderTable(); }
+}));
+document.getElementById('norm').onchange=drawImage;
+
+[{depth:1018,dip:18,azimuth:95,feature:'bedding',quality:'A'},
+ {depth:1042,dip:34,azimuth:120,feature:'fracture',quality:'B'},
+ {depth:1071,dip:12,azimuth:70,feature:'bedding',quality:'A'}].forEach(p=>picks.push(p));
+drawImage(); drawTadpole(); renderTable();
+</script>
+</body>
+</html>
