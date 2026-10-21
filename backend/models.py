@@ -53,6 +53,11 @@ class Well(Base):
     dst_tests = relationship("DSTTest", back_populates="well", cascade="all, delete-orphan")
     rft_points = relationship("RFTPoint", back_populates="well", cascade="all, delete-orphan")
     completion_data = relationship("CompletionData", back_populates="well", cascade="all, delete-orphan")
+    core_datasets = relationship("CoreDataset", back_populates="well", cascade="all, delete-orphan")
+    rock_types = relationship("RockType", back_populates="well", cascade="all, delete-orphan")
+    flow_units = relationship("FlowUnit", back_populates="well", cascade="all, delete-orphan")
+    contacts = relationship("Contact", back_populates="well", cascade="all, delete-orphan")
+    saturation_height_models = relationship("SaturationHeightModel", back_populates="well", cascade="all, delete-orphan")
 
 
 class LogRun(Base):
@@ -357,6 +362,191 @@ class DeviationSurvey(Base):
 
     well = relationship("Well")
 
+
+
+
+class CoreDataset(Base):
+    """A versioned, approvable set of core plugs for one well."""
+    __tablename__ = "core_datasets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, index=True)
+    version = Column(Integer, default=1)
+    status = Column(String(20), default="draft", index=True)
+    source = Column(String(200), default="")
+    imported_by = Column(String(120), default="")
+    imported_at = Column(DateTime, default=utcnow)
+    approved_by = Column(String(120), default="")
+    approved_at = Column(DateTime, nullable=True)
+    input_hash = Column(String(64), default="")
+    created_at = Column(DateTime, default=utcnow)
+
+    well = relationship("Well", back_populates="core_datasets")
+    plugs = relationship("CorePlug", back_populates="dataset", cascade="all, delete-orphan")
+
+class CorePlug(Base):
+    __tablename__ = "core_plugs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dataset_id = Column(Integer, ForeignKey("core_datasets.id"), nullable=False, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, index=True)
+    rock_type_id = Column(Integer, ForeignKey("rock_types.id"), nullable=True, index=True)
+    plug_name = Column(String(120), nullable=False)
+    depth_md = Column(Float, nullable=False)
+    depth_tvd = Column(Float, nullable=True)
+    formation = Column(String(200), default="")
+    lithology = Column(String(200), default="")
+    porosity = Column(Float, nullable=True)
+    perm_air = Column(Float, nullable=True)
+    perm_klin = Column(Float, nullable=True)
+    grain_density = Column(Float, nullable=True)
+    fluid_saturation = Column(Float, nullable=True)
+    plug_type = Column(String(50), default="routine")
+    source = Column(String(200), default="")
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=utcnow)
+
+    dataset = relationship("CoreDataset", back_populates="plugs")
+    measurements = relationship("CoreMeasurement", back_populates="plug", cascade="all, delete-orphan")
+    capillary_pressure = relationship("CapillaryPressure", back_populates="plug", cascade="all, delete-orphan")
+    relative_perm = relationship("RelativePerm", back_populates="plug", cascade="all, delete-orphan")
+    photos = relationship("CorePhoto", back_populates="plug", cascade="all, delete-orphan")
+    thin_sections = relationship("ThinSection", back_populates="plug", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("well_id", "plug_name", "depth_md", name="uq_core_plug_identity"),
+    )
+
+class CoreMeasurement(Base):
+    __tablename__ = "core_measurements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plug_id = Column(Integer, ForeignKey("core_plugs.id"), nullable=False, index=True)
+    measurement_type = Column(String(50), nullable=False, index=True)
+    method = Column(String(80), default="")
+    value = Column(Float, nullable=False)
+    unit = Column(String(30), default="")
+    quality = Column(String(20), default="")
+    lab = Column(String(200), default="")
+    sample_date = Column(String(40), default="")
+    created_at = Column(DateTime, default=utcnow)
+
+    plug = relationship("CorePlug", back_populates="measurements")
+
+class CapillaryPressure(Base):
+    __tablename__ = "capillary_pressure"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plug_id = Column(Integer, ForeignKey("core_plugs.id"), nullable=False, index=True)
+    test_type = Column(String(30), default="drainage")
+    sigma = Column(Float, default=72.0)
+    cos_theta = Column(Float, default=1.0)
+    points_json = Column(Text, default="[]")
+    quality = Column(String(20), default="")
+    created_at = Column(DateTime, default=utcnow)
+
+    plug = relationship("CorePlug", back_populates="capillary_pressure")
+
+class RelativePerm(Base):
+    __tablename__ = "relative_perm"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plug_id = Column(Integer, ForeignKey("core_plugs.id"), nullable=False, index=True)
+    points_json = Column(Text, default="[]")
+    method = Column(String(80), default="")
+    quality = Column(String(20), default="")
+    created_at = Column(DateTime, default=utcnow)
+
+    plug = relationship("CorePlug", back_populates="relative_perm")
+
+class CorePhoto(Base):
+    __tablename__ = "core_photos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plug_id = Column(Integer, ForeignKey("core_plugs.id"), nullable=False, index=True)
+    file_path = Column(String(500), nullable=False)
+    caption = Column(Text, default="")
+    scale = Column(String(100), default="")
+    orientation = Column(String(50), default="")
+    checksum = Column(String(64), default="")
+    created_at = Column(DateTime, default=utcnow)
+
+    plug = relationship("CorePlug", back_populates="photos")
+
+class ThinSection(Base):
+    __tablename__ = "thin_sections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plug_id = Column(Integer, ForeignKey("core_plugs.id"), nullable=False, index=True)
+    file_path = Column(String(500), nullable=False)
+    caption = Column(Text, default="")
+    description = Column(Text, default="")
+    checksum = Column(String(64), default="")
+    created_at = Column(DateTime, default=utcnow)
+
+    plug = relationship("CorePlug", back_populates="thin_sections")
+
+class RockType(Base):
+    __tablename__ = "rock_types"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    color = Column(String(20), default="#58a6ff")
+    description = Column(Text, default="")
+    created_at = Column(DateTime, default=utcnow)
+
+    well = relationship("Well", back_populates="rock_types")
+
+class FlowUnit(Base):
+    __tablename__ = "flow_units"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, index=True)
+    version = Column(Integer, default=1)
+    cluster_index = Column(Integer, nullable=False)
+    fzi_min = Column(Float, nullable=True)
+    fzi_max = Column(Float, nullable=True)
+    rock_type_id = Column(Integer, ForeignKey("rock_types.id"), nullable=True)
+    stats_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=utcnow)
+
+    well = relationship("Well", back_populates="flow_units")
+
+class Contact(Base):
+    __tablename__ = "contacts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, index=True)
+    zone_id = Column(Integer, ForeignKey("zones.id"), nullable=True, index=True)
+    contact_type = Column(String(20), default="FWL")
+    depth = Column(Float, nullable=False)
+    source = Column(String(200), default="")
+    confidence = Column(String(20), default="")
+    created_at = Column(DateTime, default=utcnow)
+
+    well = relationship("Well", back_populates="contacts")
+
+class SaturationHeightModel(Base):
+    __tablename__ = "saturation_height_models"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, index=True)
+    rock_type_id = Column(Integer, ForeignKey("rock_types.id"), nullable=True, index=True)
+    model_type = Column(String(50), nullable=False)
+    version = Column(Integer, default=1)
+    status = Column(String(20), default="draft", index=True)
+    parameters_json = Column(Text, default="{}")
+    r2 = Column(Float, nullable=True)
+    residual = Column(Float, nullable=True)
+    input_hash = Column(String(64), default="")
+    contact_id = Column(Integer, ForeignKey("contacts.id"), nullable=True)
+    created_by = Column(String(120), default="")
+    created_at = Column(DateTime, default=utcnow)
+    approved_by = Column(String(120), default="")
+    approved_at = Column(DateTime, nullable=True)
+
+    well = relationship("Well", back_populates="saturation_height_models")
 
 class AuditLog(Base):
     """Track all user actions for audit trail."""

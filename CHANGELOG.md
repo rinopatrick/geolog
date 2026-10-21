@@ -10,6 +10,12 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
+- **Core/SCAL v1.** Core datasets/plugs/measurements, capillary pressure,
+  relative permeability, photos/thin-section metadata, CSV import (dry-run and
+  conflict reporting), FZI multi-resolution flow units, contacts, and J-function
+  saturation-height fit/apply. Adds migration `d4e5f6a7b8c9`, router and
+  `docs/CORE_SCAL.md`. Excel import, staged depth matching, extended saturation-
+  height models and photo upload are not in this increment.
 - **Semantics-aware QC and petrophysics.** Advanced QC, unified saturation,
   permeability, dual-water, VCL models, multimineral and permeability-multi now
   read through the shared semantics layer, so aliases, units and corrected MD
