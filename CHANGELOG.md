@@ -10,6 +10,10 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
+- **WITSML/OSDU read-first adapters v1.** WITSML 1.4.1.1 SOAP well/log pull and
+  curve import; OSDU Wellbore DDMS well pull and explicit well push; env-based
+  credentials, TLS verification, tests and `docs/INTEROP.md`. WITSML 2.1/ETP
+  and OSDU log-curve transfer remain out of scope.
 - **Borehole images and manual dip picks v1.** Conditioned image upload,
   artifact storage, optional DLIS image-channel extraction, trace-to-sinusoid
   dip fitting, dip quality/approval, migration `f6a7b8c9d0e1`, and
