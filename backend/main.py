@@ -1,21 +1,11 @@
 """GeoLog — Oil & Gas Well Log Viewer."""
-import asyncio
-import csv
-import datetime
 import hashlib
-import io
 import json
 import logging
-import math
 import os
 import time
 import traceback
-import urllib.error
 import uuid
-import zipfile
-from concurrent.futures import ThreadPoolExecutor
-from threading import Lock
-from typing import Any, Literal
 
 import numpy as np
 from fastapi import (
@@ -31,8 +21,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -42,22 +30,16 @@ except ImportError:
     from backend.timeutils import utcnow
 
 try:
-    from audit import append_audit_entry, log_audit as _log_audit
+    from audit import append_audit_entry
     from deps import (
         SafeJSONResponse,
-        require_admin,
-        require_interpreter,
         require_role,
         require_viewer,
     )
     from validation import pick_typed
     from jobs import (
-        JOB_EXECUTOR,
-        create_job as _create_job,
         get_job as _get_job,
         list_jobs as _list_jobs,
-        update_job as _update_job,
-        utc_now_iso as _utc_now_iso,
     )
     from observability import record_request
     from schema import ensure_schema
@@ -76,22 +58,16 @@ try:
     from routers.wells import router as wells_router
     from routers.zonation import router as zonation_router
 except ImportError:
-    from backend.audit import append_audit_entry, log_audit as _log_audit
+    from backend.audit import append_audit_entry
     from backend.deps import (
         SafeJSONResponse,
-        require_admin,
-        require_interpreter,
         require_role,
         require_viewer,
     )
     from backend.validation import pick_typed
     from backend.jobs import (
-        JOB_EXECUTOR,
-        create_job as _create_job,
         get_job as _get_job,
         list_jobs as _list_jobs,
-        update_job as _update_job,
-        utc_now_iso as _utc_now_iso,
     )
     from backend.observability import record_request
     from backend.schema import ensure_schema
@@ -112,34 +88,12 @@ except ImportError:
 
 
 
-import datetime
-import csv
-import io
-import zipfile
-import time
-from concurrent.futures import ThreadPoolExecutor
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.graphics.shapes import Drawing
-from reportlab.graphics.charts.barcharts import VerticalBarChart
-from reportlab.graphics import renderPDF
-from threading import Lock
-import uuid
-import hashlib
-import hmac
-import urllib.request
-import urllib.error
-from email.utils import format_datetime, parsedate_to_datetime
 
 try:
-    from database import Base, SessionLocal, engine, get_db
+    from database import SessionLocal, get_db
     from las_parser import CURVE_TRACKS, LASParser
     from models import (
         Annotation,
-        AuditLog,
         CompletionData,
         CorrelationMarker,
         CorrelationProfile,
@@ -154,16 +108,14 @@ try:
         ROLE_RANK,
         AuthConfig,
         current_env,
-        require_min_role,
         resolve_auth_context,
         role_from_request,
     )
 except ImportError:
-    from backend.database import Base, SessionLocal, engine, get_db
+    from backend.database import SessionLocal, get_db
     from backend.las_parser import CURVE_TRACKS, LASParser
     from backend.models import (
         Annotation,
-        AuditLog,
         CompletionData,
         CorrelationMarker,
         CorrelationProfile,
@@ -178,7 +130,6 @@ except ImportError:
         ROLE_RANK,
         AuthConfig,
         current_env,
-        require_min_role,
         resolve_auth_context,
         role_from_request,
     )
@@ -307,8 +258,32 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         return response
 
 
+# Paths that must work before a caller has a token: login, health checks, docs,
+# and the bundled SPA/static assets. Everything else under /api still requires
+# auth in jwt mode.
+PUBLIC_PATHS = frozenset({
+    "/api/health",
+    "/api/users/token",
+    "/docs",
+    "/docs/oauth2-redirect",
+    "/redoc",
+    "/openapi.json",
+    "/favicon.ico",
+})
+
+def _is_public_request(request: Request) -> bool:
+    path = request.url.path
+    if request.method == "OPTIONS":
+        return True
+    if path in PUBLIC_PATHS or path.startswith("/static/"):
+        return True
+    # The SPA shell and its non-API assets carry no data by themselves.
+    return request.method in {"GET", "HEAD"} and not path.startswith("/api/")
+
 class AuthContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        if _is_public_request(request):
+            return await call_next(request)
         try:
             auth_ctx = resolve_auth_context(request, AUTH_CONFIG)
         except HTTPException as e:
@@ -358,11 +333,12 @@ class RBACWriteGuardMiddleware(BaseHTTPMiddleware):
         if method in {"POST", "PUT", "DELETE"} and path.startswith("/api/"):
             role = role_from_request(request)
 
-            # POST endpoints that are read/query-only (safe for viewer)
-            viewer_safe = {
-                "/api/log-runs/",       # /data, /data-decimated queries
-                "/api/users/token",     # public login / token issuance
-            }
+            # Only the two POST query endpoints are viewer-safe. The old
+            # "/api/log-runs/" prefix also matched curve writes (filter,
+            # curve-override, curve-edit, depth-shift).
+            viewer_safe_post = path.startswith("/api/log-runs/") and path.endswith(
+                ("/data", "/data-decimated")
+            )
 
             # Admin-only paths (structural/destructive)
             admin_exact_post = {"/api/projects/", "/api/wells/"}
@@ -377,7 +353,7 @@ class RBACWriteGuardMiddleware(BaseHTTPMiddleware):
                 required = "admin"
             elif method == "DELETE":
                 required = "admin"
-            elif any(path.startswith(p) for p in viewer_safe):
+            elif method == "POST" and viewer_safe_post:
                 required = "viewer"
 
             if ROLE_RANK.get(role, 0) < ROLE_RANK.get(required, 99):
@@ -1115,8 +1091,6 @@ def delete_completion_component(cid: int, db: Session = Depends(get_db)):
 
 # ─── Inject audit logging into key endpoints ──────────────────
 # Patch upload endpoint to log audit
-_orig_upload = app.routes[:]
-# We'll add audit calls inline in new code below
 
 
 # ─── Sprint 28: Multi-User Roles ─────────────────────────────
@@ -1374,7 +1348,6 @@ def wells_compare(ids: str, db: Session = Depends(get_db)):
 
 
 # ─── Real-Time Collaboration WebSocket ──────────────────────
-import asyncio
 import json as _json
 
 class CollabRoom:
@@ -1429,14 +1402,36 @@ collab_rooms = CollabRoom()
 
 @app.websocket("/ws/collab/{well_id}")
 async def websocket_collab(websocket: WebSocket, well_id: int):
-    user_id = websocket.query_params.get("user", f"anon_{id(websocket)}")
+    auth_header = websocket.headers.get("authorization") or ""
+    token = websocket.query_params.get("token") or (
+        auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+    )
+    if AUTH_CONFIG.mode == "jwt":
+        if not token:
+            await websocket.close(code=1008)
+            return
+        class _AuthRequest:
+            headers = {"Authorization": f"Bearer {token}"}
+        try:
+            auth_ctx = resolve_auth_context(_AuthRequest(), AUTH_CONFIG)
+        except HTTPException:
+            await websocket.close(code=1008)
+            return
+        role = auth_ctx.role
+        user_id = auth_ctx.subject or websocket.query_params.get("user", f"anon_{id(websocket)}")
+    else:
+        role = (websocket.headers.get(AUTH_CONFIG.header_role_name)
+                or websocket.query_params.get("role") or "viewer").lower()
+        role = role if role in ROLE_RANK else "viewer"
+        user_id = websocket.query_params.get("user", f"anon_{id(websocket)}")
     user_name = websocket.query_params.get("name", user_id)
-    role = websocket.query_params.get("role", "viewer")
     await collab_rooms.connect(well_id, websocket, user_id, user_name, role)
     try:
         while True:
             data = await websocket.receive_text()
             msg = _json.loads(data)
+            if not isinstance(msg, dict):
+                continue
             msg["user_id"] = user_id
             msg["name"] = user_name
             await collab_rooms.broadcast(well_id, msg, exclude_ws=websocket)

@@ -8,6 +8,55 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+### Fixed
+
+- **JWT mode locked out login, health checks, docs and the SPA.** The auth
+  middleware now skips public paths (`/api/health`, `/api/users/token`, docs,
+  static files and non-API GETs) while still protecting every other API route.
+- **Client `X-User-Role` could override a JWT role.** The four well-state routes
+  (template lock/unlock, well unlock, snapshot approval) now use the resolved
+  role through FastAPI dependencies instead of reading the header directly.
+- **Stored XSS through well, project, top and zone names.** Server strings are
+  HTML-escaped before they enter the DOM; toasts use `textContent`.
+- **QC, correlation and zonation read float64 curves as float32.** They now use
+  the stored dtype and the stored DEPT curve instead of inventing depths.
+- **`auto-zone-from-tops` crashed without SciPy.** The GR valley picker is now
+  NumPy-only.
+- **Deleting a well or project left child rows behind.** Annotations, production,
+  deviation surveys, aliases, petro params, correlation markers/profiles and
+  depth shifts are removed with the well, and its lock/snapshot files are
+  deleted. SQLite id reuse can no longer make a new well inherit old data.
+- **Viewers could write curve data through `/api/log-runs/*`.** Only the two
+  read-only POST query endpoints remain viewer-safe.
+- **Frontend calls dropped auth headers.** Deletes, exports, QC, tornado, VCL,
+  image-log and correlation requests now use the shared auth helper; blob
+  downloads include the bearer token.
+- **The collaboration WebSocket accepted anonymous clients and query-string
+  roles.** JWT mode now requires a token before `accept()`; header mode keeps the
+  development role query but ignores spoofed roles elsewhere.
+- **Local token issuance accepted empty user tokens and used a time-based
+  token.** Empty tokens are rejected, new tokens use `secrets.token_urlsafe(32)`,
+  comparisons are constant-time, and issuance fails with 503 when no JWT secret
+  is configured.
+- **Security-evidence attestation accepted unknown signature algorithms.** Only
+  `hmac-sha256` is accepted now.
+- **File-backed state was not safe across workers.** Audit chain, metrics, jobs,
+  locks and snapshots use an OS-level file lock; ops endpoints reload shared
+  metrics before reporting.
+- **Several write endpoints returned 500 on non-numeric input.** Petro params,
+  zones, save-picks, depth-shift, production, aliases, trajectory and template
+  preview now return 400 with the field name.
+- **Core calibration reported the first N core depths instead of the matched
+  depths.** Fixed and covered by a regression test.
+- **DLIS/LIS temp files could not be reopened on Windows, and the heuristic
+  fallback was silent.** Temp files use `delete=False` and are removed in a
+  `finally`; fallback parses return a warning that the upload UI shows.
+- **Bulk upload was declared as a JSON list, not multipart files.** It now accepts
+  `list[UploadFile]`, commits per file and increments run numbers correctly.
+- **Curve splice and filter were O(n²)/Python-loop slow.** Splice uses
+  `searchsorted`, filters use sliding windows.
+- **`np.trapz` is gone in NumPy 2.** EUR uses `np.trapezoid` when available.
+
 ## [0.1.0] - 2026-10-14
 
 First tagged release. Pre-production engineering sample: the API is not stable

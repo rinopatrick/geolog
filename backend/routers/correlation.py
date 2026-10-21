@@ -72,12 +72,21 @@ def _load_curve(db: Session, well_id: int, curve: str) -> Tuple[Optional[LogRun]
     if not lr.num_points or lr.num_points <= 1 or lr.start_depth is None or lr.stop_depth is None:
         return lr, None, None, None
 
-    depth = np.linspace(float(lr.start_depth), float(lr.stop_depth), int(lr.num_points), dtype=np.float32)
+    depth_cd = db.query(CurveData).filter(
+        CurveData.log_run_id == lr.id,
+        CurveData.mnemonic.in_(["DEPT", "DEPTH", "MD", "TVD"]),
+    ).first()
+    if depth_cd and depth_cd.data_binary:
+        depth = np.frombuffer(depth_cd.data_binary, dtype=np.float64).copy()
+    else:
+        depth = np.linspace(float(lr.start_depth), float(lr.stop_depth), int(lr.num_points))
+    if depth.size <= 1:
+        return lr, None, None, None
     cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic == curve).first()
     if not cd or not cd.data_binary:
         return lr, depth, None, None
 
-    arr = np.frombuffer(cd.data_binary, dtype=np.float32)
+    arr = np.frombuffer(cd.data_binary, dtype=np.float64)
     n = min(len(arr), len(depth))
     if n <= 1:
         return lr, depth, None, cd.unit or ""

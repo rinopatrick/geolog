@@ -17,7 +17,7 @@ class QualityScoreCard {
         return `
             <div class="qc-score-card" style="border:1px solid #30363d;border-radius:8px;padding:10px;background:#0d1117">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                    <strong>${this.curveName}</strong>
+                    <strong>${window.escapeHtml ? window.escapeHtml(this.curveName) : this.curveName}</strong>
                     <span style="color:${color};font-weight:700">${pct.toFixed(1)}</span>
                 </div>
                 <div style="height:8px;background:#21262d;border-radius:6px;overflow:hidden">
@@ -40,7 +40,7 @@ class MissingIntervalTable {
         if (!this.intervals.length) return '<div style="color:#3fb950">No missing intervals detected.</div>';
         const rows = this.intervals.map(it => `
             <tr>
-                <td>${it.curve || '-'}</td>
+                <td>${window.escapeHtml ? window.escapeHtml(it.curve || '-') : (it.curve || '-')}</td>
                 <td>${Number(it.start_depth ?? 0).toFixed(2)}</td>
                 <td>${Number(it.end_depth ?? 0).toFixed(2)}</td>
                 <td>${Number(it.gap_length ?? 0).toFixed(2)}</td>
@@ -119,7 +119,7 @@ class AdvancedQCPanel {
 
     async load(wellId) {
         const res = await fetch(`${this.apiBase}/wells/${wellId}/advanced-qc`, {
-            headers: { 'X-User-Role': (window.app?.currentRole || 'admin') },
+            headers: window.geologAuthHeaders(),
         });
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();

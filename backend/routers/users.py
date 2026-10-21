@@ -1,5 +1,8 @@
 """User management router for GeoLog."""
 
+import hmac
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -34,9 +37,6 @@ def list_users(db: Session = Depends(get_db), _role: str = Depends(require_viewe
 
 @router.post("", status_code=201)
 def create_user(data: dict, db: Session = Depends(get_db), _role: str = Depends(require_admin)):
-    import hashlib
-    import time
-
     username = data.get("username", "")
     if not username:
         raise HTTPException(400, "username required")
@@ -45,7 +45,7 @@ def create_user(data: dict, db: Session = Depends(get_db), _role: str = Depends(
     # When creating user, if client specifies an initial token/secret, preserve it; otherwise auto-generate
     token = (data.get("token") or "").strip()
     if not token:
-        token = hashlib.sha256(f"{username}{time.time()}".encode()).hexdigest()[:32]
+        token = secrets.token_urlsafe(32)
     u = User(
         username=username,
         display_name=data.get("display_name", username),
@@ -91,14 +91,15 @@ def issue_user_token(data: dict, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(401, "Invalid credentials")
 
-    # If user has a registered token/secret, verify it
-    if user.token and user.token != token:
+    # A user with no registered secret cannot authenticate. The old form
+    # skipped this check when the column was empty, so any legacy row with no
+    # token could be logged in as without a credential.
+    if not user.token or not hmac.compare_digest(str(user.token), token):
         raise HTTPException(401, "Invalid credentials")
 
     cfg = AuthConfig.from_env()
     if not cfg.jwt_secret:
-        # If secret not set in env, provide temporary dev secret to permit local test token issuance
-        cfg.jwt_secret = "geolog-dev-token-secret"
+        raise HTTPException(503, "JWT secret is not configured (set AUTH_JWT_SECRET)")
 
     access_token = create_access_token(subject=user.username, role=user.role, cfg=cfg)
     return {

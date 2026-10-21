@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List
+import os
 import re
 import tempfile
 import numpy as np
@@ -60,6 +61,7 @@ class ParsedFile:
     well_name: str
     uwi: str
     runs: List[ParsedRun]
+    warnings: List[str] = field(default_factory=list)
 
 
 DEPTH_KEYS = ("DEPT", "DEPTH", "MD", "TDEP", "TVD")
@@ -112,21 +114,27 @@ def _as_string(value) -> str:
 
 
 def parse_dlis_content(content: bytes, filename: str = "upload.dlis") -> ParsedFile:
+    warning = ""
     if dlis_mod is not None:
         try:
             return _parse_dlis_dlisio(content, filename)
-        except Exception:
-            pass
-    return _parse_dlis_binary_fallback(content, filename)
+        except Exception as exc:
+            warning = f"dlisio failed, using heuristic fallback: {exc}"
+    parsed = _parse_dlis_binary_fallback(content, filename)
+    parsed.warnings.append(warning or "dlisio is not installed; using heuristic binary scan")
+    return parsed
 
 
 def parse_lis_content(content: bytes, filename: str = "upload.lis") -> ParsedFile:
+    warning = ""
     if lis_mod is not None:
         try:
             return _parse_lis_dlisio(content, filename)
-        except Exception:
-            pass
-    return _parse_lis_binary_fallback(content, filename)
+        except Exception as exc:
+            warning = f"dlisio failed, using heuristic fallback: {exc}"
+    parsed = _parse_lis_binary_fallback(content, filename)
+    parsed.warnings.append(warning or "dlisio is not installed; using heuristic binary scan")
+    return parsed
 
 
 def _parse_dlis_dlisio(content: bytes, filename: str) -> ParsedFile:
@@ -134,9 +142,11 @@ def _parse_dlis_dlisio(content: bytes, filename: str) -> ParsedFile:
     well_name = ""
     uwi = ""
 
-    with tempfile.NamedTemporaryFile(suffix=".dlis", delete=True) as tf:
-        tf.write(content)
-        tf.flush()
+    tf = tempfile.NamedTemporaryFile(suffix=".dlis", delete=False)
+    tf.write(content)
+    tf.flush()
+    tf.close()
+    try:
         with dlis_mod.load(tf.name) as physical:
             for lf_idx, logical in enumerate(physical):
                 if not well_name:
@@ -219,6 +229,12 @@ def _parse_dlis_dlisio(content: bytes, filename: str) -> ParsedFile:
                         depth_key=depth_key,
                     ))
 
+    finally:
+        try:
+            os.unlink(tf.name)
+        except OSError:
+            pass
+
     if not runs:
         raise ValueError("No frame data found in DLIS")
 
@@ -235,9 +251,11 @@ def _parse_lis_dlisio(content: bytes, filename: str) -> ParsedFile:
     well_name = ""
     uwi = ""
 
-    with tempfile.NamedTemporaryFile(suffix=".lis", delete=True) as tf:
-        tf.write(content)
-        tf.flush()
+    tf = tempfile.NamedTemporaryFile(suffix=".lis", delete=False)
+    tf.write(content)
+    tf.flush()
+    tf.close()
+    try:
         with lis_mod.load(tf.name) as physical:
             for lf_idx, logical in enumerate(physical):
                 header = getattr(logical, "header", None)
@@ -299,6 +317,12 @@ def _parse_lis_dlisio(content: bytes, filename: str) -> ParsedFile:
                         parameters=[{"mnemonic": "SET", "unit": "", "value": run_name}],
                         depth_key=depth_key,
                     ))
+
+    finally:
+        try:
+            os.unlink(tf.name)
+        except OSError:
+            pass
 
     if not runs:
         raise ValueError("No data records found in LIS")

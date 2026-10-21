@@ -9,7 +9,6 @@ middleware in main.py writes them and these routes read them.
 
 from __future__ import annotations
 
-import datetime
 import hashlib
 import hmac
 import json
@@ -34,7 +33,7 @@ try:
     from audit import resolve_audit_export_signing_key, verify_audit_export_signature_payload
     from database import get_db
     from deps import require_interpreter, require_viewer
-    from observability import OBS_METRICS, OBS_METRICS_LOCK
+    from observability import OBS_METRICS, OBS_METRICS_LOCK, refresh_metrics
     from validation import canonical_json
     # Reused response models, defined alongside the audit routes that share them.
     from routers.audit import AuditSignatureVerifyRequest, AuditSignatureVerifyResponse
@@ -42,7 +41,7 @@ except ImportError:
     from backend.audit import resolve_audit_export_signing_key, verify_audit_export_signature_payload
     from backend.database import get_db
     from backend.deps import require_interpreter, require_viewer
-    from backend.observability import OBS_METRICS, OBS_METRICS_LOCK
+    from backend.observability import OBS_METRICS, OBS_METRICS_LOCK, refresh_metrics
     from backend.validation import canonical_json
     from backend.routers.audit import AuditSignatureVerifyRequest, AuditSignatureVerifyResponse
 
@@ -53,6 +52,7 @@ OpsEvidenceAttestReasonCode = Literal[
     "ATTEST_VALID",
     "MISSING_REPORT",
     "MISSING_SIGNATURE",
+    "UNSUPPORTED_ALG",
     "INVALID_SIGNATURE_FORMAT",
     "DIGEST_MISMATCH",
     "HMAC_KEY_MISSING",
@@ -421,42 +421,53 @@ def _attest_security_evidence_payload(report: dict[str, Any] | None, signature_o
             "timestamp": utcnow().isoformat() + "Z",
         }
 
-    if signature_alg == "hmac-sha256":
-        if not sig or len(sig) != 64 or any(c not in "0123456789abcdef" for c in sig):
-            return {
-                "ok": False,
-                "reason": "signature must be 64-char hex",
-                "reason_code": "INVALID_SIGNATURE_FORMAT",
-                "report_sha256": report_sha,
-                "signature_alg": signature_alg,
-                "signature_kid": signature_kid,
-                "retention_days": retention_days,
-                "timestamp": utcnow().isoformat() + "Z",
-            }
-        key = (os.getenv("BACKUP_DRILL_SIGNING_KEY") or "").strip()
-        if not key:
-            return {
-                "ok": False,
-                "reason": "BACKUP_DRILL_SIGNING_KEY is required for hmac-sha256 verification",
-                "reason_code": "HMAC_KEY_MISSING",
-                "report_sha256": report_sha,
-                "signature_alg": signature_alg,
-                "signature_kid": signature_kid,
-                "retention_days": retention_days,
-                "timestamp": utcnow().isoformat() + "Z",
-            }
-        expected = hmac.new(key.encode("utf-8"), report_sha.encode("utf-8"), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, sig):
-            return {
-                "ok": False,
-                "reason": "hmac signature mismatch",
-                "reason_code": "HMAC_SIGNATURE_MISMATCH",
-                "report_sha256": report_sha,
-                "signature_alg": signature_alg,
-                "signature_kid": signature_kid,
-                "retention_days": retention_days,
-                "timestamp": utcnow().isoformat() + "Z",
-            }
+    if signature_alg != "hmac-sha256":
+        return {
+            "ok": False,
+            "reason": "unsupported signature_alg",
+            "reason_code": "UNSUPPORTED_ALG",
+            "report_sha256": report_sha,
+            "signature_alg": signature_alg,
+            "signature_kid": signature_kid,
+            "retention_days": retention_days,
+            "timestamp": utcnow().isoformat() + "Z",
+        }
+
+    if not sig or len(sig) != 64 or any(c not in "0123456789abcdef" for c in sig):
+        return {
+            "ok": False,
+            "reason": "signature must be 64-char hex",
+            "reason_code": "INVALID_SIGNATURE_FORMAT",
+            "report_sha256": report_sha,
+            "signature_alg": signature_alg,
+            "signature_kid": signature_kid,
+            "retention_days": retention_days,
+            "timestamp": utcnow().isoformat() + "Z",
+        }
+    key = (os.getenv("BACKUP_DRILL_SIGNING_KEY") or "").strip()
+    if not key:
+        return {
+            "ok": False,
+            "reason": "BACKUP_DRILL_SIGNING_KEY is required for hmac-sha256 verification",
+            "reason_code": "HMAC_KEY_MISSING",
+            "report_sha256": report_sha,
+            "signature_alg": signature_alg,
+            "signature_kid": signature_kid,
+            "retention_days": retention_days,
+            "timestamp": utcnow().isoformat() + "Z",
+        }
+    expected = hmac.new(key.encode("utf-8"), report_sha.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        return {
+            "ok": False,
+            "reason": "hmac signature mismatch",
+            "reason_code": "HMAC_SIGNATURE_MISMATCH",
+            "report_sha256": report_sha,
+            "signature_alg": signature_alg,
+            "signature_kid": signature_kid,
+            "retention_days": retention_days,
+            "timestamp": utcnow().isoformat() + "Z",
+        }
 
     return {
         "ok": True,
@@ -582,6 +593,7 @@ def _security_evidence_gate_failure_detail(gate: dict[str, Any]) -> dict[str, An
 )
 def ops_metrics(_role: str = Depends(require_viewer)):
     """Lightweight in-process metrics snapshot (Phase 2 baseline)."""
+    refresh_metrics()
     with OBS_METRICS_LOCK:
         total = int(OBS_METRICS.get("requests_total", 0))
         count = int(OBS_METRICS.get("latency_ms_count", 0))
@@ -625,6 +637,7 @@ def ops_metrics_recent(
     _role: str = Depends(require_viewer),
 ):
     """Return recent request events captured by in-process metrics middleware."""
+    refresh_metrics()
     limit = max(1, min(int(limit or 20), 200))
     status_min = max(0, int(status_min or 0))
     needle = (path_contains or "").strip().lower()
@@ -681,6 +694,7 @@ def ops_metrics_recent(
 )
 def ops_slo_status(_role: str = Depends(require_viewer)):
     """Basic SLO evaluation snapshot from in-process counters."""
+    refresh_metrics()
     target_latency_avg_ms = float(os.getenv("OPS_SLO_AVG_MS", "500") or 500)
     target_latency_p95_ms = float(os.getenv("OPS_SLO_P95_MS", "800") or 800)
     target_error_rate = float(os.getenv("OPS_SLO_ERROR_RATE", "0.01") or 0.01)
@@ -906,6 +920,7 @@ def ops_alert_rules(_role: str = Depends(require_viewer)):
 )
 def ops_metrics_prometheus(_role: str = Depends(require_viewer)):
     """Prometheus text exposition for lightweight ops metrics."""
+    refresh_metrics()
     with OBS_METRICS_LOCK:
         total = int(OBS_METRICS.get("requests_total", 0))
         by_method = dict(OBS_METRICS.get("requests_by_method", {}))

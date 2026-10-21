@@ -21,7 +21,14 @@
             this._disconnect();
 
             const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-            const url = `${proto}://${location.host}/ws/collab/${wellId}?user=${encodeURIComponent(this.userId)}&name=${encodeURIComponent(this.userName)}`;
+            const qs = new URLSearchParams({
+                user: this.userId,
+                name: this.userName,
+                role: window.app?.currentRole || 'viewer',
+            });
+            const token = window.app?.authToken || localStorage.getItem('geolog_auth_token');
+            if (token) qs.set('token', token);
+            const url = `${proto}://${location.host}/ws/collab/${wellId}?${qs.toString()}`;
 
             try {
                 this.ws = new WebSocket(url);
@@ -144,7 +151,7 @@
                 if (!el) {
                     el = document.createElement('div');
                     el.style.cssText = 'position:absolute;left:0;right:0;height:2px;pointer-events:none;z-index:5;transition:top 0.15s';
-                    el.innerHTML = `<span style="position:absolute;left:4px;top:-16px;font-size:9px;padding:1px 4px;border-radius:3px;white-space:nowrap">${peer.name || uid}</span>`;
+                    el.innerHTML = `<span style="position:absolute;left:4px;top:-16px;font-size:9px;padding:1px 4px;border-radius:3px;white-space:nowrap">${window.escapeHtml ? window.escapeHtml(peer.name || uid) : (peer.name || uid)}</span>`;
                     container.appendChild(el);
                     this.cursorEls[uid] = el;
                 }
@@ -172,7 +179,7 @@
             el.innerHTML = Object.entries(this.peers).map(([uid, p]) =>
                 `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:8px;font-size:11px">
                     <span style="width:8px;height:8px;border-radius:50%;background:${p.color || '#58a6ff'}"></span>
-                    ${p.name || uid} (${p.role || 'viewer'})
+                    ${window.escapeHtml ? window.escapeHtml(p.name || uid) : (p.name || uid)} (${window.escapeHtml ? window.escapeHtml(p.role || 'viewer') : (p.role || 'viewer')})
                 </span>`
             ).join('');
         },

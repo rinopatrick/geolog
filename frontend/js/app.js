@@ -3,6 +3,21 @@
  */
 
 // ─── UI Utilities ────────────────────────────────────────────
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+window.escapeHtml = escapeHtml;
+
+// Shared by the standalone modules (qc.js, templates.js, units.js, ...).
+// They load before app.js, so call this at request time, not at load time.
+window.geologAuthHeaders = function () {
+    const headers = { 'X-User-Role': (window.app?.currentRole || 'viewer') };
+    const token = window.app?.authToken || localStorage.getItem('geolog_auth_token') || '';
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return headers;
+};
 const GeoModal = {
     _resolve: null,
     _confirmed: false,
@@ -49,7 +64,12 @@ const GeoToast = {
         const toast = document.createElement('div');
         toast.className = `toast toast-${type}`;
         const icons = { success: '✓', error: '✕', info: 'ℹ', warn: '⚠' };
-        toast.innerHTML = `<span>${icons[type] || ''}</span><span>${message}</span>`;
+        const icon = document.createElement('span');
+        icon.textContent = icons[type] || '';
+        const text = document.createElement('span');
+        text.textContent = message;
+        toast.appendChild(icon);
+        toast.appendChild(text);
         container.appendChild(toast);
         setTimeout(() => { toast.classList.add('fade-out'); setTimeout(() => toast.remove(), 300); }, duration);
     },
@@ -921,9 +941,10 @@ class GeoLogApp {
     }
 
     async _apiBlob(path, opts = {}) {
+        const { headers: optHeaders, ...rest } = opts;
         const resp = await fetch('/api' + path, {
-            headers: { 'X-User-Role': this.currentRole || 'viewer', ...opts.headers },
-            ...opts,
+            ...rest,
+            headers: { ...this._authHeaders(), ...(optHeaders || {}) },
         });
         if (!resp.ok) throw new Error(`Export error: ${resp.status}`);
         return resp.blob();
@@ -1293,8 +1314,8 @@ class GeoLogApp {
         container.innerHTML = this.projects.map(p => `
             <div class="project-group">
                 <div class="project-header">
-                    <span class="project-name">${p.name}</span>
-                    <span class="project-meta">${p.operator || ''} • ${p.country || ''}</span>
+                    <span class="project-name">${escapeHtml(p.name)}</span>
+                    <span class="project-meta">${escapeHtml(p.operator || '')} • ${escapeHtml(p.country || '')}</span>
                     <button class="btn-icon-sm" onclick="app.deleteProject(${p.id})" title="Delete">
                         <i data-lucide="trash-2"></i>
                     </button>
@@ -1310,8 +1331,8 @@ class GeoLogApp {
         if (!container) return;
         container.innerHTML = this.wells.map(w => `
             <div class="well-item" data-id="${w.id}" onclick="app.selectWell(${w.id})">
-                <div class="well-name">${w.name}</div>
-                <div class="well-meta">${w.uwi || '—'} • ${w.log_run_count || 0} logs</div>
+                <div class="well-name">${escapeHtml(w.name)}</div>
+                <div class="well-meta">${escapeHtml(w.uwi || '—')} • ${w.log_run_count || 0} logs</div>
             </div>
         `).join('');
     }
@@ -1330,7 +1351,7 @@ class GeoLogApp {
         const a = document.getElementById('corrWellA');
         const b = document.getElementById('corrWellB');
         if (!a || !b) return;
-        const opts = this.wells.map(w => `<option value="${w.id}">${w.name}</option>`).join('');
+        const opts = this.wells.map(w => `<option value="${w.id}">${escapeHtml(w.name)}</option>`).join('');
         a.innerHTML = opts;
         b.innerHTML = opts;
         if (this.wells.length > 0) a.value = String(this.wells[0].id);
@@ -2288,8 +2309,8 @@ class GeoLogApp {
             return `
                 <div class="curve-row">
                     <span class="curve-dot" style="background:${color}"></span>
-                    <span class="curve-name">${c.mnemonic}</span>
-                    <span class="curve-unit">${c.unit || ''}</span>
+                    <span class="curve-name">${escapeHtml(c.mnemonic)}</span>
+                    <span class="curve-unit">${escapeHtml(c.unit || '')}</span>
                     <span class="curve-track">T${track}</span>
                     <span class="curve-range">${c.min_value?.toFixed(2)} – ${c.max_value?.toFixed(2)}</span>
                 </div>
@@ -2304,9 +2325,9 @@ class GeoLogApp {
         panel.innerHTML = this.formationTops.map(t => `
             <div class="top-row">
                 <span class="top-color" style="background:${t.color}"></span>
-                <span class="top-name">${t.formation_name}</span>
+                <span class="top-name">${escapeHtml(t.formation_name)}</span>
                 <span class="top-depth">${t.depth?.toFixed(1)} ${t.depth_unit || 'FT'}</span>
-                <span class="top-lith">${t.lithology || ''}</span>
+                <span class="top-lith">${escapeHtml(t.lithology || '')}</span>
                 <button class="btn-icon-sm" onclick="app.editTop(${t.id})" title="Edit">
                     <i data-lucide="pencil"></i>
                 </button>
@@ -2515,6 +2536,9 @@ class GeoLogApp {
                 this._applyUploadedLASVersion(result);
                 const runs = result.runs_created ? ` (${result.runs_created} run${result.runs_created > 1 ? 's' : ''})` : '';
                 GeoToast.success(`Uploaded ${result.filename}${runs} — ${result.curves.length} curves, ${result.num_points} points`);
+                if (Array.isArray(result.warnings) && result.warnings.length) {
+                    GeoToast.warn(result.warnings.join('; '), 8000);
+                }
                 if (this.projects.length > 0) await this.loadWells(this.projects[0].id);
             } catch (e) {
                 GeoToast.error(`${conf.label} upload failed: ` + e.message);
@@ -2603,7 +2627,7 @@ class GeoLogApp {
             return `
                 <div style="border:1px solid #30363d;border-radius:10px;padding:10px;margin-bottom:10px;background:#0d1117">
                     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
-                        <strong style="color:#c9d1d9">${item.file.name}</strong>
+                        <strong style="color:#c9d1d9">${escapeHtml(item.file.name)}</strong>
                         <span style="font-size:12px;color:${statusColor[item.status] || '#8b949e'}">${item.status.toUpperCase()}</span>
                     </div>
                     <div style="display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:8px;font-size:12px;color:#8b949e;margin-top:6px">
@@ -2867,7 +2891,7 @@ class GeoLogApp {
         panel.innerHTML = zones.map((z, i) => `
             <div class="zone-row">
                 <span class="zone-color" style="background:${z.color || colors[i % colors.length]}"></span>
-                <span class="zone-name">${z.name}</span>
+                <span class="zone-name">${escapeHtml(z.name)}</span>
                 <span class="zone-range">${z.top.toFixed(1)} – ${z.bottom.toFixed(1)}</span>
                 <button class="btn-icon-sm" onclick="app.editZone(${i})" title="Edit">
                     <i data-lucide="pencil"></i>
@@ -3588,7 +3612,7 @@ class GeoLogApp {
             const fmt = (v, digits = 3) => (v !== null && v !== undefined && Number.isFinite(Number(v)) ? Number(v).toFixed(digits) : '-');
             for (const z of data.zones) {
                 html += '<tr>';
-                html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#c9d1d9">${z.name || '-'}</td>`;
+                html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#c9d1d9">${escapeHtml(z.name || '-')}</td>`;
                 html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#c9d1d9">${fmt(z.top_depth, 1)}</td>`;
                 html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#c9d1d9">${fmt(z.bottom_depth, 1)}</td>`;
                 html += `<td style="padding:3px 6px;border:1px solid #21262d;color:#c9d1d9">${fmt(z.gross_ft, 1)}</td>`;
@@ -3788,7 +3812,7 @@ class GeoLogApp {
     async downloadZonationReport() {
         if (!this.currentWell) return GeoToast.warn('No well selected');
         try {
-            const resp = await fetch(`/api/wells/${this.currentWell.id}/zonation-report`);
+            const resp = await fetch(`/api/wells/${this.currentWell.id}/zonation-report`, { headers: this._authHeaders() });
             if (!resp.ok) throw new Error(await resp.text());
             const blob = await resp.blob();
             const a = document.createElement('a');
@@ -3886,10 +3910,10 @@ class GeoLogApp {
             const c = t.recommended_cutoffs || {};
             return `<div style="border:1px solid #30363d;border-radius:8px;padding:8px;background:#0d1117">
                 <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
-                    <strong>${t.name || 'Template'}</strong>
+                    <strong>${escapeHtml(t.name || 'Template')}</strong>
                     <button class="btn-sm" onclick="app.previewTemplate(${idx})">Preview</button>
                 </div>
-                <div style="font-size:12px;color:#8b949e;margin:4px 0">${t.description || ''}</div>
+                <div style="font-size:12px;color:#8b949e;margin:4px 0">${escapeHtml(t.description || '')}</div>
                 <div style="font-size:12px;color:#c9d1d9">a=${p.a}, m=${p.m}, n=${p.n}, Vcl≤${c.vsh_cutoff}, PHIE≥${c.phie_cutoff}, Sw≤${c.sw_cutoff}</div>
                 <div style="margin-top:6px"><button class="btn-primary" onclick="app.applyWorkflowTemplate('${(t.name || '').replace(/'/g, "\\'")}')">Apply Template</button></div>
             </div>`;
@@ -3902,7 +3926,7 @@ class GeoLogApp {
         if (!el || !t) return;
         const p = t.params || {};
         const c = t.recommended_cutoffs || {};
-        el.innerHTML = `Preview: <strong>${t.name}</strong> → model=${p.saturation_model || 'archie'}, a=${p.a}, m=${p.m}, n=${p.n}, Rw=${t.suggested_rw ?? p.rw}, Vcl≤${c.vsh_cutoff}, PHIE≥${c.phie_cutoff}, Sw≤${c.sw_cutoff}, GR range ${c.gr_min}-${c.gr_max}.`;
+        el.innerHTML = `Preview: <strong>${escapeHtml(t.name)}</strong> → model=${escapeHtml(p.saturation_model || 'archie')}, a=${p.a}, m=${p.m}, n=${p.n}, Rw=${t.suggested_rw ?? p.rw}, Vcl≤${c.vsh_cutoff}, PHIE≥${c.phie_cutoff}, Sw≤${c.sw_cutoff}, GR range ${c.gr_min}-${c.gr_max}.`;
     }
 
     async applyWorkflowTemplate(templateName) {
@@ -6940,12 +6964,12 @@ class GeoLogApp {
         html += '</tr></thead><tbody>';
         for (const t of tops) {
             html += `<tr>`;
-            html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9">${t.formation_name}</td>`;
+            html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9">${escapeHtml(t.formation_name)}</td>`;
             html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9">${t.depth.toFixed(1)}</td>`;
             html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9">${t.top_depth?.toFixed(1) ?? '-'}</td>`;
             html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9">${t.base_depth?.toFixed(1) ?? '-'}</td>`;
             html += `<td style="padding:4px 6px;border:1px solid #21262d"><span style="display:inline-block;width:16px;height:16px;border-radius:3px;background:${t.color}"></span></td>`;
-            html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9">${t.lithology || '-'}</td>`;
+            html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9">${escapeHtml(t.lithology || '-')}</td>`;
             html += `<td style="padding:4px 6px;border:1px solid #21262d">`;
             html += `<button class="btn-sm" onclick="app.editFormationTop(${t.id})" style="font-size:10px">✏️</button> `;
             html += `<button class="btn-sm" onclick="app.deleteFormationTop(${t.id})" style="font-size:10px;color:#f85149">🗑️</button>`;
@@ -6960,7 +6984,7 @@ class GeoLogApp {
         if (!this.projects?.[0]) return;
         const pid = this.projects[0].id;
         try {
-            const resp = await fetch(`/api/projects/${pid}/tops-export`);
+            const resp = await fetch(`/api/projects/${pid}/tops-export`, { headers: this._authHeaders() });
             const text = await resp.text();
             const blob = new Blob([text], { type: 'text/csv' });
             const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -6972,7 +6996,7 @@ class GeoLogApp {
     async exportTopsPetrel() {
         if (!this.currentWell) return;
         try {
-            const resp = await fetch(`/api/wells/${this.currentWell.id}/tops-petrel`);
+            const resp = await fetch(`/api/wells/${this.currentWell.id}/tops-petrel`, { headers: this._authHeaders() });
             const text = await resp.text();
             const blob = new Blob([text], { type: 'text/csv' });
             const a = document.createElement('a');
@@ -7166,8 +7190,8 @@ class GeoLogApp {
                 html += '</tr></thead><tbody>';
                 for (const w of data.wells) {
                     html += '<tr>';
-                    html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9">${w.name || '-'}</td>`;
-                    html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#8b949e">${w.uwi || '-'}</td>`;
+                    html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9">${escapeHtml(w.name || '-')}</td>`;
+                    html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#8b949e">${escapeHtml(w.uwi || '-')}</td>`;
                     html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9;text-align:center">${w.log_runs ?? 0}</td>`;
                     html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9;text-align:center">${w.tops ?? 0}</td>`;
                     html += `<td style="padding:4px 6px;border:1px solid #21262d;color:#c9d1d9;text-align:center">${w.zones ?? 0}</td>`;
@@ -7199,7 +7223,7 @@ class GeoLogApp {
             html += '<thead><tr style="background:#161b22">';
             html += '<th style="padding:6px 12px;border:1px solid #30363d;color:#58a6ff;text-align:left">Formation</th>';
             for (const w of data.wells) {
-                html += `<th style="padding:6px 12px;border:1px solid #30363d;color:#58a6ff;text-align:center">${w.name}</th>`;
+                html += `<th style="padding:6px 12px;border:1px solid #30363d;color:#58a6ff;text-align:center">${escapeHtml(w.name)}</th>`;
             }
             html += '</tr></thead><tbody>';
             for (const form of data.formations) {
@@ -7476,7 +7500,7 @@ class GeoLogApp {
         if (!this.projects.length) return [];
         const pid = this.projects[0]?.id;
         try {
-            const resp = await fetch(`/api/audit-log?project_id=${pid}&limit=50`);
+            const resp = await fetch(`/api/audit-log?project_id=${pid}&limit=50`, { headers: this._authHeaders() });
             return await resp.json();
         } catch { return []; }
     }
@@ -7515,7 +7539,7 @@ class GeoLogApp {
         const curveX = document.getElementById('matrixCurveX')?.value || 'GR';
         const curveY = document.getElementById('matrixCurveY')?.value || 'RT';
         try {
-            const resp = await fetch(`/api/projects/${pid}/crossplot-matrix?curve_x=${curveX}&curve_y=${curveY}`);
+            const resp = await fetch(`/api/projects/${pid}/crossplot-matrix?curve_x=${curveX}&curve_y=${curveY}`, { headers: this._authHeaders() });
             const data = await resp.json();
             this._renderMatrixPlot(data);
         } catch (e) {
@@ -7614,7 +7638,7 @@ class GeoLogApp {
         if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
         GeoLoading.show('Generating report...');
         try {
-            const resp = await fetch(`/api/wells/${this.currentWell.id}/report`);
+            const resp = await fetch(`/api/wells/${this.currentWell.id}/report`, { headers: this._authHeaders() });
             const data = await resp.json();
             GeoLoading.hide();
             this._renderReportPreview(data);
@@ -7627,26 +7651,26 @@ class GeoLogApp {
     _renderReportPreview(data) {
         const w = data.well || {};
         let html = `<div class="report-preview">
-            <h1>Well Log Report — ${w.name || 'Unknown'}</h1>
-            <p><strong>UWI:</strong> ${w.uwi || '—'} | <strong>Operator:</strong> ${w.operator || '—'} | <strong>Field:</strong> ${w.field_name || '—'} | <strong>Generated:</strong> ${data.generated_at || '—'}</p>`;
+            <h1>Well Log Report — ${escapeHtml(w.name || 'Unknown')}</h1>
+            <p><strong>UWI:</strong> ${escapeHtml(w.uwi || '—')} | <strong>Operator:</strong> ${escapeHtml(w.operator || '—')} | <strong>Field:</strong> ${escapeHtml(w.field_name || '—')} | <strong>Generated:</strong> ${escapeHtml(data.generated_at || '—')}</p>`;
         if (data.formation_tops && data.formation_tops.length) {
             html += `<h2>Formation Tops</h2><table><tr><th>Formation</th><th>Depth (${w.depth_unit || 'FT'})</th><th>Lithology</th></tr>`;
             data.formation_tops.forEach(t => {
-                html += `<tr><td>${t.formation_name}</td><td>${t.depth?.toFixed(1) || '—'}</td><td>${t.lithology || '—'}</td></tr>`;
+                html += `<tr><td>${escapeHtml(t.formation_name)}</td><td>${t.depth?.toFixed(1) || '—'}</td><td>${escapeHtml(t.lithology || '—')}</td></tr>`;
             });
             html += '</table>';
         }
         if (data.zones && data.zones.length) {
             html += `<h2>Zones</h2><table><tr><th>Zone</th><th>Top</th><th>Bottom</th><th>Gross (ft)</th></tr>`;
             data.zones.forEach(z => {
-                html += `<tr><td>${z.name}</td><td>${z.top_depth?.toFixed(1)}</td><td>${z.bottom_depth?.toFixed(1)}</td><td>${(z.bottom_depth - z.top_depth)?.toFixed(1)}</td></tr>`;
+                html += `<tr><td>${escapeHtml(z.name)}</td><td>${z.top_depth?.toFixed(1)}</td><td>${z.bottom_depth?.toFixed(1)}</td><td>${(z.bottom_depth - z.top_depth)?.toFixed(1)}</td></tr>`;
             });
             html += '</table>';
         }
         if (data.curve_summary && data.curve_summary.length) {
             html += `<h2>Curve Summary</h2><table><tr><th>Run</th><th>Curve</th><th>Unit</th><th>Count</th><th>Min</th><th>Max</th><th>Mean</th></tr>`;
             data.curve_summary.forEach(c => {
-                html += `<tr><td>${c.run}</td><td>${c.mnemonic}</td><td>${c.unit || ''}</td><td>${c.count?.toLocaleString()}</td><td>${c.min?.toFixed(3) || '—'}</td><td>${c.max?.toFixed(3) || '—'}</td><td>${c.mean?.toFixed(3) || '—'}</td></tr>`;
+                html += `<tr><td>${c.run}</td><td>${escapeHtml(c.mnemonic)}</td><td>${escapeHtml(c.unit || '')}</td><td>${c.count?.toLocaleString()}</td><td>${c.min?.toFixed(3) || '—'}</td><td>${c.max?.toFixed(3) || '—'}</td><td>${c.mean?.toFixed(3) || '—'}</td></tr>`;
             });
             html += '</table>';
         }
@@ -7686,7 +7710,7 @@ class GeoLogApp {
 
     async _exportPackage(wid) {
         try {
-            const resp = await fetch(`/api/wells/${wid}/export-package`);
+            const resp = await fetch(`/api/wells/${wid}/export-package`, { headers: this._authHeaders() });
             const data = await resp.json();
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             const a = document.createElement('a');
@@ -7716,7 +7740,7 @@ class GeoLogApp {
 
     deleteWell(wid) {
         if (!confirm('Delete this well and all its data?')) return;
-        fetch(`/api/wells/${wid}`, { method: 'DELETE' }).then(() => {
+        fetch(`/api/wells/${wid}`, { method: 'DELETE', headers: this._authHeaders() }).then(() => {
             GeoToast.success('Well deleted');
             this.loadProjects();
         });
@@ -7729,7 +7753,7 @@ class GeoLogApp {
         GeoLoading.show('Running tornado analysis...');
         try {
             const resp = await fetch(`/api/wells/${this.currentWell.id}/tornado`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
                 body: JSON.stringify({ variation_pct: parseFloat(variation) })
             });
             const data = await resp.json();
@@ -7786,7 +7810,7 @@ class GeoLogApp {
         GeoLoading.show('Computing Vclay models...');
         try {
             const resp = await fetch(`/api/wells/${this.currentWell.id}/vcl-models`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
                 body: JSON.stringify({ gr_clean: grClean, gr_shale: grShale })
             });
             const data = await resp.json();
@@ -7925,7 +7949,7 @@ class GeoLogApp {
         GeoLoading.show('Calibrating...');
         try {
             const resp = await fetch(`/api/wells/${this.currentWell.id}/core-calibration`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
                 body: JSON.stringify({ core_depth: depths, core_phi: phi, core_k: perm, log_curve: curve })
             });
             const data = await resp.json();
@@ -8047,7 +8071,7 @@ class GeoLogApp {
         GeoLoading.show('Running enhanced QC...');
         try {
             const resp = await fetch(`/api/wells/${this.currentWell.id}/qc-autofix`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
                 body: JSON.stringify({})
             });
             const data = await resp.json();
@@ -8382,7 +8406,7 @@ class GeoLogApp {
         GeoLoading.show('Generating borehole image...');
         try {
             const resp = await fetch(`/api/wells/${this.currentWell.id}/image-log`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
                 body: JSON.stringify({})
             });
             const data = await resp.json();
@@ -8475,7 +8499,7 @@ class GeoLogApp {
         GeoLoading.show('Finding analog wells...');
         try {
             const pid = this.projects[0]?.id;
-            const resp = await fetch(`/api/projects/${pid}/well-analogs?reference_well_id=${this.currentWell.id}`);
+            const resp = await fetch(`/api/projects/${pid}/well-analogs?reference_well_id=${this.currentWell.id}`, { headers: this._authHeaders() });
             const data = await resp.json();
             GeoLoading.hide();
             if (data.detail) { GeoToast.error(data.detail); return; }
@@ -8812,7 +8836,7 @@ class GeoLogApp {
                 include_curve_summary: includeCurves ? 'true' : 'false',
                 include_qc: includeQc ? 'true' : 'false',
             });
-            const resp = await fetch(`/api/wells/${this.currentWell.id}/report-pdf?${qs.toString()}`);
+            const resp = await fetch(`/api/wells/${this.currentWell.id}/report-pdf?${qs.toString()}`, { headers: this._authHeaders() });
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             const blob = await resp.blob();
             const url = URL.createObjectURL(blob);
@@ -9002,7 +9026,7 @@ class GeoLogApp {
             const projects = await this._api('/projects/');
             if (!projects.length) { GeoToast.warn('No project found'); return; }
             const pid = projects[0].id;
-            const resp = await fetch(`/api/projects/${pid}/tops-export`);
+            const resp = await fetch(`/api/projects/${pid}/tops-export`, { headers: this._authHeaders() });
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             const blob = await resp.blob();
             const url = URL.createObjectURL(blob);
@@ -9013,7 +9037,7 @@ class GeoLogApp {
             // Also export each well LAS
             for (const w of wells) {
                 try {
-                    const lasResp = await fetch(`/api/wells/${w.id}/export-las`);
+                    const lasResp = await fetch(`/api/wells/${w.id}/export-las`, { headers: this._authHeaders() });
                     if (lasResp.ok) {
                         const lasBlob = await lasResp.blob();
                         const lasUrl = URL.createObjectURL(lasBlob);
@@ -9098,7 +9122,7 @@ class GeoLogApp {
             const runs = await this._api(`/wells/${wellId}/log-runs`);
             if (!runs.length) return;
             const run = runs[runs.length-1];
-            const resp = await fetch(`/api/log-runs/${run.id}/data-decimated?max_points=200&curve_mnemonics=GR`);
+            const resp = await fetch(`/api/log-runs/${run.id}/data-decimated?max_points=200&curve_mnemonics=GR`, { headers: this._authHeaders() });
             if (!resp.ok) return;
             const data = await resp.json();
             const gr = data.GR || data.data?.GR || [];
@@ -9450,7 +9474,7 @@ class GeoLogApp {
             const scaleStr = c.log ? `[${c.scale[0]}, ${c.scale[1]}] log` : `[${c.scale[0]}, ${c.scale[1]}]`;
             html += `<tr style="border-bottom:1px solid #21262d">
                 <td style="padding:4px"><span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:${c.color}"></span></td>
-                <td style="padding:4px;color:#c9d1d9;font-weight:bold">${c.mnemonic}</td>
+                <td style="padding:4px;color:#c9d1d9;font-weight:bold">${escapeHtml(c.mnemonic)}</td>
                 <td style="padding:4px;color:#8b949e">${c.track}</td>
                 <td style="padding:4px;color:#8b949e;text-align:right">${scaleStr}</td>
                 <td style="padding:4px;color:#8b949e;text-align:right">${c.samples.toLocaleString()}</td>
@@ -9690,3 +9714,6 @@ document.addEventListener('keydown', (e) => {
 
     }
 });
+
+// Expose the singleton so standalone modules can read the current role/token.
+window.app = app;

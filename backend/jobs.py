@@ -7,12 +7,16 @@ by any other worker process.
 
 from __future__ import annotations
 
-import datetime
 import json
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
+
+try:
+    from filelock import interprocess_lock
+except ImportError:
+    from backend.filelock import interprocess_lock
 
 try:
     from timeutils import utcnow
@@ -54,11 +58,20 @@ def utc_now_iso() -> str:
     return utcnow().isoformat() + "Z"
 
 
+def _mutate_jobs(fn):
+    with JOBS_LOCK, interprocess_lock(JOBS_FILE):
+        jobs = _load_jobs_file()
+        result = fn(jobs)
+        _save_jobs_file(jobs)
+        JOBS.clear()
+        JOBS.update(jobs)
+        return result
+
 def create_job(job_type: str) -> str:
     job_id = f"job_{uuid.uuid4().hex[:12]}"
-    with JOBS_LOCK:
-        jobs = _load_jobs_file()
-        job = {
+
+    def _add(jobs):
+        jobs[job_id] = {
             "id": job_id,
             "type": job_type,
             "status": "queued",
@@ -69,25 +82,19 @@ def create_job(job_type: str) -> str:
             "finished_at": None,
             "created_at": utc_now_iso(),
         }
-        jobs[job_id] = job
-        _save_jobs_file(jobs)
-        JOBS.clear()
-        JOBS.update(jobs)
-    return job_id
+        return job_id
 
+    return _mutate_jobs(_add)
 
 def update_job(job_id: str, **fields) -> None:
-    with JOBS_LOCK:
-        jobs = _load_jobs_file()
+    def _update(jobs):
         job = jobs.get(job_id)
         if not job:
-            return
+            return None
         job.update(fields)
-        jobs[job_id] = job
-        _save_jobs_file(jobs)
-        JOBS.clear()
-        JOBS.update(jobs)
+        return job
 
+    _mutate_jobs(_update)
 
 def get_job(job_id: str) -> dict | None:
     with JOBS_LOCK:

@@ -122,7 +122,6 @@ def check_for_pending_migrations() -> list[str]:
     than raised so that a developer who has just edited a model still gets a
     running app, with a loud warning instead of a silent schema mismatch.
     """
-    cfg = _alembic_config()
     try:
         from alembic.autogenerate import compare_metadata
 
