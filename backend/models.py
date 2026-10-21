@@ -1,5 +1,5 @@
 """Database models for well log viewer."""
-from sqlalchemy import Column, Integer, Float, String, Text, Date, DateTime, ForeignKey, LargeBinary
+from sqlalchemy import Column, Integer, Float, String, Text, Date, DateTime, ForeignKey, LargeBinary, UniqueConstraint
 from sqlalchemy.orm import relationship
 try:
     from database import Base
@@ -39,6 +39,7 @@ class Well(Base):
     elevation = Column(Float, nullable=True)     # kelly bushing elevation
     total_depth = Column(Float, nullable=True)   # TD in feet or meters
     depth_unit = Column(String(10), default="FT")  # FT or M
+    unit_system = Column(String(10), nullable=False, default="field", server_default="field")  # field | si
     operator = Column(String(200), default="")
     field_name = Column(String(200), default="")
     spud_date = Column(String(50), default="")
@@ -73,7 +74,25 @@ class LogRun(Base):
 
     well = relationship("Well", back_populates="log_runs")
     curve_data = relationship("CurveData", back_populates="log_run", cascade="all, delete-orphan")
+    depth_control_points = relationship("DepthControlPoint", back_populates="log_run", cascade="all, delete-orphan")
 
+
+
+class DepthControlPoint(Base):
+    """Ordered MD -> corrected-depth control points for one log run."""
+    __tablename__ = "depth_control_points"
+
+    id = Column(Integer, primary_key=True, index=True)
+    log_run_id = Column(Integer, ForeignKey("log_runs.id"), nullable=False, index=True)
+    md = Column(Float, nullable=False)
+    corrected_depth = Column(Float, nullable=False)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=utcnow)
+
+    log_run = relationship("LogRun", back_populates="depth_control_points")
+    __table_args__ = (
+        UniqueConstraint("log_run_id", "md", name="uq_depth_control_points_run_md"),
+    )
 
 class CurveData(Base):
     __tablename__ = "curve_data"

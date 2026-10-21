@@ -470,6 +470,12 @@ If this project helps you, support ongoing development:
 [![Saweria](https://img.shields.io/badge/Support-Saweria-FF5722?style=flat-square&logo=wallet)](https://saweria.co/rinopatrick)
 [![Ko-fi](https://img.shields.io/badge/Support-Ko--fi-FF5E5B?style=flat-square&logo=kofi)](https://ko-fi.com/rinopatrick)
 
+## Data semantics
+
+Log data responses carry a `semantics` block and are corrected on read. See
+[`docs/DATA_SEMANTICS.md`](docs/DATA_SEMANTICS.md) for the alias/unit/depth
+control-point rules, API endpoints and response shape.
+
 ## Production-readiness status
 
 Current state: **engineering sample / pre-production**.
