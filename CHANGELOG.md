@@ -50,7 +50,8 @@ While the major version is `0`, the API is not yet stable.
   depths.** Fixed and covered by a regression test.
 - **DLIS/LIS temp files could not be reopened on Windows, and the heuristic
   fallback was silent.** Temp files use `delete=False` and are removed in a
-  `finally`; fallback parses return a warning that the upload UI shows.
+  `finally`; fallback parses return a warning that the upload UI shows. `dlisio`
+  is now a dependency, and the LIS loader calls its method-based API correctly.
 - **Bulk upload was declared as a JSON list, not multipart files.** It now accepts
   `list[UploadFile]`, commits per file and increments run numbers correctly.
 - **Curve splice and filter were O(n²)/Python-loop slow.** Splice uses

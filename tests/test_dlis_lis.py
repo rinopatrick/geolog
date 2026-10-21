@@ -97,3 +97,62 @@ def test_fallback_lis_parsing_success():
     assert run.start_depth == 2000.0
     assert run.stop_depth == 2009.0
     assert run.step == 1.0
+
+def test_lis_dlisio_wrapper_calls_methods(monkeypatch):
+    """LIS header/data_format_specs are methods in dlisio 1.x, not properties."""
+    import backend.dlis_lis_parser as parser
+
+    class Meta:
+        def __init__(self, mnemonic, units):
+            self.mnemonic = mnemonic
+            self.units = units
+
+    class Header:
+        file_name = "REAL.LIS"
+        well_name = ""
+        well_id = ""
+
+    class Logical:
+        def header(self):
+            return Header()
+
+        def data_format_specs(self):
+            return [object()]
+
+    class Physical:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def __iter__(self):
+            return iter([Logical()])
+
+    class FakeLis:
+        @staticmethod
+        def load(path):
+            return Physical()
+
+        @staticmethod
+        def curves(logical, spec, strict=False):
+            return np.array(
+                [(100.0, 50.0), (100.5, 51.0)],
+                dtype=[("DEPT", "f4"), ("GR", "f4")],
+            )
+
+        @staticmethod
+        def curves_metadata(spec, strict=False):
+            return {"DEPT": Meta("DEPT", "M"), "GR": Meta("GR", "GAPI")}
+
+    monkeypatch.setattr(parser, "lis_mod", FakeLis)
+    parsed = parser._parse_lis_dlisio(b"fake", "real.lis")
+
+    assert parsed.well_name == "REAL.LIS"
+    assert len(parsed.runs) == 1
+    run = parsed.runs[0]
+    assert run.depth_key == "DEPT"
+    assert run.curves[0].mnemonic == "DEPT"
+    assert run.curves[0].unit == "M"
+    assert np.allclose(run.depth, [100.0, 100.5])
+    assert np.allclose(run.data["GR"], [50.0, 51.0])
