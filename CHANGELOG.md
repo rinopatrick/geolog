@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, the API is not yet stable.
 
-## [Unreleased]
+## [0.6.0] - 2026-10-21
 
 ### Added
 
@@ -278,5 +278,6 @@ and the schema may change between 0.x versions.
   interpreter, so an interpreter can sign off a template that only an admin can
   reopen. Deliberate, but worth confirming it matches your process.
 
-[Unreleased]: https://github.com/rinopatrick/geolog/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/rinopatrick/geolog/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/rinopatrick/geolog/compare/v0.2.0...v0.6.0
 [0.1.0]: https://github.com/rinopatrick/geolog/releases/tag/v0.1.0
