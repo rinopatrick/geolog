@@ -14,6 +14,20 @@ While the major version is `0`, the API is not yet stable.
   skip/update actions, saturation-height model apply/toggle, geomechanics
   calibration editor, DLIS image-channel upload, and image asset edit/delete.
 
+## [Unreleased]
+
+### Added
+
+- **Core/SCAL completion.** XLSX import, Brooks-Corey/Lambda/Thomeer/
+  Skelt-Harrison saturation-height fits, core-photo/thin-section uploads and
+  staged per-plug core-to-log depth matching with migration `a7b8c9d0e1f2`.
+- **Geomechanics breakout calibration.** Vertical-well SHmax inversion from
+  manually entered breakout widths, plus a Kirsch amplitude correction.
+- **OSDU log pull.** Wellbore DDMS well-log records with curve import and
+  configurable collection path.
+- **JWT refresh/revocation.** Rotating refresh tokens and a `revoked_tokens`
+  table enforced by middleware (migration `b8c9d0e1f2a3`).
+
 ## [0.7.0] - 2026-10-21
 
 ### Added

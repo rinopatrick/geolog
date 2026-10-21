@@ -6,10 +6,12 @@ import csv
 import hashlib
 import io
 import json
+import uuid
+from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 try:
@@ -18,6 +20,7 @@ try:
         CapillaryPressure,
         Contact,
         CoreDataset,
+        CoreDepthMatch,
         CoreMeasurement,
         CorePhoto,
         CorePlug,
@@ -30,12 +33,15 @@ try:
         Well,
     )
     from semantics import apply_run_semantics
+    from well_state import ARTIFACT_DIR
+    from saturation_height import apply_model, fit_model, normalize_model_type
 except ImportError:
     from backend.database import get_db
     from backend.models import (
         CapillaryPressure,
         Contact,
         CoreDataset,
+        CoreDepthMatch,
         CoreMeasurement,
         CorePhoto,
         CorePlug,
@@ -48,6 +54,8 @@ except ImportError:
         Well,
     )
     from backend.semantics import apply_run_semantics
+    from backend.well_state import ARTIFACT_DIR
+    from backend.saturation_height import apply_model, fit_model, normalize_model_type
 
 router = APIRouter(prefix="/api/wells/{wid}", tags=["core"])
 
@@ -125,6 +133,7 @@ def _plug_dict(plug: CorePlug) -> dict:
         "plug_name": plug.plug_name,
         "depth_md": plug.depth_md,
         "depth_tvd": plug.depth_tvd,
+        "matched_log_md": plug.matched_log_md,
         "formation": plug.formation or "",
         "lithology": plug.lithology or "",
         "porosity": plug.porosity,
@@ -340,6 +349,158 @@ def add_thin_section(wid: int, plug_id: int, data: dict, db: Session = Depends(g
     db.refresh(row)
     return {"id": row.id, "plug_id": row.plug_id, "file_path": row.file_path}
 
+
+def _read_import_rows(content: bytes, filename: str) -> list[dict]:
+    """Read CSV or XLSX/XLSM rows into a list of dicts with lower-case headers."""
+    name = (filename or "").lower()
+    if name.endswith((".xlsx", ".xlsm")):
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            raise HTTPException(501, "openpyxl is required for Excel import")
+        wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        ws = wb.active
+        iterator = ws.iter_rows(values_only=True)
+        try:
+            header = next(iterator)
+        except StopIteration:
+            return []
+        keys = [str(v).strip().lower() if v is not None else "" for v in header]
+        rows = []
+        for values in iterator:
+            if all(v is None or str(v).strip() == "" for v in values):
+                continue
+            rows.append({k: v for k, v in zip(keys, values) if k})
+        wb.close()
+        return rows
+    text = content.decode("utf-8", errors="replace")
+    return list(csv.DictReader(io.StringIO(text)))
+
+
+CORE_IMAGE_EXT = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+CORE_IMAGE_MAX = 50 * 1024 * 1024
+
+def _save_core_image(wid: int, plug_id: int, upload: UploadFile, content: bytes) -> tuple[str, str]:
+    ext = Path(upload.filename or "").suffix.lower()
+    if ext not in CORE_IMAGE_EXT:
+        raise HTTPException(400, "unsupported image extension")
+    if len(content) > CORE_IMAGE_MAX:
+        raise HTTPException(413, "image exceeds 50 MB")
+    root = Path(ARTIFACT_DIR).resolve() / "core" / str(wid) / str(plug_id)
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / f"{uuid.uuid4().hex}{ext}"
+    path.write_bytes(content)
+    return str(path), hashlib.sha256(content).hexdigest()
+
+@router.post("/core/plugs/{plug_id}/photos/upload", status_code=201)
+async def upload_core_photo(
+    wid: int,
+    plug_id: int,
+    file: UploadFile = File(...),
+    caption: str = Form(""),
+    scale: str = Form(""),
+    orientation: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    _well(db, wid)
+    plug = _plug(db, wid, plug_id)
+    _draft_guard(plug.dataset)
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Empty image")
+    path, checksum = _save_core_image(wid, plug.id, file, content)
+    row = CorePhoto(
+        plug_id=plug.id, file_path=path, caption=caption,
+        scale=scale, orientation=orientation, checksum=checksum,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id, "plug_id": plug.id, "file_path": path, "checksum": checksum}
+
+@router.post("/core/plugs/{plug_id}/thin-sections/upload", status_code=201)
+async def upload_thin_section(
+    wid: int,
+    plug_id: int,
+    file: UploadFile = File(...),
+    caption: str = Form(""),
+    description: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    _well(db, wid)
+    plug = _plug(db, wid, plug_id)
+    _draft_guard(plug.dataset)
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Empty image")
+    path, checksum = _save_core_image(wid, plug.id, file, content)
+    row = ThinSection(
+        plug_id=plug.id, file_path=path, caption=caption,
+        description=description, checksum=checksum,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id, "plug_id": plug.id, "file_path": path, "checksum": checksum}
+
+@router.get("/core/plugs/{plug_id}/depth-matches")
+def list_depth_matches(wid: int, plug_id: int, db: Session = Depends(get_db)):
+    _well(db, wid)
+    plug = _plug(db, wid, plug_id)
+    rows = db.query(CoreDepthMatch).filter(CoreDepthMatch.plug_id == plug.id).order_by(CoreDepthMatch.id.desc()).all()
+    return [
+        {"id": r.id, "plug_id": r.plug_id, "log_run_id": r.log_run_id,
+         "core_md": r.core_md, "log_md": r.log_md, "shift": r.shift,
+         "residual": r.residual, "method": r.method, "status": r.status,
+         "notes": r.notes, "created_at": r.created_at.isoformat() if r.created_at else ""}
+        for r in rows
+    ]
+
+@router.post("/core/plugs/{plug_id}/depth-match", status_code=201)
+def create_depth_match(wid: int, plug_id: int, data: dict, db: Session = Depends(get_db)):
+    _well(db, wid)
+    plug = _plug(db, wid, plug_id)
+    _draft_guard(plug.dataset)
+    log_run_id = data.get("log_run_id")
+    if log_run_id is None:
+        raise HTTPException(400, "log_run_id is required")
+    lr = db.query(LogRun).filter(LogRun.id == int(log_run_id), LogRun.well_id == wid).first()
+    if not lr:
+        raise HTTPException(404, "Log run not found")
+    core_md = float(plug.depth_md)
+    if data.get("log_md") is not None:
+        log_md = _float(data.get("log_md"), "log_md", True)
+    else:
+        log_md = core_md + _float(data.get("shift", 0.0), "shift", True)
+    shift = log_md - core_md
+    row = CoreDepthMatch(
+        well_id=wid, plug_id=plug.id, log_run_id=lr.id, core_md=core_md,
+        log_md=log_md, shift=shift, residual=shift, method=str(data.get("method") or "manual_shift"),
+        status="proposed", notes=str(data.get("notes") or ""),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id, "plug_id": plug.id, "log_run_id": lr.id,
+            "core_md": row.core_md, "log_md": row.log_md, "shift": row.shift,
+            "status": row.status}
+
+@router.post("/core/depth-matches/{match_id}/apply")
+def apply_depth_match(wid: int, match_id: int, db: Session = Depends(get_db)):
+    _well(db, wid)
+    row = db.query(CoreDepthMatch).filter(
+        CoreDepthMatch.id == match_id, CoreDepthMatch.well_id == wid
+    ).first()
+    if not row:
+        raise HTTPException(404, "Depth match not found")
+    plug = _plug(db, wid, row.plug_id)
+    _draft_guard(plug.dataset)
+    plug.matched_log_md = row.log_md
+    row.status = "applied"
+    db.commit()
+    return {"status": "ok", "id": row.id, "plug_id": plug.id,
+            "matched_log_md": plug.matched_log_md}
+
 @router.post("/core/import")
 async def import_core_csv(
     wid: int,
@@ -352,11 +513,9 @@ async def import_core_csv(
     content = await file.read()
     if not content:
         raise HTTPException(400, "Empty file")
-    text = content.decode("utf-8", errors="replace")
-    reader = csv.DictReader(io.StringIO(text))
-    rows = list(reader)
+    rows = _read_import_rows(content, file.filename or "")
     if not rows:
-        raise HTTPException(400, "CSV has no data rows")
+        raise HTTPException(400, "File has no data rows")
 
     ds = None if dry_run else _dataset(db, wid, create=True)
     imported = 0
@@ -520,9 +679,9 @@ def _model_params(row: SaturationHeightModel) -> dict:
 @router.post("/core/saturation-height/fit")
 def fit_saturation_height(wid: int, data: dict, db: Session = Depends(get_db)):
     _well(db, wid)
-    model_type = str(data.get("model_type") or "j_function").lower()
-    if model_type != "j_function":
-        raise HTTPException(400, "only j_function is implemented")
+    model_type = normalize_model_type(data.get("model_type") or "j_function")
+    if model_type not in {"j_function", "brooks_corey", "lambda", "thomeer", "skelt_harrison"}:
+        raise HTTPException(400, "unsupported saturation-height model")
     rock_type_id = data.get("rock_type_id")
     q = (
         db.query(CapillaryPressure)
@@ -534,7 +693,7 @@ def fit_saturation_height(wid: int, data: dict, db: Session = Depends(get_db)):
     rows = q.all()
     if not rows:
         raise HTTPException(400, "no capillary-pressure data for this selection")
-    xs, ys = [], []
+    pc_vals, sw_vals, j_vals = [], [], []
     for row in rows:
         plug = db.query(CorePlug).filter(CorePlug.id == row.plug_id).first()
         if not plug or not plug.porosity or not plug.perm_air or plug.porosity <= 0 or plug.perm_air <= 0:
@@ -549,20 +708,19 @@ def fit_saturation_height(wid: int, data: dict, db: Session = Depends(get_db)):
             if pc <= 0 or sw <= 0 or sw >= 1:
                 continue
             j = (pc * np.sqrt(plug.perm_air / plug.porosity)) / max(sigma * cos_theta, 1e-9)
-            if j > 0:
-                xs.append(np.log10(j))
-                ys.append(np.log10(sw))
-    if len(xs) < 3:
-        raise HTTPException(400, "not enough valid Pc/Sw points")
-    slope, intercept = np.polyfit(np.array(xs), np.array(ys), 1)
-    predicted = slope * np.array(xs) + intercept
-    ss_res = float(np.sum((np.array(ys) - predicted) ** 2))
-    ss_tot = float(np.sum((np.array(ys) - np.mean(ys)) ** 2))
-    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
-    params = {"a": float(10 ** intercept), "b": float(slope)}
+            pc_vals.append(pc)
+            sw_vals.append(sw)
+            j_vals.append(j)
+    try:
+        fitted = fit_model(model_type, np.array(pc_vals), np.array(sw_vals), np.array(j_vals))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    params = fitted["parameters"]
+    r2 = fitted["r2"]
+    ss_res = fitted["residual"]
     latest = db.query(SaturationHeightModel).filter(SaturationHeightModel.well_id == wid).order_by(SaturationHeightModel.version.desc()).first()
     version = (latest.version + 1) if latest else 1
-    payload = {"model_type": model_type, "rock_type_id": rock_type_id, "params": params, "n": len(xs)}
+    payload = {"model_type": model_type, "rock_type_id": rock_type_id, "params": params, "n": fitted["n"]}
     row = SaturationHeightModel(
         well_id=wid, rock_type_id=int(rock_type_id) if rock_type_id is not None else None,
         model_type=model_type, version=version, status="draft",
@@ -574,7 +732,7 @@ def fit_saturation_height(wid: int, data: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(row)
     return {"id": row.id, "model_type": model_type, "version": version, "parameters": params,
-            "r2": row.r2, "residual": row.residual, "points": len(xs)}
+            "r2": row.r2, "residual": row.residual, "points": fitted["n"]}
 
 @router.get("/core/saturation-height/models")
 def list_saturation_height_models(wid: int, db: Session = Depends(get_db)):
@@ -639,8 +797,7 @@ def apply_saturation_height(wid: int, data: dict, db: Session = Depends(get_db))
     sigma_cos = 72.0
     with np.errstate(divide="ignore", invalid="ignore"):
         j = (pc * np.sqrt(np.clip(perm, 1e-12, None) / np.clip(phie, 1e-6, 1.0))) / sigma_cos
-        sw = float(params.get("a", 1.0)) * np.power(np.clip(j, 1e-12, None), float(params.get("b", 1.0)))
-    sw = np.clip(sw, 0.0, 1.0)
+        sw = apply_model(normalize_model_type(model.model_type), params, pc, j)
     return {
         "model_id": model.id, "contact_id": contact.id, "contact_depth": contact.depth,
         "depth": [round(float(v), 4) for v in depth],

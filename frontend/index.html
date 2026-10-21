@@ -1107,6 +1107,7 @@
                     <button class="px-button px-secondary" type="button" id="csImportBtn" data-role-required="interpreter,admin"><i data-lucide="upload"></i>Import CSV</button>
                     <input id="csCsvFile" type="file" accept=".csv,text/csv" hidden aria-label="Choose a core data CSV file">
                     <button class="px-button px-secondary" type="button" id="csClusterBtn" data-role-required="interpreter,admin">Flow units</button>
+                    <select id="csShFitType" class="px-sh-select" aria-label="Saturation-height model type"><option value="j_function">J-function</option><option value="brooks_corey">Brooks-Corey</option><option value="lambda">Lambda</option><option value="thomeer">Thomeer</option><option value="skelt_harrison">Skelt-Harrison</option></select>
                     <button class="px-button px-secondary" type="button" id="csFitShBtn" data-role-required="interpreter,admin">Fit SH</button>
                     <button class="px-button px-primary" type="button" id="csApproveBtn" data-role-required="interpreter,admin"><i data-lucide="check"></i>Approve dataset</button>
                     <span class="px-badge px-warn" id="csDatasetStatus" aria-live="polite"><i class="px-badge-dot"></i>No dataset</span>
@@ -1120,7 +1121,7 @@
                 </section>
                 <div class="px-core-workspace">
                     <section class="px-panel px-table-panel" aria-labelledby="cs-table-title">
-                        <div class="px-panel-head"><h2 id="cs-table-title">Core plug measurements</h2><div class="px-table-controls"><span>Sort · MD ↑</span></div></div>
+                        <div class="px-panel-head"><h2 id="cs-table-title">Core plug measurements</h2><div class="px-table-controls"><span>Sort · MD ↑</span><button class="px-button px-secondary" type="button" id="csMatchBtn" data-role-required="interpreter,admin">Depth match</button></div></div>
                         <div class="px-table-wrap">
                             <table class="px-plug-table" aria-label="Core plug measurements">
                                 <thead><tr><th scope="col">Plug</th><th scope="col">MD</th><th scope="col">Formation</th><th scope="col">Phi %</th><th scope="col">Kair mD</th><th scope="col">FZI</th><th scope="col">Rock type</th><th scope="col">QC</th></tr></thead>
@@ -1172,7 +1173,7 @@
                         <canvas class="px-profile-svg" id="geoProfile" role="img" aria-label="Depth profile of vertical stress, pore pressure, horizontal stresses and mud window"></canvas>
                     </section>
                     <aside class="px-panel px-provenance-panel" aria-labelledby="geo-prov-title">
-                        <div class="px-panel-head"><h2 id="geo-prov-title">Model provenance</h2><span class="px-head-meta" id="geoProvMeta">draft</span></div>
+                        <div class="px-panel-head"><h2 id="geo-prov-title">Model provenance</h2><button class="px-button px-secondary" type="button" id="geoBreakoutBtn" data-role-required="interpreter,admin" style="min-height:22px;padding:0 7px;font-size:9px">Breakouts</button><span class="px-head-meta" id="geoProvMeta">draft</span></div>
                         <div class="px-prov-body">
                             <div class="px-prov-grid" id="geoProvGrid">
                                 <div class="px-prov-item"><span class="px-prov-label">Vertical stress · Sv</span><span class="px-prov-value">no model <span class="px-badge">—</span></span></div>

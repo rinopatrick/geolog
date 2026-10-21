@@ -100,3 +100,39 @@ def test_issue_token_requires_configured_secret(monkeypatch):
 
     r = client.post("/api/users/token", json={"username": "auth_no_secret_user", "token": "secret"})
     assert r.status_code == 503, r.text
+
+
+def test_refresh_and_revocation(monkeypatch):
+    monkeypatch.setenv("AUTH_JWT_SECRET", "test-secret-for-refresh-12345")
+    monkeypatch.setenv("AUTH_JWT_REFRESH_TTL_SECONDS", "3600")
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == "auth_refresh_user").first()
+        if not user:
+            user = User(username="auth_refresh_user", display_name="Refresh", role="interpreter",
+                        token="refresh-secret")
+            db.add(user)
+            db.commit()
+    finally:
+        db.close()
+
+    issued = client.post("/api/users/token",
+                         json={"username": "auth_refresh_user", "token": "refresh-secret"})
+    assert issued.status_code == 200, issued.text
+    body = issued.json()
+    assert body["refresh_token"]
+    assert body["refresh_expires_in"] == 3600
+
+    refreshed = client.post("/api/users/refresh", json={"refresh_token": body["refresh_token"]})
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["access_token"] != body["access_token"]
+
+    reused = client.post("/api/users/refresh", json={"refresh_token": body["refresh_token"]})
+    assert reused.status_code == 401
+
+    from backend.security import AuthConfig, decode_token, is_token_revoked
+    cfg = AuthConfig.from_env()
+    claims = decode_token(body["access_token"], cfg)
+    revoked = client.post("/api/users/revoke", json={"token": body["access_token"]})
+    assert revoked.status_code == 200, revoked.text
+    assert is_token_revoked(claims["jti"]) is True

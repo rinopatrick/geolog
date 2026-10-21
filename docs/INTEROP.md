@@ -44,7 +44,9 @@ POST /api/interop/osdu/push/wells/{wid}
 
 OSDU pulls `results` from the Wellbore DDMS collection and upserts wells by UWI
 or name. Push sends a `master-data--Wellbore:1.0.0` record to the configured
-collection. Log-curve pull/push is not implemented.
+collection. `pull-logs` reads Wellbore DDMS log records and imports `Curves` + `LogData`
+when the provider returns them; metadata-only records are reported. Override the
+collection path with `GEOLOG_OSDU_WELLLOGS_PATH`. Log push is not implemented.
 
 ## Limits
 

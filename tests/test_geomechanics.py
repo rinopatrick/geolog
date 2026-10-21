@@ -46,6 +46,15 @@ def test_geomechanics_compute_and_model_lifecycle(make_well):
     assert data["curves"]["SV"][-1] > data["curves"]["SV"][0]
     assert data["summary"]["mw_min"] > 0
 
+    cal = client.post(f"/api/wells/{wid}/geomechanics/breakout-calibration", headers=I,
+                      json={"model_id": mid, "breakouts": [
+                          {"depth": 1004.0, "width_deg": 30, "mud_weight": 9.2},
+                          {"depth": 1008.0, "width_deg": 24, "mud_weight": 9.2},
+                      ]})
+    assert cal.status_code == 200, cal.text
+    assert len(cal.json()["points"]) == 2
+    assert cal.json()["average_shmax"] > 0
+
     approve = client.post(f"/api/wells/{wid}/geomechanics/models/{mid}/approve", headers=I)
     assert approve.status_code == 200
     locked = client.put(f"/api/wells/{wid}/geomechanics/models/{mid}", headers=I,
@@ -67,3 +76,13 @@ def test_geomechanics_report_csv_and_missing_curves(make_well):
     empty = make_well("GEO-EMPTY", {"DEPT": [1000.0, 1001.0], "GR": [10.0, 20.0]})
     bad = client.post(f"/api/wells/{empty}/geomechanics/compute", headers=I, json={})
     assert bad.status_code == 400
+
+
+def test_vertical_kirsch_limits():
+    import numpy as np
+    from backend.geomechanics import _borehole_hoop, _far_field_tensor
+
+    tensor = _far_field_tensor(np.array([100.0]), np.array([50.0]), np.array([80.0]), 0.0)
+    base_max, base_min, _ = _borehole_hoop(tensor, 0.0, 0.0)
+    assert np.isclose(base_max[0], 3 * 100 - 50, atol=1e-6)
+    assert np.isclose(base_min[0], 3 * 50 - 100, atol=1e-6)

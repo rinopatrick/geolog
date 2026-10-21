@@ -87,6 +87,39 @@
       } catch (e) { GeoToast.error(e.message); }
     },
 
+    calibrateBreakouts() {
+      const model = this.state.model;
+      if (!model) return GeoToast.warn('Create a model first.');
+      if (model.status === 'approved') return GeoToast.warn('Approved models are immutable.');
+      PxModal.open({
+        title: `Breakout calibration · model v${model.version}`,
+        body: `<p>Enter one breakout per line: <code>depth, width_deg[, mud_weight]</code>. SHmax is inverted from the vertical-well Kirsch hoop stress at the breakout edge using the current Pp/Shmin and UCS.</p>
+          <textarea id="geoBreakoutText" aria-label="Breakout rows" placeholder="1046.2, 30, 9.2\n1076.4, 24, 9.0"></textarea>
+          <p>This estimates calibration points; review the values before operational use.</p>`,
+        primaryLabel: 'Estimate & save',
+        onPrimary: async () => {
+          const lines = (document.getElementById('geoBreakoutText').value || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+          const breakouts = [];
+          for (const line of lines) {
+            const parts = line.split(',').map((s) => Number(s.trim()));
+            if (parts.length < 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) continue;
+            const item = { depth: parts[0], width_deg: parts[1] };
+            if (Number.isFinite(parts[2])) item.mud_weight = parts[2];
+            breakouts.push(item);
+          }
+          if (!breakouts.length) return GeoToast.error('Add at least one valid breakout row.');
+          try {
+            const result = await app._api(`/wells/${this.state.wid}/geomechanics/breakout-calibration`, {
+              method: 'POST', body: JSON.stringify({ model_id: model.id, breakouts, save: true }),
+            });
+            PxModal.close();
+            GeoToast.success(`${result.points.length} SHmax points saved · avg ${num(result.average_shmax, 0)} psi`);
+            await this.load();
+          } catch (e) { GeoToast.error(e.message); }
+        },
+      });
+    },
+
     editCalibration() {
       const model = this.state.model;
       if (!model) return GeoToast.warn('Create a model first.');
@@ -329,6 +362,7 @@
     $('geoNewBtn')?.addEventListener('click', () => View.createModel());
     $('geoSaveBtn')?.addEventListener('click', () => View.saveModel());
     $('geoCalBtn')?.addEventListener('click', () => View.editCalibration());
+    $('geoBreakoutBtn')?.addEventListener('click', () => View.calibrateBreakouts());
     $('geoComputeBtn')?.addEventListener('click', () => View.compute());
     $('geoExportBtn')?.addEventListener('click', () => View.exportPdf());
   });

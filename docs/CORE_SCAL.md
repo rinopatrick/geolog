@@ -24,7 +24,12 @@ POST      /api/wells/{wid}/core/plugs/{id}/measurements
 POST      /api/wells/{wid}/core/plugs/{id}/capillary-pressure
 POST      /api/wells/{wid}/core/plugs/{id}/relative-perm
 POST      /api/wells/{wid}/core/plugs/{id}/photos
+POST      /api/wells/{wid}/core/plugs/{id}/photos/upload
 POST      /api/wells/{wid}/core/plugs/{id}/thin-sections
+POST      /api/wells/{wid}/core/plugs/{id}/thin-sections/upload
+POST      /api/wells/{wid}/core/plugs/{id}/depth-match
+GET       /api/wells/{wid}/core/plugs/{id}/depth-matches
+POST      /api/wells/{wid}/core/depth-matches/{id}/apply
 POST      /api/wells/{wid}/core/import?dry_run=true|false&update=false
 GET       /api/wells/{wid}/core/datasets
 POST      /api/wells/{wid}/core/datasets/{id}/approve
@@ -40,13 +45,15 @@ POST      /api/wells/{wid}/core/saturation-height/models/{id}/approve
 
 ## Import
 
-CSV columns: `plug_name, depth_md, depth_tvd, formation, lithology, porosity,
+CSV or XLSX columns: `plug_name, depth_md, depth_tvd, formation, lithology, porosity,
 perm_air, perm_klin, grain_density, fluid_saturation, plug_type, source, notes`.
 `dry_run=true` validates without writing. Existing `(well, plug_name, depth_md)`
 rows are conflicts unless `update=true`.
 
-Excel import, staged depth matching, and a dedicated import-issues table are not
-implemented yet.
+XLSX/XLSM is parsed with openpyxl. Depth matching is staged per plug:
+`depth-match` creates a proposed match and `depth-matches/{id}/apply` copies its
+`log_md` to `core_plugs.matched_log_md`. There is no automatic core-to-log
+correlation yet.
 
 ## Flow units
 
@@ -62,15 +69,20 @@ It sorts log-FZI and recursively splits the largest gap until `k` clusters
 
 ## Saturation height
 
-Only the J-function is implemented in this increment:
+Supported models: J-function, Brooks-Corey, Lambda, Thomeer and
+Skelt-Harrison.
+
+The J-function is:
 
 ```text
 J = (Pc * sqrt(k/phi)) / (sigma * cos theta)
 Sw = a * J^b
 ```
 
-`fit` performs a log-log linear regression over Pc/Sw points and stores `a`, `b`,
-R² and residual as a draft `saturation_height_models` row. `apply` uses the
-selected contact/FWL, a default 0.433 psi/ft gradient, and `PHIE`/`PERM` curves;
-it returns Sw. Brooks-Corey, Thomeer, Lambda, Skelt-Harrison, Excel import,
-core depth matching and photo upload are next.
+`fit` stores model parameters, R², residual and an input hash as a draft
+`saturation_height_models` row. `apply` uses the selected contact/FWL, a default
+0.433 psi/ft gradient, and `PHIE`/`PERM` curves; it returns Sw. The UI exposes
+model type, fit and apply controls.
+
+Photo and thin-section binaries can be uploaded to the artifact store:
+`photos/upload` and `thin-sections/upload` (50 MB, image extensions).

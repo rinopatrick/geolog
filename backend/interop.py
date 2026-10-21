@@ -67,6 +67,7 @@ def osdu_config() -> dict[str, Any]:
         "timeout": float(os.environ.get("GEOLOG_OSDU_TIMEOUT", "30") or 30),
         "verify_tls": not _bool_env("GEOLOG_INTEROP_INSECURE_TLS", False),
         "wellbores_path": os.environ.get("GEOLOG_OSDU_WELLBORES_PATH", "/api/wellbore/v1/wellbores"),
+        "welllogs_path": os.environ.get("GEOLOG_OSDU_WELLLOGS_PATH", "/api/wellbore/v1/wellbores/{wellbore_id}/welllogs"),
     }
 
 def http_request(method: str, url: str, body: bytes | None, headers: dict[str, str],
@@ -311,6 +312,81 @@ def osdu_pull_wells(db, project_id: int, limit: int = 100, cfg: dict | None = No
     db.commit()
     return {"status": status, "records": len(records), "created": created,
             "updated": updated, "skipped": skipped}
+
+
+
+def osdu_pull_logs(db, well: Well, wellbore_id: str, limit: int = 100,
+                   cfg: dict | None = None) -> dict:
+    """Pull Wellbore DDMS well-log records and import curves when present.
+
+    The DDMS log record shape varies by provider. Curves are accepted from
+    ``Curves``/``curves`` and rows from ``LogData``/``logData``/``Data``.
+    """
+    cfg = cfg or osdu_config()
+    path = cfg["welllogs_path"].format(wellbore_id=wellbore_id)
+    status, body = osdu_request(cfg, "GET", f"{path}?limit={max(1, min(limit, 1000))}")
+    if not (200 <= status < 300):
+        raise RuntimeError(f"OSDU HTTP {status}: {str(body)[:300]}")
+    records = body.get("results") or body.get("welllogs") or []
+    imported = []
+    existing = {r.filename for r in db.query(LogRun).filter(LogRun.well_id == well.id).all()}
+    for record in records:
+        data = record.get("data", record)
+        curves_raw = data.get("Curves") or data.get("curves") or []
+        rows_raw = data.get("LogData") or data.get("logData") or data.get("Data") or []
+        if not curves_raw or not rows_raw:
+            imported.append({"name": data.get("Name") or data.get("WellLogName") or "",
+                             "status": "metadata_only"})
+            continue
+        curves = []
+        for c in curves_raw:
+            if isinstance(c, dict):
+                curves.append({
+                    "mnemonic": str(c.get("Mnemonic") or c.get("mnemonic") or ""),
+                    "unit": str(c.get("Unit") or c.get("unit") or ""),
+                    "description": str(c.get("Description") or c.get("description") or ""),
+                })
+        curves = [c for c in curves if c["mnemonic"]]
+        if not curves:
+            continue
+        if isinstance(rows_raw[0], dict):
+            rows = [[row.get(c["mnemonic"], row.get(c["mnemonic"].lower())) for c in curves] for row in rows_raw]
+        else:
+            rows = [row[:len(curves)] for row in rows_raw]
+        try:
+            arr = np.asarray(rows, dtype=np.float64)
+        except (TypeError, ValueError):
+            continue
+        name = str(data.get("Name") or data.get("WellLogName") or f"osdu-log-{len(existing)+1}")
+        filename = f"osdu::{name}"
+        if filename in existing:
+            imported.append({"name": name, "status": "skipped_exists"})
+            continue
+        start = data.get("StartIndex") or data.get("startIndex") or arr[0, 0]
+        stop = data.get("EndIndex") or data.get("endIndex") or arr[-1, 0]
+        run = LogRun(
+            well_id=well.id, run_number=len(existing) + 1, filename=filename,
+            las_version="osdu-welllog", start_depth=float(start), stop_depth=float(stop),
+            step=float(np.median(np.diff(arr[:, 0]))) if len(arr) > 1 else None,
+            num_points=len(arr), curves_json=json.dumps(curves),
+        )
+        db.add(run)
+        db.flush()
+        for i, curve in enumerate(curves):
+            values = arr[:, i]
+            valid = values[np.isfinite(values)]
+            db.add(CurveData(
+                log_run_id=run.id, mnemonic=curve["mnemonic"], unit=curve["unit"],
+                description=curve["description"], num_points=len(values),
+                min_value=float(np.min(valid)) if len(valid) else None,
+                max_value=float(np.max(valid)) if len(valid) else None,
+                data_binary=values.tobytes(),
+            ))
+        existing.add(filename)
+        imported.append({"name": name, "status": "imported", "log_run_id": run.id,
+                         "points": len(arr)})
+    db.commit()
+    return {"status": status, "records": len(records), "logs": imported}
 
 def osdu_push_well(db, well: Well, cfg: dict | None = None) -> dict:
     cfg = cfg or osdu_config()

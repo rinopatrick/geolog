@@ -275,8 +275,36 @@
     },
 
     async fitSh() {
-      try { const r = await app._api(`/wells/${this.state.wid}/core/saturation-height/fit`, { method: 'POST', body: JSON.stringify({ model_type: 'j_function' }) }); GeoToast.success(`J-function fit R² ${num(r.r2, 3)}`); await this.load(); }
+      try { const r = await app._api(`/wells/${this.state.wid}/core/saturation-height/fit`, { method: 'POST', body: JSON.stringify({ model_type: $('csShFitType').value || 'j_function' }) }); GeoToast.success(`J-function fit R² ${num(r.r2, 3)}`); await this.load(); }
       catch (e) { GeoToast.error(e.message); }
+    },
+
+    matchDepth() {
+      const plug = this.state.plugs.find((p) => p.id === this.state.selectedId);
+      const lr = app.currentLogRun || app.currentWell?.log_runs?.[0];
+      if (!plug) return GeoToast.warn('Select a core plug first.');
+      if (!lr) return GeoToast.warn('Select a log run first.');
+      PxModal.open({
+        title: `Depth match · ${plug.plug_name}`,
+        body: `<p>Core MD <strong>${num(plug.depth_md, 3)}</strong> · log run <strong>${esc(lr.filename || lr.id)}</strong></p>
+          <label style="display:block;color:var(--px-muted);font-size:9px;margin-top:8px">Shift (positive = deeper log match)
+            <input id="csMatchShift" class="px-text-control" type="number" step="0.1" value="0" style="width:100%;margin-top:4px">
+          </label>
+          <p style="margin-top:8px">Stages a proposed match and applies it immediately. Approved datasets are immutable.</p>`,
+        primaryLabel: 'Stage & apply',
+        onPrimary: async () => {
+          const shift = Number(document.getElementById('csMatchShift').value || 0);
+          try {
+            const match = await app._api(`/wells/${this.state.wid}/core/plugs/${plug.id}/depth-match`, {
+              method: 'POST', body: JSON.stringify({ log_run_id: lr.id, shift }),
+            });
+            await app._api(`/wells/${this.state.wid}/core/depth-matches/${match.id}/apply`, { method: 'POST' });
+            PxModal.close();
+            GeoToast.success(`Matched ${plug.plug_name} to ${num(match.log_md, 3)} MD`);
+            await this.load();
+          } catch (e) { GeoToast.error(e.message); }
+        },
+      });
     },
 
     async previewImport(file) {
@@ -353,6 +381,7 @@
     $('csFitShBtn')?.addEventListener('click', () => View.fitSh());
     $('csImportBtn')?.addEventListener('click', () => $('csCsvFile').click());
     $('csCsvFile')?.addEventListener('change', (e) => View.previewImport(e.target.files?.[0]));
+    $('csMatchBtn')?.addEventListener('click', () => View.matchDepth());
     $('csShModel')?.addEventListener('change', (e) => { View.state.shModelId = Number(e.target.value) || null; });
     $('csApplyShBtn')?.addEventListener('click', () => View.applySh());
     $('csPcToggle')?.addEventListener('click', () => View.togglePc());
