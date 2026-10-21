@@ -105,6 +105,7 @@ def issue_user_token(data: dict, db: Session = Depends(get_db)):
     return {
         "access_token": access_token,
         "token_type": "bearer",
+        "expires_in": cfg.jwt_ttl_seconds,
         "username": user.username,
         "role": user.role,
     }

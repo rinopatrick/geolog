@@ -54,3 +54,62 @@ jobs:
             echo "checking $f"
             node --check "$f"
           done
+
+  browser-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GEOLOG_ENV: ci
+      GEOLOG_ENFORCE_SECRETS_SOURCE: "false"
+      GEOLOG_ENABLE_DEMO_SEED: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install app dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Start API
+        run: |
+          set -euo pipefail
+          nohup python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 \
+            > /tmp/geolog-browser.log 2>&1 &
+          echo $! > /tmp/geolog-browser.pid
+          for i in {1..40}; do
+            if curl -sf http://127.0.0.1:8000/api/health >/dev/null; then
+              echo "API ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "API failed to start"
+          cat /tmp/geolog-browser.log || true
+          exit 1
+
+      - name: Browser smoke
+        run: npm run e2e
+
+      - name: Stop API
+        if: always()
+        run: |
+          if [ -f /tmp/geolog-browser.pid ]; then
+            kill "$(cat /tmp/geolog-browser.pid)" || true
+          fi
+          cat /tmp/geolog-browser.log || true

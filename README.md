@@ -2,7 +2,7 @@
 
 Comprehensive, production-style subsurface interpretation platform for oil & gas workflows. GeoLog combines high-performance log visualization, petrophysical computation, correlation, zonation, quality control, and export/reporting in a FastAPI + SQLite + Canvas-based stack.
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?style=flat-square&logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Framework-009688?style=flat-square&logo=fastapi&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)
 ![SQLite](https://img.shields.io/badge/SQLite-Database-003B57?style=flat-square&logo=sqlite&logoColor=white)
@@ -143,7 +143,6 @@ GeoLog currently includes **35+ analysis views/panels** and **100+ API capabilit
 
 ### Method 1 — One-command local run (`run.sh`)
 ```bash
-cd /home/patrick/geolog-app
 chmod +x run.sh
 ./run.sh
 ```
@@ -152,14 +151,12 @@ chmod +x run.sh
 
 ### Method 2 — Docker
 ```bash
-cd /home/patrick/geolog-app
 docker compose up --build
 ```
 Then open `http://localhost:8000`.
 
 ### Method 3 — Manual (Python)
 ```bash
-cd /home/patrick/geolog-app
 python3 -m pip install -r requirements.txt
 python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
@@ -332,26 +329,24 @@ geolog-app/
 
 ### Parser + API smoke tests script
 ```bash
-cd /home/patrick/geolog-app
-python3 tests/test_parser.py
+python -m pytest tests/test_parser.py -q
 ```
 
 ### Browser e2e smoke (views + role-gates)
 ```bash
-cd /home/patrick/geolog-app
+npm ci
+npx playwright install --with-deps chromium
 node scripts/e2e_panel_smoke.js
 node scripts/e2e_role_gate_smoke.js
 ```
 
 ### With pytest
 ```bash
-cd /home/patrick/geolog-app
-pytest -q tests/test_parser.py
+python -m pytest -q tests/test_parser.py
 ```
 
 ### Phase 2 critical-path coverage gate (target >=80%)
 ```bash
-cd /home/patrick/geolog-app
 bash scripts/phase2_critical_coverage_gate.sh
 ```
 
@@ -366,7 +361,6 @@ Phase 2 regression dataset evidence:
 
 ### Phase 3a security + backup gates
 ```bash
-cd /home/patrick/geolog-app
 bash scripts/backup_restore_drill.sh backend/data/geolog.db
 ```
 
@@ -485,23 +479,38 @@ and [CHANGELOG.md](CHANGELOG.md). While the major version is `0`, the API is not
 stable and the schema may change between releases.
 
 Recommended next steps:
-1. Finish splitting `backend/main.py` — the `/api/wells` routes (87 endpoints) and the petrophysics helpers they depend on
-2. Raise coverage on the petrophysics paths (`backend/main.py` is the least covered module)
-3. Add an auth provider integration — `AUTH_MODE=jwt` verifies tokens but issues none
-4. Add monitoring and an operational runbook
+1. Add a token revocation/refresh lifecycle and map IdP-specific role claims. JWKS/RS256 verification, issuer/audience/expiry checks and local HS256 issuance are implemented; see `docs/PRODUCTION_HARDENING.md`.
+2. Raise coverage on the petrophysics compute paths; they are the least-covered high-risk modules.
+3. Complete deployment hardening: TLS termination, secret manager, backup/restore drill and monitoring. See [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md).
+4. Add committed real DLIS/LIS regression fixtures. The real-file checks are opt-in because the sample files are third-party test data; see the testing section.
 
 Module layout:
 ```
 backend/
-├── main.py            app assembly, middleware, /api/wells routes
+├── main.py            app assembly, middleware, small legacy routes, WebSocket
 ├── deps.py            SafeJSONResponse, role dependencies
+├── security.py        header/JWT auth, token issuance, JWKS/public-key verification
 ├── schema.py          Alembic runner + drift verification
 ├── audit.py           audit chain + evidence signing
 ├── observability.py   request counters (middleware writes, /api/ops reads)
 ├── jobs.py            in-process background job registry
+├── filelock.py        cross-process lock for JSON state files
 ├── curve_corrections.py  density-porosity + bad-hole QC
 ├── curve_plausibility.py stored-curve sanity checks
 ├── migrations/        Alembic revisions
 └── routers/           users, log_runs, projects, audit, ops, qc,
-                       correlation, zonation, units, templates, reports
+                       correlation, zonation, units, templates, reports,
+                       wells (ingest, tops, zones, petrophysics, snapshots)
 ```
+
+DLIS/LIS parsing uses `dlisio` on Python 3.10+. On Python 3.9 the package is
+skipped and uploads fall back to the heuristic scan with a warning.
+
+### Real DLIS/LIS files (optional)
+```bash
+GEOLOG_DLIS_SAMPLE=/path/file.dlis \
+GEOLOG_LIS_SAMPLE=/path/file.lis \
+python -m pytest tests/test_dlis_lis_real_samples.py -q
+```
+Samples are not committed; see `tests/test_dlis_lis_real_samples.py` for the
+NumPy/dlisio constraint.

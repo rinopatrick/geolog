@@ -3,7 +3,9 @@
   "version": "0.2.0",
   "private": true,
   "scripts": {
-    "e2e:smoke": "node scripts/e2e_panel_smoke.js"
+    "e2e:smoke": "node scripts/e2e_panel_smoke.js",
+    "e2e:roles": "node scripts/e2e_role_gate_smoke.js",
+    "e2e": "node scripts/e2e_panel_smoke.js && node scripts/e2e_role_gate_smoke.js"
   },
   "devDependencies": {
     "playwright": "^1.54.0"

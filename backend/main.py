@@ -19,7 +19,7 @@ from fastapi import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -295,6 +295,32 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+def _https_required() -> bool:
+    return (os.getenv("GEOLOG_REQUIRE_HTTPS", "false") or "false").strip().lower() in {"1", "true", "yes", "on"}
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Optional HTTPS redirect plus baseline response hardening headers."""
+
+    async def dispatch(self, request: Request, call_next):
+        if (
+            _https_required()
+            and request.url.scheme != "https"
+            and request.method not in {"OPTIONS"}
+            and request.url.path != "/api/health"
+        ):
+            return RedirectResponse(str(request.url.replace(scheme="https")), status_code=308)
+
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+        if request.url.scheme == "https":
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
+        return response
+
 class RequestMetricsMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         start = time.perf_counter()
@@ -472,6 +498,7 @@ app.add_middleware(ImmutableAuditTrailMiddleware)
 app.add_middleware(AuthContextMiddleware)
 app.add_middleware(RequestMetricsMiddleware)
 app.add_middleware(RequestIdMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 def _enforce_secrets_source_policy() -> None:
