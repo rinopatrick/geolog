@@ -8,6 +8,20 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+### Added
+
+- **Production hardening.** JWT verification supports JWKS and RS256 public keys,
+  token TTL/leeway are configurable, issued tokens carry a `jti` and the token
+  endpoint reports `expires_in`.
+- **Secrets from files.** Every supported secret can use the `<NAME>_FILE`
+  convention for Docker/Kubernetes secret mounts.
+- **TLS and response headers.** `GEOLOG_REQUIRE_HTTPS=true` redirects with 308,
+  HTTPS responses get HSTS, and all responses carry baseline hardening headers.
+- **Deployment guide.** `docs/PRODUCTION_HARDENING.md` covers IdP, secrets, TLS,
+  persistence, backup drills, monitoring and a release checklist.
+- **Real DLIS/LIS checks.** Opt-in tests accept `GEOLOG_DLIS_SAMPLE` and
+  `GEOLOG_LIS_SAMPLE`; no third-party binary fixtures are committed.
+
 ## [0.2.0] - 2026-10-21
 
 Security, data-integrity and ingestion hardening release.

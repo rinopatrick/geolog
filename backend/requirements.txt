@@ -8,3 +8,4 @@ numpy==1.26.4
 reportlab==4.5.1
 PyJWT==2.15.1
 dlisio==1.0.4; python_version >= "3.10"
+cryptography==50.0.2; python_version >= "3.10"

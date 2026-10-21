@@ -35,6 +35,7 @@ try:
     from deps import require_interpreter, require_viewer
     from observability import OBS_METRICS, OBS_METRICS_LOCK, refresh_metrics
     from validation import canonical_json
+    from secretstore import read_secret
     # Reused response models, defined alongside the audit routes that share them.
     from routers.audit import AuditSignatureVerifyRequest, AuditSignatureVerifyResponse
 except ImportError:
@@ -43,6 +44,7 @@ except ImportError:
     from backend.deps import require_interpreter, require_viewer
     from backend.observability import OBS_METRICS, OBS_METRICS_LOCK, refresh_metrics
     from backend.validation import canonical_json
+    from backend.secretstore import read_secret
     from backend.routers.audit import AuditSignatureVerifyRequest, AuditSignatureVerifyResponse
 
 router = APIRouter(prefix="/api/ops", tags=["ops"])
@@ -1180,7 +1182,7 @@ def ops_security_evidence_status(_role: str = Depends(require_viewer)):
             report_sha256_matches_signature = bool(declared_sha and declared_sha == report_sha)
 
             if signature_alg == "hmac-sha256":
-                key = (os.getenv("BACKUP_DRILL_SIGNING_KEY") or "").strip()
+                key = (read_secret("BACKUP_DRILL_SIGNING_KEY") or "").strip()
                 sig = str(sig_obj.get("signature", "") or "").strip().lower()
                 if key and sig and len(sig) == 64 and all(c in "0123456789abcdef" for c in sig):
                     signed_value = (declared_sha or report_sha).encode("utf-8")

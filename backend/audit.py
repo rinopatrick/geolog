@@ -40,6 +40,11 @@ except ImportError:
     from backend.filelock import interprocess_lock
 
 try:
+    from secretstore import read_secret
+except ImportError:
+    from backend.secretstore import read_secret
+
+try:
     from well_state import ARTIFACT_DIR
 except ImportError:
     from backend.well_state import ARTIFACT_DIR
@@ -213,8 +218,8 @@ def resolve_audit_export_signing_key(requested_kid: str | None = None):
     2) AUDIT_EXPORT_HMAC_ACTIVE_KID -> AUDIT_EXPORT_HMAC_KEYS_JSON map
     3) legacy AUDIT_EXPORT_HMAC_KEY (kid='legacy')
     """
-    keys_json = (os.getenv("AUDIT_EXPORT_HMAC_KEYS_JSON") or "").strip()
-    active_kid = (os.getenv("AUDIT_EXPORT_HMAC_ACTIVE_KID") or "").strip()
+    keys_json = (read_secret("AUDIT_EXPORT_HMAC_KEYS_JSON") or "").strip()
+    active_kid = (read_secret("AUDIT_EXPORT_HMAC_ACTIVE_KID") or "").strip()
 
     key_map = {}
     if keys_json:
@@ -228,7 +233,7 @@ def resolve_audit_export_signing_key(requested_kid: str | None = None):
     if requested_kid:
         if requested_kid in key_map:
             return requested_kid, key_map[requested_kid]
-        legacy = (os.getenv("AUDIT_EXPORT_HMAC_KEY") or "").strip()
+        legacy = (read_secret("AUDIT_EXPORT_HMAC_KEY") or "").strip()
         if requested_kid == "legacy" and legacy:
             return "legacy", legacy
         raise HTTPException(status_code=400, detail=f"unknown signature kid: {requested_kid}")
@@ -236,7 +241,7 @@ def resolve_audit_export_signing_key(requested_kid: str | None = None):
     if active_kid and active_kid in key_map:
         return active_kid, key_map[active_kid]
 
-    legacy = (os.getenv("AUDIT_EXPORT_HMAC_KEY") or "").strip()
+    legacy = (read_secret("AUDIT_EXPORT_HMAC_KEY") or "").strip()
     if legacy:
         return "legacy", legacy
 
