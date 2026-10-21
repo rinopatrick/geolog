@@ -75,6 +75,7 @@ class LogRun(Base):
     well = relationship("Well", back_populates="log_runs")
     curve_data = relationship("CurveData", back_populates="log_run", cascade="all, delete-orphan")
     depth_control_points = relationship("DepthControlPoint", back_populates="log_run", cascade="all, delete-orphan")
+    nmr_inversions = relationship("NmrInversion", back_populates="log_run", cascade="all, delete-orphan")
 
 
 
@@ -93,6 +94,39 @@ class DepthControlPoint(Base):
     __table_args__ = (
         UniqueConstraint("log_run_id", "md", name="uq_depth_control_points_run_md"),
     )
+
+
+class NmrInversion(Base):
+    """One T2 inversion result for a log run."""
+    __tablename__ = "nmr_inversions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, index=True)
+    log_run_id = Column(Integer, ForeignKey("log_runs.id"), nullable=False, index=True)
+    method = Column(String(50), default="nnls")
+    t2_bins_json = Column(Text, default="[]")
+    cutoff_ms = Column(Float, default=33.0)
+    lambda_value = Column(Float, default=0.1)
+    n_depth = Column(Integer, default=0)
+    n_bins = Column(Integer, default=0)
+    params_hash = Column(String(64), default="")
+    engine_version = Column(String(50), default="nmr-v1")
+    created_at = Column(DateTime, default=utcnow)
+
+    log_run = relationship("LogRun", back_populates="nmr_inversions")
+    distribution = relationship("NmrDistribution", back_populates="inversion", cascade="all, delete-orphan", uselist=False)
+
+class NmrDistribution(Base):
+    __tablename__ = "nmr_distributions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    inversion_id = Column(Integer, ForeignKey("nmr_inversions.id"), nullable=False, unique=True, index=True)
+    n_depth = Column(Integer, default=0)
+    n_bins = Column(Integer, default=0)
+    depth_binary = Column(LargeBinary, nullable=True)
+    amplitudes = Column(LargeBinary, nullable=True)
+
+    inversion = relationship("NmrInversion", back_populates="distribution")
 
 class CurveData(Base):
     __tablename__ = "curve_data"

@@ -43,6 +43,7 @@ GeoLog currently includes **35+ analysis views/panels** and **100+ API capabilit
 - Cutoff-based net pay evaluation and zone summaries
 - Batch petrophysics workflows (sync + async)
 - **Multi-mineral solver workflows** via calculator/derived-curve tooling
+- **NMR T2** vendor-bin interpretation and raw CPMG NNLS inversion (`docs/NMR.md`)
 
 ### 4) Well Correlation
 - Interactive **2-well correlation panel**
