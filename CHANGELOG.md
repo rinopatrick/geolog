@@ -10,6 +10,10 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
+- **Semantics-aware QC and petrophysics.** Advanced QC, unified saturation,
+  permeability, dual-water, VCL models, multimineral and permeability-multi now
+  read through the shared semantics layer, so aliases, units and corrected MD
+  agree with the viewer.
 - **NMR T2 interpretation.** Vendor T2-bin curves are interpreted synchronously;
   raw CPMG echoes use regularized NNLS as a background job. Adds
   `nmr_inversions`/`nmr_distributions`, derived `NMRP`/`BVI`/`FFI`/`T2GM`/
