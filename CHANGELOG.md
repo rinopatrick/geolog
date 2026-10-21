@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, the API is not yet stable.
 
+## [Unreleased]
+
+### Added
+
+- **Petrophysics workbench UI.** Core/SCAL, geomechanics and image-log panels
+  with live API data, canvas profile/crossplot/Pc views, CSV import, dataset
+  approval, FZI clustering, J-function fitting, geomechanics compute/PDF export,
+  manual image trace fitting and role gates (`docs/PETROPHYSICS_UI.md`).
+
 ## [0.6.0] - 2026-10-21
 
 ### Added

@@ -9,6 +9,7 @@
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/sprint26.css">
+    <link rel="stylesheet" href="/static/css/petrophysics.css">
 </head>
 <body>
     <!-- Top Bar -->
@@ -40,6 +41,8 @@
                     <button class="nav-btn" data-view="tornado" title="Tornado chart — parameter impact on net pay"><i data-lucide="wind"></i><span>Tornado</span></button>
                     <button class="nav-btn" data-view="vclmodels" title="Compare Vclay models (Larionov, Clavier, Steiber)"><i data-lucide="layers"></i><span>Vcl Models</span></button>
                     <button class="nav-btn" data-view="comparison" title="Well-to-well structural cross-section view"><i data-lucide="columns-3"></i><span>Cross Section</span></button>
+                    <button class="nav-btn" data-view="corescal" title="Core plugs, SCAL, FZI flow units and saturation height"><i data-lucide="database"></i><span>Core / SCAL</span></button>
+                    <button class="nav-btn" data-view="geomechanics" title="Screening pore pressure, stresses, mud window and failure flags"><i data-lucide="mountain"></i><span>Geomechanics</span></button>
                 </div>
             </details>
             <details class="nav-group">
@@ -1091,6 +1094,190 @@
             </div>
         </div>
 
+        <!-- Core / SCAL Panel -->
+        <div id="corescalPanel" class="panel" style="display:none">
+            <div class="px-workbench" id="coreScalRoot">
+                <section class="px-toolbar" aria-label="Core dataset controls">
+                    <span class="px-toolbar-title">Core / SCAL</span>
+                    <select id="csDataset" aria-label="Core dataset version"></select>
+                    <label class="px-field" for="csSource">Source
+                        <select id="csSource" aria-label="Core data source"><option value="">All core data</option></select>
+                    </label>
+                    <span class="px-toolbar-spacer"></span>
+                    <button class="px-button px-secondary" type="button" id="csImportBtn" data-role-required="interpreter,admin"><i data-lucide="upload"></i>Import CSV</button>
+                    <input id="csCsvFile" type="file" accept=".csv,text/csv" hidden aria-label="Choose a core data CSV file">
+                    <button class="px-button px-secondary" type="button" id="csClusterBtn" data-role-required="interpreter,admin">Flow units</button>
+                    <button class="px-button px-secondary" type="button" id="csFitShBtn" data-role-required="interpreter,admin">Fit SH</button>
+                    <button class="px-button px-primary" type="button" id="csApproveBtn" data-role-required="interpreter,admin"><i data-lucide="check"></i>Approve dataset</button>
+                    <span class="px-badge px-warn" id="csDatasetStatus" aria-live="polite"><i class="px-badge-dot"></i>No dataset</span>
+                </section>
+                <section class="px-kpis" aria-label="Core dataset summary">
+                    <div class="px-kpi"><span class="px-kpi-label">PLUGS</span><span class="px-kpi-value"><span id="csKpiPlugs">0</span> <span class="px-kpi-unit">samples</span></span></div>
+                    <div class="px-kpi"><span class="px-kpi-label">POROSITY</span><span class="px-kpi-value"><span id="csKpiPhi">—</span> <span class="px-kpi-unit">%</span></span></div>
+                    <div class="px-kpi"><span class="px-kpi-label">AIR PERM</span><span class="px-kpi-value"><span id="csKpiPerm">—</span> <span class="px-kpi-unit">mD</span></span></div>
+                    <div class="px-kpi"><span class="px-kpi-label">FZI CLUSTERS</span><span class="px-kpi-value"><span id="csKpiFzi">0</span> <span class="px-kpi-unit">rock types</span></span></div>
+                    <div class="px-kpi"><span class="px-kpi-label">APPROVED</span><span class="px-kpi-value"><span class="px-accent" id="csKpiApproved">0</span><span class="px-kpi-unit">%</span></span></div>
+                </section>
+                <div class="px-core-workspace">
+                    <section class="px-panel px-table-panel" aria-labelledby="cs-table-title">
+                        <div class="px-panel-head"><h2 id="cs-table-title">Core plug measurements</h2><div class="px-table-controls"><span>Sort · MD ↑</span></div></div>
+                        <div class="px-table-wrap">
+                            <table class="px-plug-table" aria-label="Core plug measurements">
+                                <thead><tr><th scope="col">Plug</th><th scope="col">MD</th><th scope="col">Formation</th><th scope="col">Phi %</th><th scope="col">Kair mD</th><th scope="col">FZI</th><th scope="col">Rock type</th><th scope="col">QC</th></tr></thead>
+                                <tbody id="csPlugRows"></tbody>
+                            </table>
+                            <div id="csEmpty" class="px-empty" hidden><strong>No core plugs yet</strong><span>Import a CSV or add plugs through the API to start the core/SCAL workflow.</span></div>
+                        </div>
+                        <div class="px-table-foot"><span id="csTableCount">0 measurements</span><span class="px-mono" id="csQcCount">0 QC REVIEW</span></div>
+                    </section>
+                    <section class="px-core-analysis" aria-label="Core analysis plots">
+                        <figure class="px-panel px-chart-panel" aria-labelledby="cs-crossplot-title" style="margin:0">
+                            <div class="px-panel-head"><div class="px-chart-heading"><h2 id="cs-crossplot-title">Porosity – permeability</h2><span class="px-chart-sub">log Kair</span></div><div class="px-legend"><span><i class="px-swatch" style="color:var(--px-cyan)"></i>FZI 2.0</span><span><i class="px-swatch" style="color:var(--px-accent)"></i>FZI 3.5</span><span><i class="px-swatch" style="color:var(--px-blue)"></i>FZI 5.0</span></div></div>
+                            <canvas class="px-chart-svg" id="csCrossplot" role="img" aria-label="Porosity versus air permeability crossplot"></canvas>
+                        </figure>
+                        <figure class="px-panel px-chart-panel" aria-labelledby="cs-pc-title" style="margin:0">
+                            <div class="px-panel-head"><div class="px-chart-heading"><h2 id="cs-pc-title">Capillary pressure</h2><span class="px-chart-sub" id="csPcHead">select a plug</span></div><div class="px-chart-tools"><span class="px-badge px-info" id="csPcMethod">AIR–BRINE</span></div></div>
+                            <canvas class="px-chart-svg" id="csPcPlot" role="img" aria-label="Capillary pressure curve for selected plug"></canvas>
+                        </figure>
+                    </section>
+                </div>
+                <section class="px-summary-strip" aria-label="Selected plug summary">
+                    <div class="px-summary-item"><span class="px-summary-label">SELECTED PLUG</span><div class="px-summary-selection"><strong class="px-plug-big" id="csSummaryPlug">—</strong><span class="px-formation" id="csSummaryFormation">choose a plug</span></div></div>
+                    <div class="px-summary-item"><span class="px-summary-label">PC FIT R²</span><span class="px-summary-value" id="csSummaryR2">—</span></div>
+                    <div class="px-summary-item"><span class="px-summary-label">SW AT 100 FT</span><span class="px-summary-value" id="csSummarySw">—</span></div>
+                    <div class="px-summary-item"><span class="px-summary-label">FLOW UNIT</span><span class="px-summary-value" id="csSummaryFlow">—</span></div>
+                    <div class="px-summary-item"><span class="px-summary-label">QC INTERPRETATION</span><span class="px-summary-value" id="csSummaryQc"><span class="px-badge">NO SELECTION</span></span></div>
+                </section>
+            </div>
+        </div>
+
+        <!-- Geomechanics Panel -->
+        <div id="geomechanicsPanel" class="panel" style="display:none">
+            <div class="px-workbench" id="geoRoot">
+                <section class="px-geo-controls" aria-label="Geomechanics model controls">
+                    <span class="px-toolbar-title">Geomechanics</span>
+                    <select id="geoModel" aria-label="Geomechanics model version"></select>
+                    <button class="px-button px-secondary" type="button" id="geoNewBtn" data-role-required="interpreter,admin">New model</button>
+                    <span class="px-badge px-info" id="geoBadgePp"><i class="px-badge-dot"></i>Pp</span>
+                    <span class="px-badge px-info" id="geoBadgeShmin"><i class="px-badge-dot"></i>Shmin</span>
+                    <span class="px-badge px-warn" id="geoBadgeShmax"><i class="px-badge-dot"></i>Shmax assumed</span>
+                    <span class="px-toolbar-spacer"></span>
+                    <button class="px-button px-secondary" type="button" id="geoExportBtn"><i data-lucide="file-down"></i>Export PDF</button>
+                    <button class="px-button px-primary" type="button" id="geoComputeBtn" data-role-required="interpreter,admin"><i data-lucide="refresh-cw"></i>Compute</button>
+                </section>
+                <div class="px-geo-main">
+                    <section class="px-panel px-profile-panel" aria-labelledby="geo-profile-title">
+                        <div class="px-panel-head"><h2 id="geo-profile-title">Pressure profile</h2><span class="px-head-meta px-mono" id="geoProfileMeta">no model</span><div class="px-profile-legend"><span><i class="px-sv"></i>Sv</span><span><i class="px-pp"></i>Pp</span><span><i class="px-shmin"></i>Shmin</span><span><i class="px-shmax"></i>Shmax</span><span><i class="px-mw"></i>Mud window</span></div></div>
+                        <canvas class="px-profile-svg" id="geoProfile" role="img" aria-label="Depth profile of vertical stress, pore pressure, horizontal stresses and mud window"></canvas>
+                    </section>
+                    <aside class="px-panel px-provenance-panel" aria-labelledby="geo-prov-title">
+                        <div class="px-panel-head"><h2 id="geo-prov-title">Model provenance</h2><span class="px-head-meta" id="geoProvMeta">draft</span></div>
+                        <div class="px-prov-body">
+                            <div class="px-prov-grid" id="geoProvGrid">
+                                <div class="px-prov-item"><span class="px-prov-label">Vertical stress · Sv</span><span class="px-prov-value">no model <span class="px-badge">—</span></span></div>
+                                <div class="px-prov-item"><span class="px-prov-label">Pore pressure · Pp</span><span class="px-prov-value">no model <span class="px-badge">—</span></span></div>
+                                <div class="px-prov-item"><span class="px-prov-label">Min horizontal · Shmin</span><span class="px-prov-value">no model <span class="px-badge">—</span></span></div>
+                                <div class="px-prov-item"><span class="px-prov-label">Max horizontal · Shmax</span><span class="px-prov-value">no model <span class="px-badge">—</span></span></div>
+                            </div>
+                            <div class="px-geo-kpis"><div class="px-geo-kpi"><span class="px-prov-label">Mud-weight window</span><strong id="geoMudWindow">— <span class="px-kpi-unit">ppg</span></strong></div><div class="px-geo-kpi"><span class="px-prov-label">Breakouts</span><strong id="geoBreakouts">— <span class="px-kpi-unit">intervals</span></strong></div></div>
+                            <div class="px-subhead"><span>Model inputs</span><span class="px-mono">screening</span></div>
+                            <div class="px-model-form">
+                                <label>Mud weight (ppg)<input id="geoMudWeight" type="number" step="0.1" min="0" value="9.0"></label>
+                                <label>Shmax azimuth (°)<input id="geoAzimuth" type="number" step="1" min="0" max="360" value="0"></label>
+                                <label>Shmin gradient (psi/ft)<input id="geoShminGrad" type="number" step="0.01" min="0" value="0.70"></label>
+                                <label>Shmax gradient (psi/ft)<input id="geoShmaxGrad" type="number" step="0.01" min="0" value="1.20"></label>
+                                <div class="px-model-actions"><button class="px-button px-secondary" type="button" id="geoSaveBtn" data-role-required="interpreter,admin">Save model</button><span class="px-inline-note" id="geoFormNote">Draft models are editable.</span></div>
+                            </div>
+                            <div class="px-subhead"><span>Calibration points</span><span class="px-mono" id="geoCalCount">0</span></div>
+                            <div class="px-cal-list" id="geoCalList"><div class="px-cal-row"><span>No calibration points</span><span class="px-data">—</span><span class="px-data">—</span><span class="px-badge">—</span></div></div>
+
+                            <p class="px-screening-note">Screening model for interval review. Reconcile assumed Shmax with image-log breakouts before operational use.</p>
+                        </div>
+                    </aside>
+                </div>
+                <section class="px-panel px-failure-panel" aria-labelledby="geo-failure-title">
+                    <div class="px-panel-head"><h2 id="geo-failure-title">Failure intervals</h2><span class="px-head-meta" id="geoWindowMeta">no computed interval</span><span class="px-head-meta px-mono" id="geoFailureMeta">0 flagged</span></div>
+                    <div class="px-table-wrap"><table class="px-failure-table" aria-label="Failure interval screening table"><thead><tr><th scope="col">Depth interval m</th><th scope="col">BO</th><th scope="col">MC</th><th scope="col">HB</th><th scope="col">DP</th><th scope="col">Sanding CDP</th><th scope="col">Screening status</th></tr></thead><tbody id="geoFailureRows"></tbody></table></div>
+                </section>
+                <div class="px-geo-foot"><span id="geoComputeState" aria-live="polite">No compute run yet.</span><span>Pressure referenced to TVD · psi</span></div>
+            </div>
+        </div>
+
+        <!-- Image Log Panel -->
+        <div id="imagelogPanel" class="panel" style="display:none">
+            <div class="px-workbench" id="imageLogRoot">
+                <section class="px-image-controls" aria-label="Image log controls">
+                    <span class="px-toolbar-title">Image log</span>
+                    <label class="px-field" for="imgAsset">Asset
+                        <select id="imgAsset" aria-label="Image asset"><option value="">No image assets</option></select>
+                    </label>
+                    <label class="px-field" for="imgDepthRange">Depth <input class="px-text-control px-mono" id="imgDepthRange" value="—" aria-label="Displayed depth range" readonly></label>
+                    <label class="px-field" for="imgAzimuth">Azimuth <input class="px-text-control px-mono" id="imgAzimuth" value="0–360°" aria-label="Azimuth range" readonly></label>
+                    <label class="px-field" for="imgRadius">Borehole radius <input class="px-text-control px-mono" id="imgRadius" value="—" aria-label="Borehole radius" readonly></label>
+                    <span class="px-pick-hint" id="imgPickHint">Click the image to add trace points</span>
+                    <span class="px-toolbar-spacer"></span>
+                    <button class="px-button px-primary" type="button" id="imgFitBtn" data-role-required="interpreter,admin"><i data-lucide="spline"></i>Fit dip</button>
+                    <button class="px-button px-secondary" type="button" id="imgApproveBtn" data-role-required="interpreter,admin">Approve picks</button>
+                </section>
+                <div class="px-image-main">
+                    <figure class="px-panel px-image-panel" aria-labelledby="img-unwrapped-title" style="margin:0">
+                        <div class="px-panel-head"><h2 id="img-unwrapped-title">Unwrapped borehole</h2><span class="px-head-meta px-mono" id="imgCaption">no asset</span></div>
+                        <div class="px-unwrapped-layout">
+                            <div class="px-axis-corner">MD (m)</div>
+                            <div class="px-azimuth-axis" aria-label="Azimuth in degrees"><span>0°</span><span>90°</span><span>180°</span><span>270°</span><span>360°</span></div>
+                            <div></div>
+                            <div class="px-depth-axis" id="imgDepthAxis" aria-label="Depth axis"><span>—</span><span>—</span><span>—</span><span>—</span><span>—</span><span>—</span></div>
+                            <div class="px-image-map" id="imgMap"><canvas id="imgCanvas" width="256" height="520" role="img" aria-label="Unwrapped borehole image"></canvas>
+                                <div class="px-image-empty" id="imgEmpty">Select an image asset or upload one to begin.</div>
+                                <svg class="px-image-overlay" viewBox="0 0 256 520" preserveAspectRatio="none" aria-hidden="true"><g id="imgVectorLayer"></g></svg>
+                            </div><div></div>
+                            <figcaption class="px-image-caption"><span id="imgScaleNote">Amplitude · normalized</span><span class="px-mono" id="imgMetaNote">PNG / DLIS</span></figcaption>
+                        </div>
+                    </figure>
+                    <div class="px-pick-workspace">
+                        <section class="px-panel px-pick-panel" aria-labelledby="img-picks-title">
+                            <div class="px-panel-head"><h2 id="img-picks-title">Dip picks</h2><span class="px-head-meta px-mono" id="imgPickCount">0 FEATURES</span></div>
+                            <div class="px-table-wrap"><table class="px-pick-table" aria-label="Dip picks with approval status"><thead><tr><th scope="col">Depth m</th><th scope="col">Dip °</th><th scope="col">Az °</th><th scope="col">R²</th><th scope="col">Quality</th><th scope="col">Approve</th></tr></thead><tbody id="imgPickRows"></tbody></table></div>
+                            <div class="px-table-foot"><span id="imgApprovalCount" aria-live="polite">0 picks</span><span>Click a row to inspect</span></div>
+                        </section>
+                        <section class="px-panel px-pick-detail" aria-labelledby="img-detail-title">
+                            <div class="px-panel-head"><h2 id="img-detail-title">Pick detail</h2><span class="px-head-meta px-mono" id="imgDetailDepth">—</span></div>
+                            <div class="px-pick-detail-content">
+                                <div class="px-detail-values">
+                                    <div class="px-detail-row"><span>Dip angle</span><strong id="imgDetailDip">—</strong></div>
+                                    <div class="px-detail-row"><span>Azimuth</span><strong id="imgDetailAz">—</strong></div>
+                                    <div class="px-detail-row"><span>Fit R²</span><strong id="imgDetailR2">—</strong></div>
+                                    <div class="px-detail-row"><span>Quality</span><strong id="imgDetailQuality">—</strong></div>
+                                    <div class="px-detail-row"><span>Interpreter</span><strong id="imgDetailBy">—</strong></div>
+                                </div>
+                                <div class="px-dip-glyph" aria-label="Dip orientation glyph">
+                                    <svg viewBox="0 0 112 112" role="img" aria-label="Stereonet showing selected dip orientation">
+                                        <circle cx="56" cy="56" r="45" fill="var(--px-secondary)" stroke="var(--px-border-accent)" stroke-width="1"/><circle cx="56" cy="56" r="30" fill="none" stroke="var(--px-border)"/><circle cx="56" cy="56" r="15" fill="none" stroke="var(--px-border)"/>
+                                        <path d="M11 56h90M56 11v90M24 24l64 64M88 24 24 88" stroke="var(--px-border)" stroke-width=".7"/>
+                                        <path id="imgOrientationLine" d="M56 56 L56 56" fill="none" stroke="var(--px-accent)" stroke-width="2.2"/><circle id="imgOrientationDot" cx="56" cy="56" r="3.3" fill="var(--px-accent)" stroke="var(--px-secondary)" stroke-width="1.5"/>
+                                        <text x="56" y="7" fill="var(--px-muted)" text-anchor="middle" font-size="7" font-family="JetBrains Mono">N</text><text x="106" y="58" fill="var(--px-muted)" text-anchor="middle" font-size="7" font-family="JetBrains Mono">E</text>
+                                    </svg><p>Equal-area · lower hemisphere</p>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+                <section class="px-upload-bar" id="imgUploadBar" aria-label="Upload image log data">
+                    <i data-lucide="upload-cloud" class="px-upload-icon"></i>
+                    <span><strong>Drop raster image</strong> or <button class="px-button px-secondary" type="button" id="imgChooseFile" data-role-required="interpreter,admin" style="min-height:22px;padding:0 7px">Browse</button></span>
+                    <span class="px-muted">PNG, JPEG, TIFF · ≤50 MB</span>
+                    <div class="px-upload-fields">
+                        <label>Top <input id="imgDepthTop" type="number" step="0.1" aria-label="Upload depth top"></label>
+                        <label>Base <input id="imgDepthBottom" type="number" step="0.1" aria-label="Upload depth bottom"></label>
+                        <label>Radius m <input id="imgUploadRadius" type="number" step="0.001" min="0.01" value="0.15" aria-label="Borehole radius for new image"></label>
+                        <label>Type <select id="imgAssetType" class="px-text-control" style="width:74px;height:24px"><option>FMI</option><option>UBI</option><option>OBMI</option><option>manual</option></select></label>
+                    </div>
+                    <span class="px-upload-meta" id="imgFileName">no file selected</span>
+                    <input id="imgFile" type="file" accept=".png,.jpg,.jpeg,.tif,.tiff,.bmp,image/*" hidden aria-label="Choose an image log file">
+                </section>
+            </div>
+        </div>
+
         <!-- Core Calibration Panel -->
         <div id="corecalPanel" class="panel" style="display:none">
             <div class="panel-toolbar">
@@ -1164,25 +1351,6 @@
                     <div class="empty-state-icon"><i data-lucide="activity"></i></div>
                     <h3>Synthetic Seismogram</h3>
                     <p>Generate synthetic trace from sonic (DT) and density (RHOB). Requires both curves.</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Image Log Panel -->
-        <div id="imagelogPanel" class="panel" style="display:none">
-            <div class="panel-toolbar">
-                <div class="toolbar-group">
-                    <label>Resistivity Image Log</label>
-                    <span class="toolbar-hint">FMI/OBI-lite display — borehole resistivity image from RT curve</span>
-                </div>
-                <button class="btn-primary" onclick="app.runImageLog()"><i data-lucide="refresh-cw"></i> Render</button>
-            </div>
-            <div style="padding:20px">
-                <canvas id="imageLogCanvas" style="width:100%;height:calc(100vh - 200px);background:var(--bg-primary);border-radius:8px;display:none"></canvas>
-                <div id="imageLogEmpty" class="empty-state">
-                    <div class="empty-state-icon"><i data-lucide="image"></i></div>
-                    <h3>Borehole Image Log</h3>
-                    <p>Generate a resistivity image display. Maps RT values to blue-white-red color scale around borehole circumference.</p>
                 </div>
             </div>
         </div>
@@ -1438,6 +1606,8 @@
     <script src="/static/js/templates.js"></script>
     <script src="/static/js/multi-well.js"></script>
     <script src="/static/js/seismic-tie.js"></script>
+    <script src="/static/js/core-scal.js"></script>
+    <script src="/static/js/geomechanics.js"></script>
     <script src="/static/js/image-log.js"></script>
     <script src="/static/js/formation-tester.js"></script>
     <script src="/static/js/collaboration.js"></script>

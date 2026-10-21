@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>GeoLog · Well analysis</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geologica:wght@350;400;500;600;650&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0a0e14;
+      --secondary: #111720;
+      --surface: #1c2433;
+      --surface-raised: #202a3a;
+      --border: #2a3446;
+      --fg: #e8ddd0;
+      --muted: #9aa8b8;
+      --accent: #d4a853;
+      --cyan: #5ba8a0;
+      --success: #4caf7d;
+      --danger: #c75a5a;
+      --font-ui: "Geologica", "Segoe UI", sans-serif;
+      --font-data: "JetBrains Mono", Consolas, monospace;
+      --line: 1px solid var(--border);
+      --r: 3px;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; }
+    body {
+      overflow: hidden;
+      color: var(--fg);
+      background: var(--bg);
+      font: 12px/1.35 var(--font-ui);
+      font-weight: 350;
+      font-feature-settings: "tnum" 1;
+    }
+    button, select, input { font: inherit; }
+    button, select { color: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, select:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+      z-index: 2;
+    }
+    .mono, .num, .data { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+    .muted { color: var(--muted); }
+    .app { display: flex; flex-direction: column; height: 100svh; min-height: 620px; }
+    .topbar {
+      height: 50px; flex: 0 0 50px; display: flex; align-items: center; gap: 20px;
+      padding: 0 18px; background: #0d121a; border-bottom: var(--line);
+    }
+    .brand { display: flex; align-items: center; gap: 9px; min-width: 162px; }
+    .brand-mark { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid #657488; border-radius: 2px; }
+    .brand-mark svg { width: 14px; height: 14px; }
+    .brand-name { font-weight: 600; letter-spacing: .015em; font-size: 14px; }
+    .brand-tag { font: 9px var(--font-data); color: var(--muted); border-left: var(--line); padding-left: 9px; margin-left: 1px; }
+    .well-context { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .well-context strong { font-weight: 500; white-space: nowrap; }
+    .well-context .context-path { color: var(--muted); white-space: nowrap; }
+    .header-right { margin-left: auto; display: flex; align-items: center; gap: 11px; }
+    .connected { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; }
+    .dot { width: 6px; height: 6px; background: var(--success); border-radius: 50%; box-shadow: 0 0 0 2px #4caf7d22; }
+    .icon-button { display: grid; place-items: center; width: 30px; height: 30px; background: transparent; border: 1px solid transparent; border-radius: var(--r); color: var(--muted); }
+    .icon-button:hover { color: var(--fg); background: var(--surface); border-color: var(--border); }
+    .icon-button svg { width: 15px; height: 15px; }
+    .avatar { display: grid; place-items: center; width: 25px; height: 25px; border: var(--line); border-radius: 50%; color: var(--fg); font: 9px var(--font-data); }
+    .tabs { height: 42px; flex: 0 0 42px; display: flex; align-items: stretch; gap: 3px; padding: 0 18px; border-bottom: var(--line); background: var(--secondary); }
+    .tab {
+      position: relative; min-width: 122px; padding: 0 16px; border: 0; border-radius: 0; background: transparent;
+      color: var(--muted); text-align: left; font-size: 11px; font-weight: 400;
+    }
+    .tab:hover { color: var(--fg); background: #ffffff08; }
+    .tab[aria-selected="true"] { color: var(--fg); font-weight: 500; background: #ffffff06; }
+    .tab[aria-selected="true"]::after { content: ""; position: absolute; left: 15px; right: 15px; bottom: -1px; height: 2px; background: var(--accent); }
+    .tab .tab-index { font: 9px var(--font-data); color: #657488; margin-right: 8px; }
+    .view { display: none; flex: 1; min-height: 0; padding: 9px 18px 7px; }
+    .view.active { display: flex; flex-direction: column; gap: 7px; }
+    .toolbar { min-height: 40px; flex: 0 0 40px; display: flex; align-items: center; gap: 9px; border-bottom: var(--line); padding-bottom: 7px; }
+    .toolbar-title { font-size: 12px; font-weight: 500; margin-right: 4px; white-space: nowrap; }
+    .toolbar-meta { color: var(--muted); font-size: 10px; padding-right: 10px; border-right: var(--line); white-space: nowrap; }
+    .field { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+    select, .text-control {
+      height: 29px; padding: 0 9px; border: var(--line); border-radius: var(--r); background: var(--secondary);
+      color: var(--fg); font-size: 10px;
+    }
+    select { min-width: 104px; }
+    .field select { min-width: 120px; }
+    .toolbar-spacer { flex: 1; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 29px; padding: 0 11px; border: var(--line); border-radius: var(--r); background: var(--surface); color: var(--fg); font-size: 10px; font-weight: 500; white-space: nowrap; }
+    .button:hover { background: var(--surface-raised); border-color: #43516a; }
+    .button.secondary { background: transparent; color: var(--fg); }
+    .button.secondary:hover { background: var(--surface); }
+    .button.primary { background: var(--accent); border-color: var(--accent); color: #17130b; font-weight: 600; }
+    .button.primary:hover { background: color-mix(in oklch, var(--accent) 88%, white); border-color: color-mix(in oklch, var(--accent) 88%, white); color: #17130b; }
+    .button svg { width: 13px; height: 13px; }
+    .badge { display: inline-flex; align-items: center; gap: 5px; min-height: 20px; padding: 0 7px; border: 1px solid var(--border); border-radius: 2px; color: var(--muted); font-size: 9px; line-height: 1; white-space: nowrap; }
+    .badge .badge-dot { width: 5px; height: 5px; background: currentColor; border-radius: 50%; }
+    .badge.warn { color: var(--accent); border-color: #755c31; background: #d4a85312; }
+    .badge.ok { color: var(--success); border-color: #31684f; background: #4caf7d10; }
+    .badge.info { color: var(--cyan); border-color: #315e5a; background: #5ba8a010; }
+    .kpis { flex: 0 0 61px; display: grid; grid-template-columns: repeat(5,1fr); border: var(--line); background: var(--secondary); }
+    .kpi { display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 7px 14px; border-right: var(--line); min-width: 0; }
+    .kpi:last-child { border-right: 0; }
+    .kpi-label { color: var(--muted); font-size: 9px; }
+    .kpi-value { display: flex; align-items: baseline; gap: 6px; font: 500 15px/1 var(--font-data); letter-spacing: -.025em; white-space: nowrap; }
+    .kpi-unit { color: var(--muted); font: 9px var(--font-ui); letter-spacing: 0; }
+    .kpi-value .accent { color: var(--accent); }
+    .core-workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.06fr); gap: 8px; }
+    .panel { min-width: 0; min-height: 0; border: var(--line); background: var(--secondary); }
+    .panel-head { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 11px; border-bottom: var(--line); }
+    .panel-head h2, .panel-head h3 { margin: 0; font-size: 11px; font-weight: 500; }
+    .panel-head .head-meta { color: var(--muted); font-size: 9px; margin-left: auto; }
+    .table-panel { display: flex; flex-direction: column; }
+    .table-controls { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 9px; }
+    .table-wrap { min-height: 0; flex: 1; overflow: auto; scrollbar-color: #344055 transparent; scrollbar-width: thin; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th { height: 28px; padding: 0 7px; text-align: right; color: var(--muted); font-weight: 400; font-size: 9px; white-space: nowrap; background: #131a24; border-bottom: var(--line); }
+    td { height: 31px; padding: 0 7px; text-align: right; color: #d5d4ce; font: 10px var(--font-data); border-bottom: 1px solid #222c3b; white-space: nowrap; }
+    th:first-child, td:first-child { text-align: left; padding-left: 11px; }
+    .plug-table th:nth-child(1) { width: 76px; }
+    .plug-table th:nth-child(2) { width: 62px; }
+    .plug-table th:nth-child(3) { width: 86px; text-align: left; }
+    .plug-table td:nth-child(3) { text-align: left; font-family: var(--font-ui); font-size: 9px; }
+    .plug-table th:nth-child(4) { width: 52px; }
+    .plug-table th:nth-child(5) { width: 65px; }
+    .plug-table th:nth-child(6) { width: 45px; }
+    .plug-table th:nth-child(7) { width: 70px; text-align: left; }
+    .plug-table td:nth-child(7) { text-align: left; font-family: var(--font-ui); font-size: 9px; }
+    .plug-table th:nth-child(8) { width: 49px; text-align: center; }
+    .plug-table td:nth-child(8) { text-align: center; }
+    .plug-row { cursor: pointer; }
+    .plug-row:hover { background: #ffffff08; }
+    .plug-row[aria-selected="true"] { background: #d4a85314; box-shadow: inset 2px 0 var(--accent); }
+    .plug-id { color: var(--fg); font-weight: 500; }
+    .rock { color: #b4c2cd; }
+    .qc { display: inline-grid; place-items: center; width: 17px; height: 16px; border-radius: 2px; font: 9px var(--font-data); }
+    .qc.pass { color: var(--success); background: #4caf7d17; }
+    .qc.review { color: var(--accent); background: #d4a85318; }
+    .table-foot { height: 27px; flex: 0 0 27px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; color: var(--muted); font-size: 9px; border-top: var(--line); }
+    .pager { display: flex; gap: 4px; align-items: center; }
+    .pager button { height: 18px; min-width: 20px; padding: 0 5px; border: 1px solid transparent; background: transparent; color: var(--muted); font: 9px var(--font-data); }
+    .pager button:hover { color: var(--fg); background: var(--surface); border-color: var(--border); }
+    .core-analysis { min-height: 0; display: grid; grid-template-rows: minmax(0, 1.8fr) minmax(0, 1fr); gap: 8px; }
+    .chart-panel { display: flex; flex-direction: column; }
+    .chart-heading { display: flex; align-items: center; gap: 9px; }
+    .chart-heading .chart-sub { color: var(--muted); font: 9px var(--font-data); }
+    .chart-tools { display: flex; align-items: center; gap: 7px; margin-left: auto; color: var(--muted); font-size: 9px; }
+    .legend { display: flex; gap: 11px; align-items: center; margin-left: auto; color: var(--muted); font-size: 9px; }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .swatch { width: 10px; height: 2px; background: currentColor; }
+    .swatch.dot-swatch { width: 6px; height: 6px; border-radius: 50%; }
+    .chart-svg { display: block; width: 100%; min-height: 0; flex: 1; }
+    .chart-svg text, .profile-svg text { font-family: var(--font-data); font-size: 9px; fill: var(--muted); }
+    .gridline { stroke: #2a3446; stroke-width: 1; }
+    .axisline { stroke: #586579; stroke-width: 1; }
+    .summary-strip { flex: 0 0 56px; display: grid; grid-template-columns: 1.45fr repeat(3,1fr) 1.4fr; align-items: center; border: var(--line); background: var(--secondary); }
+    .summary-item { min-width: 0; padding: 0 13px; border-right: var(--line); }
+    .summary-item:last-child { border-right: 0; }
+    .summary-label { display: block; color: var(--muted); font-size: 9px; margin-bottom: 3px; }
+    .summary-value { font: 11px var(--font-data); white-space: nowrap; }
+    .summary-value strong { color: var(--fg); font-weight: 500; }
+    .summary-selection { display: flex; align-items: center; gap: 8px; }
+    .summary-selection .plug-big { font: 600 13px var(--font-data); color: var(--accent); }
+    .summary-selection .formation { font-size: 9px; color: var(--muted); }
+    .geo-controls { min-height: 40px; flex: 0 0 40px; display: flex; align-items: center; gap: 8px; border-bottom: var(--line); padding-bottom: 7px; }
+    .geo-controls .toolbar-title { margin-right: 3px; }
+    .geo-main { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, .9fr); gap: 8px; }
+    .profile-panel { display: flex; flex-direction: column; }
+    .profile-svg { display: block; width: 100%; min-height: 0; flex: 1; }
+    .profile-legend { display: flex; align-items: center; gap: 14px; margin-left: auto; font-size: 9px; color: var(--muted); }
+    .profile-legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .profile-legend i { display: inline-block; width: 11px; height: 2px; background: var(--fg); }
+    .profile-legend .sv { background: #d9e0df; }
+    .profile-legend .pp { background: var(--cyan); }
+    .profile-legend .shmin { background: var(--accent); }
+    .profile-legend .shmax { background: #91a4d0; }
+    .profile-legend .mw { width: 10px; height: 8px; background: #d4a85330; border: 1px solid #d4a85360; }
+    .provenance-panel { display: flex; flex-direction: column; }
+    .prov-body { min-height: 0; padding: 9px 11px; display: flex; flex-direction: column; gap: 10px; }
+    .prov-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px; }
+    .prov-item { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .prov-label { color: var(--muted); font-size: 9px; }
+    .prov-value { display: flex; align-items: center; gap: 6px; min-height: 18px; font-size: 10px; white-space: nowrap; }
+    .prov-value .badge { min-height: 16px; font-size: 8px; }
+    .subhead { display: flex; align-items: center; justify-content: space-between; padding-top: 7px; border-top: var(--line); color: var(--muted); font-size: 9px; }
+    .cal-list { display: flex; flex-direction: column; }
+    .cal-row { height: 25px; display: grid; grid-template-columns: 1fr 68px 70px 50px; align-items: center; border-bottom: 1px solid #222c3b; font-size: 9px; }
+    .cal-row:last-child { border-bottom: 0; }
+    .cal-row .data { text-align: right; font-size: 9px; }
+    .geo-kpis { display: grid; grid-template-columns: 1fr 1fr; border: var(--line); background: #131a24; }
+    .geo-kpi { padding: 7px 9px; border-right: var(--line); }
+    .geo-kpi:last-child { border-right: 0; }
+    .geo-kpi .prov-label { display: block; margin-bottom: 3px; }
+    .geo-kpi strong { font: 500 13px var(--font-data); }
+    .screening-note { color: var(--muted); font-size: 9px; line-height: 1.4; }
+    .failure-panel { flex: 0 0 171px; display: flex; flex-direction: column; }
+    .failure-panel .panel-head { height: 31px; flex-basis: 31px; }
+    .failure-panel .table-wrap { overflow: hidden; }
+    .failure-table th { height: 24px; }
+    .failure-table td { height: 22px; font-size: 9px; }
+    .failure-table th:first-child, .failure-table td:first-child { text-align: left; }
+    .failure-table td { text-align: right; }
+    .risk { display: inline-flex; align-items: center; gap: 4px; padding: 2px 5px; border-radius: 2px; font: 8px var(--font-ui); }
+    .risk.low { background: #4caf7d18; color: var(--success); }
+    .risk.watch { background: #d4a85319; color: var(--accent); }
+    .risk.high { background: #c75a5a1a; color: #e28181; }
+    .geo-foot { flex: 0 0 18px; display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 9px; }
+    .image-controls { min-height: 40px; flex: 0 0 40px; display: flex; align-items: center; gap: 9px; border-bottom: var(--line); padding-bottom: 7px; }
+    .image-controls .field { gap: 5px; }
+    .image-controls select { min-width: 150px; }
+    .image-controls .range-field input { width: 92px; }
+    .image-controls .text-control { width: 64px; padding: 0 6px; }
+    .image-main { flex: 1; min-height: 0; display: grid; grid-template-columns: 394px minmax(0,1fr); gap: 8px; }
+    .image-panel { display: flex; flex-direction: column; }
+    .image-panel .panel-head { flex: 0 0 33px; }
+    .unwrapped-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 57px 256px 1fr; grid-template-rows: 29px 1fr; padding: 8px 10px 9px; }
+    .axis-corner { display: grid; place-items: center; color: var(--muted); font: 8px var(--font-data); border-bottom: 1px solid var(--border); }
+    .azimuth-axis { display: flex; justify-content: space-between; align-items: center; padding: 0 2px; color: var(--muted); font: 8px var(--font-data); border-bottom: 1px solid var(--border); }
+    .depth-axis { position: relative; display: flex; flex-direction: column; justify-content: space-between; padding: 0 7px 0 0; color: var(--muted); font: 8px var(--font-data); text-align: right; }
+    .depth-axis span { position: relative; padding-right: 6px; }
+    .depth-axis span::after { content: ""; position: absolute; top: 50%; right: -1px; width: 6px; border-top: 1px solid #657488; }
+    .image-map { position: relative; width: 256px; height: 100%; min-height: 390px; max-height: 520px; border: 1px solid #647080; background: #53565a; overflow: hidden; }
+    #boreholeCanvas { width: 256px; height: 100%; display: block; image-rendering: pixelated; }
+    .image-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    .image-overlay .az-grid { stroke: #e8ddd033; stroke-width: .7; stroke-dasharray: 2 4; }
+    .image-overlay .dip-trace { fill: none; stroke: var(--accent); }
+    .image-overlay .pick-dot { fill: var(--accent); stroke: #131820; stroke-width: 1.5; }
+    .image-overlay .pick-halo { fill: #d4a85324; stroke: #d4a853aa; stroke-width: 1; }
+    .image-caption { grid-column: 2 / 4; display: flex; justify-content: space-between; align-items: center; padding-top: 5px; color: var(--muted); font-size: 8px; }
+    .pick-workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(280px, .9fr); gap: 8px; }
+    .pick-panel { display: flex; flex-direction: column; }
+    .pick-table th { height: 28px; }
+    .pick-table td { height: 31px; font-size: 9px; }
+    .pick-table th:nth-child(1) { width: 72px; text-align: left; }
+    .pick-table th:nth-child(2), .pick-table th:nth-child(3), .pick-table th:nth-child(4) { width: 57px; }
+    .pick-table th:nth-child(5) { width: 75px; text-align: center; }
+    .pick-table th:nth-child(6) { width: 54px; text-align: center; }
+    .pick-table td:nth-child(1) { text-align: left; }
+    .pick-table td:nth-child(5), .pick-table td:nth-child(6) { text-align: center; }
+    .pick-row { cursor: pointer; }
+    .pick-row:hover { background: #ffffff08; }
+    .pick-row[aria-selected="true"] { background: #5ba8a012; box-shadow: inset 2px 0 var(--cyan); }
+    .quality { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; padding: 2px 4px; border-radius: 2px; color: var(--success); background: #4caf7d17; font: 8px var(--font-ui); }
+    .quality.fair { color: var(--accent); background: #d4a85318; }
+    input[type="checkbox"] { width: 13px; height: 13px; accent-color: var(--accent); vertical-align: middle; cursor: pointer; }
+    .pick-detail { display: flex; flex-direction: column; }
+    .pick-detail-content { flex: 1; min-height: 0; padding: 9px 11px; display: grid; grid-template-columns: minmax(0,1fr) 112px; gap: 10px; }
+    .detail-values { display: flex; flex-direction: column; gap: 8px; }
+    .detail-row { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid #222c3b; padding-bottom: 5px; }
+    .detail-row:last-child { border-bottom: 0; }
+    .detail-row span:first-child { color: var(--muted); font-size: 9px; }
+    .detail-row strong { font: 10px var(--font-data); font-weight: 500; white-space: nowrap; }
+    .dip-glyph { width: 112px; align-self: center; text-align: center; }
+    .dip-glyph svg { display: block; width: 104px; height: 104px; margin: 0 auto 4px; }
+    .dip-glyph p { margin: 0; color: var(--muted); font-size: 8px; }
+    .upload-bar { flex: 0 0 48px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border: 1px dashed #43516a; background: #111720; color: var(--muted); }
+    .upload-bar.dragover { border-color: var(--accent); background: #d4a85310; }
+    .upload-icon { width: 18px; height: 18px; color: var(--cyan); flex: 0 0 auto; }
+    .upload-bar strong { color: var(--fg); font-weight: 500; }
+    .upload-meta { margin-left: auto; font: 9px var(--font-data); white-space: nowrap; }
+    .statusbar { height: 19px; flex: 0 0 19px; display: flex; align-items: center; gap: 15px; padding: 0 18px; border-top: var(--line); color: #778598; font-size: 9px; background: #0d121a; }
+    .statusbar .status-right { margin-left: auto; display: flex; gap: 13px; }
+    .statusbar .status-live { display: inline-flex; align-items: center; gap: 5px; }
+    .statusbar .status-live::before { content: ""; width: 5px; height: 5px; background: var(--success); border-radius: 50%; }
+    [hidden] { display: none !important; }
+    @media (max-width: 1080px) {
+      .topbar { gap: 11px; padding: 0 12px; }
+      .brand { min-width: auto; }
+      .brand-tag, .well-context .context-path, .connected { display: none; }
+      .view { padding-left: 12px; padding-right: 12px; }
+      .plug-table th:nth-child(3), .plug-table td:nth-child(3) { display: none; }
+      .geo-main { grid-template-columns: minmax(0, 1.35fr) minmax(280px, .9fr); }
+      .image-main { grid-template-columns: 350px minmax(0,1fr); }
+      .unwrapped-layout { grid-template-columns: 47px 256px 1fr; padding-left: 7px; padding-right: 7px; }
+      .pick-workspace { grid-template-columns: minmax(0,1.1fr) minmax(250px,.9fr); }
+      .profile-legend { gap: 8px; }
+    }
+    @media (max-width: 760px) {
+      body { overflow: auto; }
+      .app { height: auto; min-height: 100svh; }
+      .topbar { height: 48px; flex-basis: 48px; }
+      .header-right .avatar { display: none; }
+      .well-context { font-size: 10px; }
+      .tabs { padding: 0 8px; height: 40px; flex-basis: 40px; }
+      .tab { min-width: 0; flex: 1; padding: 0 6px; font-size: 10px; text-align: center; }
+      .tab .tab-index { display: none; }
+      .view { min-height: 780px; padding: 8px; }
+      .view.active { overflow: visible; }
+      .toolbar, .geo-controls, .image-controls { height: auto; min-height: 40px; flex: 0 0 auto; flex-wrap: wrap; }
+      .toolbar-spacer { display: none; }
+      .kpis { flex-basis: auto; grid-template-columns: repeat(2,1fr); }
+      .kpi { min-height: 54px; border-bottom: var(--line); }
+      .kpi:last-child { border-bottom: 0; }
+      .core-workspace, .geo-main, .image-main { display: flex; flex-direction: column; }
+      .table-panel { min-height: 365px; }
+      .core-analysis { min-height: 455px; }
+      .summary-strip { min-height: 108px; grid-template-columns: repeat(2,1fr); }
+      .summary-item { min-height: 48px; display: flex; flex-direction: column; justify-content: center; border-bottom: var(--line); }
+      .summary-item:nth-child(2n) { border-right: 0; }
+      .summary-item:last-child { grid-column: 1 / -1; border-bottom: 0; }
+      .geo-main { min-height: 680px; }
+      .profile-panel { min-height: 430px; }
+      .provenance-panel { min-height: 325px; }
+      .failure-panel { flex: 0 0 171px; }
+      .image-main { min-height: 1040px; }
+      .image-panel { min-height: 600px; }
+      .image-panel .unwrapped-layout { justify-content: center; }
+      .pick-workspace { min-height: 430px; grid-template-columns: 1fr; grid-template-rows: 220px 1fr; }
+      .upload-bar { min-height: 48px; flex-wrap: wrap; }
+      .upload-meta { margin-left: 0; }
+      .statusbar { position: sticky; bottom: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+    @media print {
+      body { overflow: visible; background: white; color: #111; }
+      .topbar, .tabs, .statusbar, .button, .toolbar .button, .geo-controls .button { display: none !important; }
+      .view { display: none !important; height: auto; }
+      .view.active { display: flex !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app" data-od-id="geolog-app-shell">
+    <header class="topbar" data-od-id="global-header">
+      <div class="brand" aria-label="GeoLog">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none"><path d="M2 12.8 5.1 4l2.8 6.2 2-4.1 4.1 6.7H2Z" stroke="#d4a853" stroke-width="1.1"/><path d="M3 13.8h10" stroke="#9aa8b8" stroke-width=".8"/></svg></span>
+        <span class="brand-name">GeoLog</span><span class="brand-tag">WELL ANALYSIS</span>
+      </div>
+      <div class="well-context"><strong>Well 14/20b-A17</strong><span class="context-path">North Sea / Brent Group</span><span class="badge info">ACTIVE WELL</span></div>
+      <div class="header-right">
+        <span class="connected"><i class="dot"></i>Project synced</span>
+        <span class="avatar" aria-label="Signed in as M. Rios">MR</span>
+      </div>
+    </header>
+    <nav class="tabs" role="tablist" aria-label="Analysis views" data-od-id="analysis-tabs">
+      <button class="tab" id="tab-core" type="button" role="tab" aria-selected="true" aria-controls="view-core" data-view="core" data-od-id="tab-core-scal"><span class="tab-index">01</span>Core / SCAL</button>
+      <button class="tab" id="tab-geo" type="button" role="tab" aria-selected="false" aria-controls="view-geo" data-view="geo" tabindex="-1" data-od-id="tab-geomechanics"><span class="tab-index">02</span>Geomechanics</button>
+      <button class="tab" id="tab-image" type="button" role="tab" aria-selected="false" aria-controls="view-image" data-view="image" tabindex="-1" data-od-id="tab-image-log"><span class="tab-index">03</span>Image Log</button>
+    </nav>
+
+    <main class="view active" id="view-core" role="tabpanel" aria-labelledby="tab-core" data-view-panel="core" data-od-id="core-scal-view">
+      <section class="toolbar" aria-label="Core dataset controls" data-od-id="core-toolbar">
+        <span class="toolbar-title" data-od-id="core-view-title">Core analysis</span>
+        <select id="datasetVersion" aria-label="Dataset version" data-od-id="dataset-version"><option>Core v3 · draft</option><option>Core v2 · approved</option><option>Core v1 · archived</option></select>
+        <label class="field" for="coreSource">Source <select id="coreSource" data-od-id="core-source"><option>Lab batch 24-118</option><option>Lab batch 24-105</option></select></label>
+        <span class="toolbar-spacer"></span>
+        <button class="button secondary" type="button" id="importCsv" data-od-id="import-csv"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 10V2.5M5.2 5.3 8 2.5l2.8 2.8M2.5 9.5v3h11v-3"/></svg>Import CSV</button>
+        <input id="csvFile" type="file" accept=".csv,text/csv" hidden aria-label="Choose a core data CSV file" data-od-id="csv-file-input">
+        <button class="button primary" type="button" id="approveDataset" data-od-id="approve-dataset"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m3 8.2 3.1 3L13 4.5"/></svg>Approve dataset</button>
+        <span class="badge warn" id="datasetStatus" aria-live="polite" data-od-id="dataset-status"><i class="badge-dot"></i>Draft · not approved</span>
+      </section>
+      <section class="kpis" aria-label="Core dataset summary" data-od-id="core-kpi-strip">
+        <div class="kpi" data-od-id="kpi-plug-count"><span class="kpi-label">PLUGS</span><span class="kpi-value">24 <span class="kpi-unit">samples</span></span></div>
+        <div class="kpi" data-od-id="kpi-porosity"><span class="kpi-label">POROSITY</span><span class="kpi-value">18.2–24.8 <span class="kpi-unit">%</span></span></div>
+        <div class="kpi" data-od-id="kpi-permeability"><span class="kpi-label">AIR PERM</span><span class="kpi-value">3–420 <span class="kpi-unit">mD</span></span></div>
+        <div class="kpi" data-od-id="kpi-fzi"><span class="kpi-label">FZI CLUSTERS</span><span class="kpi-value">3 <span class="kpi-unit">rock types</span></span></div>
+        <div class="kpi" data-od-id="kpi-approved"><span class="kpi-label">APPROVED</span><span class="kpi-value"><span class="accent" id="approvedPercent">76</span><span class="kpi-unit">%</span></span></div>
+      </section>
+      <div class="core-workspace" data-od-id="core-analysis-workspace">
+        <section class="panel table-panel" aria-labelledby="plug-table-title" data-od-id="plug-table-panel">
+          <div class="panel-head"><h2 id="plug-table-title" data-od-id="plug-table-heading">Core plug measurements</h2><div class="table-controls"><span>Sort · MD ↑</span></div></div>
+          <div class="table-wrap">
+            <table class="plug-table" aria-label="Core plug measurements">
+              <thead><tr><th scope="col">Plug</th><th scope="col">MD</th><th scope="col">Formation</th><th scope="col">Phi %</th><th scope="col">Kair mD</th><th scope="col">FZI</th><th scope="col">Rock type</th><th scope="col">QC</th></tr></thead>
+              <tbody>
+                <tr class="plug-row" tabindex="0" aria-selected="true" data-plug="A17-042" data-depth="1,046.2" data-phi="22.6" data-k="186" data-fzi="4.7" data-rock="Clean sand" data-r2="0.982" data-sw="31.4" data-flow="FU-2 · good quality" data-od-id="plug-row-a17-042"><td class="plug-id">A17-042</td><td>1046.2</td><td>Brent C</td><td>22.6</td><td>186</td><td>4.7</td><td class="rock">Clean sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-043" data-depth="1,047.0" data-phi="21.8" data-k="142" data-fzi="4.1" data-rock="Clean sand" data-r2="0.976" data-sw="34.8" data-flow="FU-2 · good quality" data-od-id="plug-row-a17-043"><td class="plug-id">A17-043</td><td>1047.0</td><td>Brent C</td><td>21.8</td><td>142</td><td>4.1</td><td class="rock">Clean sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-044" data-depth="1,048.1" data-phi="24.1" data-k="420" data-fzi="5.2" data-rock="Coarse sand" data-r2="0.991" data-sw="26.2" data-flow="FU-3 · high quality" data-od-id="plug-row-a17-044"><td class="plug-id">A17-044</td><td>1048.1</td><td>Brent C</td><td>24.1</td><td>420</td><td>5.2</td><td class="rock">Coarse sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-045" data-depth="1,049.4" data-phi="19.3" data-k="38" data-fzi="2.8" data-rock="Fine sand" data-r2="0.948" data-sw="46.1" data-flow="FU-1 · moderate" data-od-id="plug-row-a17-045"><td class="plug-id">A17-045</td><td>1049.4</td><td>Brent C</td><td>19.3</td><td>38</td><td>2.8</td><td class="rock">Fine sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-046" data-depth="1,051.0" data-phi="18.2" data-k="12" data-fzi="1.9" data-rock="Silty sand" data-r2="0.812" data-sw="59.7" data-flow="FU-1 · moderate" data-od-id="plug-row-a17-046"><td class="plug-id">A17-046</td><td>1051.0</td><td>Brent B2</td><td>18.2</td><td>12</td><td>1.9</td><td class="rock">Silty sand</td><td><span class="qc review" title="Review required">!</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-047" data-depth="1,052.7" data-phi="23.4" data-k="264" data-fzi="4.9" data-rock="Coarse sand" data-r2="0.986" data-sw="29.5" data-flow="FU-3 · high quality" data-od-id="plug-row-a17-047"><td class="plug-id">A17-047</td><td>1052.7</td><td>Brent B2</td><td>23.4</td><td>264</td><td>4.9</td><td class="rock">Coarse sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-048" data-depth="1,054.3" data-phi="20.7" data-k="76" data-fzi="3.3" data-rock="Fine sand" data-r2="0.963" data-sw="39.2" data-flow="FU-2 · good quality" data-od-id="plug-row-a17-048"><td class="plug-id">A17-048</td><td>1054.3</td><td>Brent B2</td><td>20.7</td><td>76</td><td>3.3</td><td class="rock">Fine sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-049" data-depth="1,056.0" data-phi="22.1" data-k="118" data-fzi="3.9" data-rock="Clean sand" data-r2="0.973" data-sw="35.5" data-flow="FU-2 · good quality" data-od-id="plug-row-a17-049"><td class="plug-id">A17-049</td><td>1056.0</td><td>Brent B2</td><td>22.1</td><td>118</td><td>3.9</td><td class="rock">Clean sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-050" data-depth="1,058.5" data-phi="18.9" data-k="3" data-fzi="1.2" data-rock="Silty sand" data-r2="0.785" data-sw="64.3" data-flow="FU-1 · moderate" data-od-id="plug-row-a17-050"><td class="plug-id">A17-050</td><td>1058.5</td><td>Brent B1</td><td>18.9</td><td>3</td><td>1.2</td><td class="rock">Silty sand</td><td><span class="qc review" title="Review required">!</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-051" data-depth="1,060.2" data-phi="24.8" data-k="388" data-fzi="5.0" data-rock="Coarse sand" data-r2="0.989" data-sw="27.8" data-flow="FU-3 · high quality" data-od-id="plug-row-a17-051"><td class="plug-id">A17-051</td><td>1060.2</td><td>Brent B1</td><td>24.8</td><td>388</td><td>5.0</td><td class="rock">Coarse sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-052" data-depth="1,061.8" data-phi="23.1" data-k="208" data-fzi="4.6" data-rock="Coarse sand" data-r2="0.984" data-sw="30.2" data-flow="FU-3 · high quality" data-od-id="plug-row-a17-052"><td class="plug-id">A17-052</td><td>1061.8</td><td>Brent B1</td><td>23.1</td><td>208</td><td>4.6</td><td class="rock">Coarse sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-053" data-depth="1,063.4" data-phi="21.4" data-k="96" data-fzi="3.5" data-rock="Fine sand" data-r2="0.965" data-sw="37.8" data-flow="FU-2 · good quality" data-od-id="plug-row-a17-053"><td class="plug-id">A17-053</td><td>1063.4</td><td>Brent B1</td><td>21.4</td><td>96</td><td>3.5</td><td class="rock">Fine sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-054" data-depth="1,064.9" data-phi="19.8" data-k="26" data-fzi="2.2" data-rock="Silty sand" data-r2="0.851" data-sw="51.3" data-flow="FU-1 · moderate" data-od-id="plug-row-a17-054"><td class="plug-id">A17-054</td><td>1064.9</td><td>Brent B1</td><td>19.8</td><td>26</td><td>2.2</td><td class="rock">Silty sand</td><td><span class="qc review" title="Review required">!</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-055" data-depth="1,066.3" data-phi="22.7" data-k="174" data-fzi="4.3" data-rock="Clean sand" data-r2="0.979" data-sw="32.6" data-flow="FU-2 · good quality" data-od-id="plug-row-a17-055"><td class="plug-id">A17-055</td><td>1066.3</td><td>Brent B1</td><td>22.7</td><td>174</td><td>4.3</td><td class="rock">Clean sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-056" data-depth="1,068.0" data-phi="20.1" data-k="54" data-fzi="3.0" data-rock="Fine sand" data-r2="0.957" data-sw="43.4" data-flow="FU-2 · good quality" data-od-id="plug-row-a17-056"><td class="plug-id">A17-056</td><td>1068.0</td><td>Brent B1</td><td>20.1</td><td>54</td><td>3.0</td><td class="rock">Fine sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-057" data-depth="1,069.5" data-phi="23.8" data-k="312" data-fzi="5.1" data-rock="Coarse sand" data-r2="0.988" data-sw="28.4" data-flow="FU-3 · high quality" data-od-id="plug-row-a17-057"><td class="plug-id">A17-057</td><td>1069.5</td><td>Brent A2</td><td>23.8</td><td>312</td><td>5.1</td><td class="rock">Coarse sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-058" data-depth="1,071.2" data-phi="22.0" data-k="124" data-fzi="3.9" data-rock="Clean sand" data-r2="0.972" data-sw="35.9" data-flow="FU-2 · good quality" data-od-id="plug-row-a17-058"><td class="plug-id">A17-058</td><td>1071.2</td><td>Brent A2</td><td>22.0</td><td>124</td><td>3.9</td><td class="rock">Clean sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-059" data-depth="1,072.6" data-phi="18.7" data-k="8" data-fzi="1.7" data-rock="Silty sand" data-r2="0.806" data-sw="62.1" data-flow="FU-1 · moderate" data-od-id="plug-row-a17-059"><td class="plug-id">A17-059</td><td>1072.6</td><td>Brent A2</td><td>18.7</td><td>8</td><td>1.7</td><td class="rock">Silty sand</td><td><span class="qc review" title="Review required">!</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-060" data-depth="1,074.1" data-phi="24.3" data-k="396" data-fzi="5.3" data-rock="Coarse sand" data-r2="0.992" data-sw="25.9" data-flow="FU-3 · high quality" data-od-id="plug-row-a17-060"><td class="plug-id">A17-060</td><td>1074.1</td><td>Brent A2</td><td>24.3</td><td>396</td><td>5.3</td><td class="rock">Coarse sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-061" data-depth="1,075.8" data-phi="20.9" data-k="68" data-fzi="3.2" data-rock="Fine sand" data-r2="0.959" data-sw="40.8" data-flow="FU-2 · good quality" data-od-id="plug-row-a17-061"><td class="plug-id">A17-061</td><td>1075.8</td><td>Brent A2</td><td>20.9</td><td>68</td><td>3.2</td><td class="rock">Fine sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-062" data-depth="1,077.2" data-phi="21.7" data-k="103" data-fzi="3.7" data-rock="Clean sand" data-r2="0.971" data-sw="36.8" data-flow="FU-2 · good quality" data-od-id="plug-row-a17-062"><td class="plug-id">A17-062</td><td>1077.2</td><td>Brent A1</td><td>21.7</td><td>103</td><td>3.7</td><td class="rock">Clean sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-063" data-depth="1,079.0" data-phi="19.1" data-k="18" data-fzi="2.0" data-rock="Silty sand" data-r2="0.833" data-sw="56.2" data-flow="FU-1 · moderate" data-od-id="plug-row-a17-063"><td class="plug-id">A17-063</td><td>1079.0</td><td>Brent A1</td><td>19.1</td><td>18</td><td>2.0</td><td class="rock">Silty sand</td><td><span class="qc review" title="Review required">!</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-064" data-depth="1,081.6" data-phi="23.6" data-k="278" data-fzi="4.8" data-rock="Coarse sand" data-r2="0.986" data-sw="29.1" data-flow="FU-3 · high quality" data-od-id="plug-row-a17-064"><td class="plug-id">A17-064</td><td>1081.6</td><td>Brent A1</td><td>23.6</td><td>278</td><td>4.8</td><td class="rock">Coarse sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+                <tr class="plug-row" tabindex="0" aria-selected="false" data-plug="A17-065" data-depth="1,084.1" data-phi="20.4" data-k="61" data-fzi="3.1" data-rock="Fine sand" data-r2="0.952" data-sw="42.3" data-flow="FU-2 · good quality" data-od-id="plug-row-a17-065"><td class="plug-id">A17-065</td><td>1084.1</td><td>Brent A1</td><td>20.4</td><td>61</td><td>3.1</td><td class="rock">Fine sand</td><td><span class="qc pass" title="QC passed">✓</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-foot"><span>24 measurements · scroll to review all plugs</span><span class="mono">2 QC REVIEW</span></div>
+        </section>
+        <section class="core-analysis" aria-label="Core analysis plots" data-od-id="core-plots">
+          <figure class="panel chart-panel" aria-labelledby="crossplot-title" data-od-id="phi-perm-crossplot" style="margin:0">
+            <div class="panel-head"><div class="chart-heading"><h2 id="crossplot-title" data-od-id="crossplot-heading">Porosity – permeability</h2><span class="chart-sub">log Kair</span></div><div class="legend"><span><i class="swatch" style="color:#5ba8a0"></i>FZI 2.0</span><span><i class="swatch" style="color:#d4a853"></i>FZI 3.5</span><span><i class="swatch" style="color:#91a4d0"></i>FZI 5.0</span></div></div>
+            <svg class="chart-svg" viewBox="0 0 640 278" role="img" aria-label="Porosity versus air permeability crossplot with three flow zone indicator lines">
+              <g><line class="gridline" x1="52" y1="20" x2="615" y2="20"/><line class="gridline" x1="52" y1="68" x2="615" y2="68"/><line class="gridline" x1="52" y1="116" x2="615" y2="116"/><line class="gridline" x1="52" y1="164" x2="615" y2="164"/><line class="gridline" x1="52" y1="212" x2="615" y2="212"/>
+                <line class="gridline" x1="52" y1="20" x2="52" y2="212"/><line class="gridline" x1="146" y1="20" x2="146" y2="212"/><line class="gridline" x1="240" y1="20" x2="240" y2="212"/><line class="gridline" x1="334" y1="20" x2="334" y2="212"/><line class="gridline" x1="428" y1="20" x2="428" y2="212"/><line class="gridline" x1="522" y1="20" x2="522" y2="212"/><line class="gridline" x1="615" y1="20" x2="615" y2="212"/>
+                <line class="axisline" x1="52" y1="212" x2="615" y2="212"/><line class="axisline" x1="52" y1="20" x2="52" y2="212"/></g>
+              <g fill="none" stroke-width="1.5" stroke-dasharray="5 4" opacity=".8"><path d="M93 205 C175 187 260 168 340 139 S490 99 585 77" stroke="#5ba8a0"/><path d="M93 186 C177 165 258 143 340 115 S486 76 585 51" stroke="#d4a853"/><path d="M93 168 C175 146 258 122 340 92 S484 55 585 30" stroke="#91a4d0"/></g>
+              <g fill="#aab9c6" stroke="#111720" stroke-width="1.3"><circle cx="365" cy="93" r="5" fill="#d4a853"/><circle cx="350" cy="102" r="3.7"/><circle cx="414" cy="68" r="3.7"/><circle cx="291" cy="132" r="3.7"/><circle cx="247" cy="157" r="3.7"/><circle cx="325" cy="114" r="3.7"/><circle cx="380" cy="87" r="3.7"/><circle cx="343" cy="107" r="3.7"/><circle cx="194" cy="176" r="3.7"/><circle cx="443" cy="61" r="3.7"/><circle cx="401" cy="77" r="3.7"/><circle cx="300" cy="126" r="3.7"/></g>
+              <g text-anchor="end"><text x="44" y="215">1</text><text x="44" y="167">10</text><text x="44" y="119">100</text><text x="44" y="71">1k</text><text x="44" y="23">10k</text></g>
+              <g text-anchor="middle"><text x="52" y="229">10</text><text x="146" y="229">14</text><text x="240" y="229">18</text><text x="334" y="229">22</text><text x="428" y="229">26</text><text x="522" y="229">30</text><text x="615" y="229">34</text><text x="334" y="254" fill="#9aa8b8">Porosity (%)</text></g>
+              <text transform="translate(13 118) rotate(-90)" text-anchor="middle">Kair (mD)</text>
+              <text x="375" y="88" fill="#e8ddd0">A17-042</text>
+            </svg>
+          </figure>
+          <figure class="panel chart-panel" aria-labelledby="capillary-title" data-od-id="capillary-pressure-panel" style="margin:0">
+            <div class="panel-head"><div class="chart-heading"><h2 id="capillary-title" data-od-id="capillary-heading">Capillary pressure · centrifuge</h2><span class="chart-sub">A17-042</span></div><div class="chart-tools"><span class="badge info">AIR–BRINE</span><span>Lab 24-118</span></div></div>
+            <svg class="chart-svg" viewBox="0 0 640 150" role="img" aria-label="Capillary pressure curve by water saturation">
+              <g><line class="gridline" x1="52" y1="20" x2="615" y2="20"/><line class="gridline" x1="52" y1="55" x2="615" y2="55"/><line class="gridline" x1="52" y1="90" x2="615" y2="90"/><line class="gridline" x1="52" y1="125" x2="615" y2="125"/><line class="gridline" x1="52" y1="20" x2="52" y2="125"/><line class="gridline" x1="193" y1="20" x2="193" y2="125"/><line class="gridline" x1="334" y1="20" x2="334" y2="125"/><line class="gridline" x1="475" y1="20" x2="475" y2="125"/><line class="gridline" x1="615" y1="20" x2="615" y2="125"/><line class="axisline" x1="52" y1="125" x2="615" y2="125"/><line class="axisline" x1="52" y1="20" x2="52" y2="125"/></g>
+              <path d="M52 119 C100 117 139 114 181 109 S254 99 300 90 S371 78 416 66 S482 52 522 41 S576 28 615 23" fill="none" stroke="#5ba8a0" stroke-width="2"/>
+              <path d="M52 119 C100 117 139 114 181 109 S254 99 300 90 S371 78 416 66 S482 52 522 41 S576 28 615 23 L615 125 L52 125Z" fill="#5ba8a012"/>
+              <g fill="#5ba8a0" stroke="#111720" stroke-width="1"><circle cx="52" cy="119" r="2.7"/><circle cx="181" cy="109" r="2.7"/><circle cx="300" cy="90" r="2.7"/><circle cx="416" cy="66" r="2.7"/><circle cx="522" cy="41" r="2.7"/><circle cx="615" cy="23" r="2.7"/></g>
+              <g text-anchor="end"><text x="44" y="128">0</text><text x="44" y="93">40</text><text x="44" y="58">80</text><text x="44" y="23">120</text></g>
+              <g text-anchor="middle"><text x="52" y="141">100</text><text x="193" y="141">75</text><text x="334" y="141">50</text><text x="475" y="141">25</text><text x="615" y="141">0</text></g><text x="612" y="14" text-anchor="end" fill="#9aa8b8">Sw (%)</text>
+              <text transform="translate(13 72) rotate(-90)" text-anchor="middle">Pc (psi)</text>
+            </svg>
+          </figure>
+        </section>
+      </div>
+      <section class="summary-strip" aria-label="Selected plug summary" data-od-id="selected-plug-summary">
+        <div class="summary-item"><span class="summary-label">SELECTED PLUG</span><div class="summary-selection"><strong class="plug-big" id="summaryPlug">A17-042</strong><span class="formation" id="summaryFormation">Brent C · 1,046.2 m MD</span></div></div>
+        <div class="summary-item"><span class="summary-label">PC FIT R²</span><span class="summary-value" id="summaryR2">0.982</span></div>
+        <div class="summary-item"><span class="summary-label">SW AT 100 FT</span><span class="summary-value" id="summarySw">31.4 <span class="muted">%</span></span></div>
+        <div class="summary-item"><span class="summary-label">FLOW UNIT</span><span class="summary-value" id="summaryFlow">FU-2</span></div>
+        <div class="summary-item"><span class="summary-label">QC INTERPRETATION</span><span class="summary-value"><span class="badge ok"><i class="badge-dot"></i>Fit accepted</span></span></div>
+      </section>
+    </main>
+
+    <main class="view" id="view-geo" role="tabpanel" aria-labelledby="tab-geo" data-view-panel="geo" data-od-id="geomechanics-view" hidden>
+      <section class="geo-controls" aria-label="Geomechanics model controls" data-od-id="geomechanics-toolbar">
+        <span class="toolbar-title" data-od-id="geomechanics-view-title">Geomechanics</span><span class="toolbar-meta mono">MODEL v2.4</span>
+        <span class="badge info"><i class="badge-dot"></i>Pp calibrated</span><span class="badge info"><i class="badge-dot"></i>Shmin calibrated</span><span class="badge warn"><i class="badge-dot"></i>Shmax assumed</span>
+        <label class="field" for="logRun">Log run <select id="logRun" data-od-id="log-run-selector"><option>GR-RHOB-04 · final</option><option>GR-RHOB-03 · repeat</option></select></label>
+        <span class="toolbar-spacer"></span>
+        <button class="button secondary" type="button" id="exportPdf" data-od-id="export-pdf"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 2h7l3 3v9H3zM10 2v3h3M5 10.5h6M5 8h4"/></svg>Export PDF</button>
+        <button class="button primary" type="button" id="computeModel" data-od-id="compute-model"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v2m0 8v2M2 8h2m8 0h2M3.8 3.8l1.4 1.4m5.6 5.6 1.4 1.4m0-8.4-1.4 1.4m-5.6 5.6-1.4 1.4"/><circle cx="8" cy="8" r="2.5"/></svg>Compute</button>
+      </section>
+      <div class="geo-main" data-od-id="geomechanics-main">
+        <section class="panel profile-panel" aria-labelledby="profile-title" data-od-id="pressure-profile-panel">
+          <div class="panel-head"><h2 id="profile-title" data-od-id="pressure-profile-heading">Pressure profile</h2><span class="head-meta mono">1,000–1,100 m MD</span><div class="profile-legend"><span><i class="sv"></i>Sv</span><span><i class="pp"></i>Pp</span><span><i class="shmin"></i>Shmin</span><span><i class="shmax"></i>Shmax</span><span><i class="mw"></i>Mud window</span></div></div>
+          <svg class="profile-svg" viewBox="0 0 720 470" role="img" aria-label="Depth profile showing vertical stress, pore pressure, minimum and maximum horizontal stress, and mud-weight window">
+            <defs><clipPath id="profile-clip"><rect x="68" y="28" width="618" height="390"/></clipPath></defs>
+            <g><line class="gridline" x1="68" y1="28" x2="686" y2="28"/><line class="gridline" x1="68" y1="106" x2="686" y2="106"/><line class="gridline" x1="68" y1="184" x2="686" y2="184"/><line class="gridline" x1="68" y1="262" x2="686" y2="262"/><line class="gridline" x1="68" y1="340" x2="686" y2="340"/><line class="gridline" x1="68" y1="418" x2="686" y2="418"/>
+              <line class="gridline" x1="68" y1="28" x2="68" y2="418"/><line class="gridline" x1="171" y1="28" x2="171" y2="418"/><line class="gridline" x1="274" y1="28" x2="274" y2="418"/><line class="gridline" x1="377" y1="28" x2="377" y2="418"/><line class="gridline" x1="480" y1="28" x2="480" y2="418"/><line class="gridline" x1="583" y1="28" x2="583" y2="418"/><line class="gridline" x1="686" y1="28" x2="686" y2="418"/></g>
+            <g text-anchor="end"><text x="58" y="31">1,000</text><text x="58" y="109">1,020</text><text x="58" y="187">1,040</text><text x="58" y="265">1,060</text><text x="58" y="343">1,080</text><text x="58" y="421">1,100</text></g>
+            <g text-anchor="middle"><text x="68" y="440">1,000</text><text x="171" y="440">1,500</text><text x="274" y="440">2,000</text><text x="377" y="440">2,500</text><text x="480" y="440">3,000</text><text x="583" y="440">3,500</text><text x="686" y="440">4,000</text><text x="377" y="461" fill="#9aa8b8">Pressure (psi)</text></g>
+            <text transform="translate(16 223) rotate(-90)" text-anchor="middle">Measured depth (m)</text>
+            <g clip-path="url(#profile-clip)">
+              <path d="M199 28 L203 106 L208 184 L213 262 L224 340 L231 418 L331 418 L316 340 L299 262 L288 184 L279 106 L272 28Z" fill="#d4a85319" stroke="#d4a85342" stroke-width="1"/>
+              <path d="M519 28 C525 106 530 184 538 262 S551 340 559 418" fill="none" stroke="#d9e0df" stroke-width="2.1"/>
+              <path d="M199 28 C203 106 208 184 213 262 S224 340 231 418" fill="none" stroke="#5ba8a0" stroke-width="2.2"/>
+              <path d="M272 28 C279 106 288 184 299 262 S316 340 331 418" fill="none" stroke="#d4a853" stroke-width="2.2"/>
+              <path d="M363 28 C369 106 380 184 390 262 S411 340 430 418" fill="none" stroke="#91a4d0" stroke-width="2.2"/>
+              <g fill="#d4a853" stroke="#0a0e14" stroke-width="2"><circle cx="279" cy="215" r="5"/><circle cx="291" cy="324" r="5"/></g>
+              <g fill="#5ba8a0" stroke="#0a0e14" stroke-width="2"><circle cx="207" cy="106" r="4.5"/><circle cx="216" cy="301" r="4.5"/></g>
+            </g>
+            <g font-size="8"><text x="540" y="46" fill="#d9e0df">Sv</text><text x="219" y="94" fill="#5ba8a0">Pp</text><text x="306" y="281" fill="#d4a853">Shmin</text><text x="435" y="375" fill="#91a4d0">Shmax</text><text x="310" y="73" fill="#d4a853">8.6–11.4 ppg window</text></g>
+            <g><line x1="279" y1="215" x2="295" y2="204" stroke="#d4a853"/><text x="299" y="205" fill="#d4a853">DFIT · 1,048 m</text><line x1="291" y1="324" x2="307" y2="313" stroke="#d4a853"/><text x="311" y="314" fill="#d4a853">DFIT · 1,076 m</text></g>
+          </svg>
+        </section>
+        <aside class="panel provenance-panel" aria-labelledby="provenance-title" data-od-id="provenance-panel">
+          <div class="panel-head"><h2 id="provenance-title" data-od-id="provenance-heading">Model provenance</h2><span class="head-meta">V2.4 · 14:32 UTC</span></div>
+          <div class="prov-body">
+            <div class="prov-grid">
+              <div class="prov-item"><span class="prov-label">Vertical stress · Sv</span><span class="prov-value">RHOB density <span class="badge info">MEASURED</span></span></div>
+              <div class="prov-item"><span class="prov-label">Pore pressure · Pp</span><span class="prov-value">DFIT + sonic <span class="badge info">CALIBRATED</span></span></div>
+              <div class="prov-item"><span class="prov-label">Min horizontal · Shmin</span><span class="prov-value">DFIT closure <span class="badge info">CALIBRATED</span></span></div>
+              <div class="prov-item"><span class="prov-label">Max horizontal · Shmax</span><span class="prov-value">0.72 × Sv <span class="badge warn">ASSUMED</span></span></div>
+              <div class="prov-item"><span class="prov-label">Static Young’s modulus</span><span class="prov-value">Dynamic correlation <span class="badge">CORRELATION</span></span></div>
+              <div class="prov-item"><span class="prov-label">Poisson’s ratio</span><span class="prov-value mono">0.24 <span class="badge">CORRELATION</span></span></div>
+            </div>
+            <div class="subhead"><span>Calibration points</span><span class="mono">2 DFIT</span></div>
+            <div class="cal-list" aria-label="Calibration points">
+              <div class="cal-row"><span>LOT · 1,018.4 m</span><span class="data">Pp 1,506</span><span class="data">Shmin 1,884</span><span class="badge ok">FIT</span></div>
+              <div class="cal-row"><span>DFIT · 1,048.0 m</span><span class="data">Pp 1,594</span><span class="data">Shmin 1,965</span><span class="badge ok">FIT</span></div>
+              <div class="cal-row"><span>DFIT · 1,076.2 m</span><span class="data">Pp 1,672</span><span class="data">Shmin 2,054</span><span class="badge ok">FIT</span></div>
+            </div>
+            <div class="geo-kpis"><div class="geo-kpi"><span class="prov-label">Mud-weight window</span><strong>8.6–11.4 <span class="kpi-unit">ppg</span></strong></div><div class="geo-kpi"><span class="prov-label">Breakouts · 1,000–1,100 m</span><strong>3 <span class="kpi-unit">intervals</span></strong></div></div>
+            <p class="screening-note">Screening model for interval review. Reconcile assumed Shmax with image-log breakouts before operational use.</p>
+          </div>
+        </aside>
+      </div>
+      <section class="panel failure-panel" aria-labelledby="failure-title" data-od-id="failure-intervals-panel">
+        <div class="panel-head"><h2 id="failure-title" data-od-id="failure-intervals-heading">Failure intervals</h2><span class="head-meta">100 m window · criteria set 04</span><span class="head-meta mono" style="color:var(--accent)">3 flagged</span></div>
+        <div class="table-wrap"><table class="failure-table" aria-label="Failure interval screening table"><thead><tr><th scope="col">Depth interval m</th><th scope="col">BO</th><th scope="col">MC</th><th scope="col">HB</th><th scope="col">DP</th><th scope="col">Sanding CDP</th><th scope="col">Screening status</th></tr></thead><tbody>
+          <tr><td>1,012.4–1,014.0</td><td>0.31</td><td>0.74</td><td>0.12</td><td>0.08</td><td>0.15</td><td><span class="risk low">Stable</span></td></tr>
+          <tr><td>1,021.8–1,023.1</td><td>0.64</td><td>0.47</td><td>0.32</td><td>0.11</td><td>0.24</td><td><span class="risk watch">Watch · breakout</span></td></tr>
+          <tr><td>1,046.2–1,047.6</td><td>0.82</td><td>0.39</td><td>0.44</td><td>0.16</td><td>0.38</td><td><span class="risk high">Review · BO</span></td></tr>
+          <tr><td>1,068.0–1,069.4</td><td>0.28</td><td>0.69</td><td>0.18</td><td>0.07</td><td>0.14</td><td><span class="risk low">Stable</span></td></tr>
+          <tr><td>1,083.6–1,085.0</td><td>0.71</td><td>0.42</td><td>0.35</td><td>0.13</td><td>0.31</td><td><span class="risk watch">Watch · sanding</span></td></tr>
+        </tbody></table></div>
+      </section>
+      <div class="geo-foot"><span id="computeState" aria-live="polite">Last computed 21 Oct 2026 · 14:32 UTC</span><span>Pressure referenced to 1,000 m datum · psi</span></div>
+    </main>
+
+    <main class="view" id="view-image" role="tabpanel" aria-labelledby="tab-image" data-view-panel="image" data-od-id="image-log-view" hidden>
+      <section class="image-controls" aria-label="Image log controls" data-od-id="image-log-toolbar">
+        <span class="toolbar-title" data-od-id="image-log-view-title">Image log</span>
+        <label class="field" for="imageAsset">Asset <select id="imageAsset" data-od-id="image-asset-selector"><option>FMI · run 04</option><option>UBI · run 03</option></select></label>
+        <label class="field range-field" for="depthRange">Depth <input class="text-control mono" id="depthRange" value="1,000–1,100 m" aria-label="Displayed depth range" data-od-id="image-depth-range"></label>
+        <label class="field" for="azimuthInput">Azimuth <input class="text-control mono" id="azimuthInput" value="0–360°" aria-label="Azimuth range" data-od-id="image-azimuth-range"></label>
+        <label class="field" for="radiusInput">Borehole radius <input class="text-control mono" id="radiusInput" value="0.15 m" aria-label="Borehole radius" data-od-id="borehole-radius"></label>
+        <span class="toolbar-spacer"></span>
+        <button class="button primary" type="button" id="fitDip" data-od-id="fit-dip"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 11.5 5.2 8l2.3 1.8L13.5 3M10 3h3.5v3.5"/></svg>Fit dip</button>
+        <button class="button secondary" type="button" id="approvePicks" data-od-id="approve-picks">Approve picks</button>
+      </section>
+      <div class="image-main" data-od-id="image-log-main">
+        <figure class="panel image-panel" aria-labelledby="unwrapped-title" data-od-id="unwrapped-borehole-panel" style="margin:0">
+          <div class="panel-head"><h2 id="unwrapped-title" data-od-id="unwrapped-heading">Unwrapped borehole</h2><span class="head-meta mono">GRAYSCALE · 256 px</span></div>
+          <div class="unwrapped-layout">
+            <div class="axis-corner">MD (m)</div>
+            <div class="azimuth-axis" aria-label="Azimuth in degrees"><span>0°</span><span>90°</span><span>180°</span><span>270°</span><span>360°</span></div>
+            <div></div>
+            <div class="depth-axis" aria-label="Depth from 1000 to 1100 meters"><span>1,000</span><span>1,020</span><span>1,040</span><span>1,060</span><span>1,080</span><span>1,100</span></div>
+            <div class="image-map"><canvas id="boreholeCanvas" width="256" height="520" role="img" aria-label="Grayscale unwrapped borehole image from 1000 to 1100 meters"></canvas>
+              <svg class="image-overlay" viewBox="0 0 256 520" preserveAspectRatio="none" aria-hidden="true">
+                <line class="az-grid" x1="64" y1="0" x2="64" y2="520"/><line class="az-grid" x1="128" y1="0" x2="128" y2="520"/><line class="az-grid" x1="192" y1="0" x2="192" y2="520"/>
+                <path class="dip-trace" d="M0 141 C28 129 53 122 78 126 S126 143 153 148 S207 145 256 126" stroke-width="2"/>
+                <circle class="pick-halo" cx="73" cy="127" r="7"/><circle class="pick-dot" cx="73" cy="127" r="3.3"/>
+                <circle class="pick-halo" cx="188" cy="354" r="7"/><circle class="pick-dot" cx="188" cy="354" r="3.3"/>
+              </svg>
+            </div><div></div>
+            <figcaption class="image-caption"><span>Amplitude · normalized</span><span class="mono">1 m vertical resolution</span></figcaption>
+          </div>
+        </figure>
+        <div class="pick-workspace" data-od-id="dip-pick-workspace">
+          <section class="panel pick-panel" aria-labelledby="picks-title" data-od-id="dip-pick-list">
+            <div class="panel-head"><h2 id="picks-title" data-od-id="dip-picks-heading">Dip picks</h2><span class="head-meta mono">3 FEATURES</span></div>
+            <div class="table-wrap"><table class="pick-table" aria-label="Dip picks with approval status"><thead><tr><th scope="col">Depth m</th><th scope="col">Dip °</th><th scope="col">Az °</th><th scope="col">R²</th><th scope="col">Quality</th><th scope="col">Approve</th></tr></thead><tbody>
+              <tr class="pick-row" tabindex="0" aria-selected="true" data-pick="1,024.4" data-dip="27.8" data-az="138" data-r2="0.94" data-quality="Good" data-od-id="dip-pick-1024"><td>1,024.4</td><td>27.8</td><td>138</td><td>0.94</td><td><span class="quality">Good</span></td><td><input class="pick-approved" type="checkbox" checked aria-label="Approve pick at 1024.4 meters" data-od-id="approve-pick-1024"></td></tr>
+              <tr class="pick-row" tabindex="0" aria-selected="false" data-pick="1,046.2" data-dip="42.1" data-az="221" data-r2="0.89" data-quality="Good" data-od-id="dip-pick-1046"><td>1,046.2</td><td>42.1</td><td>221</td><td>0.89</td><td><span class="quality">Good</span></td><td><input class="pick-approved" type="checkbox" checked aria-label="Approve pick at 1046.2 meters" data-od-id="approve-pick-1046"></td></tr>
+              <tr class="pick-row" tabindex="0" aria-selected="false" data-pick="1,068.7" data-dip="16.5" data-az="074" data-r2="0.71" data-quality="Fair" data-od-id="dip-pick-1068"><td>1,068.7</td><td>16.5</td><td>074</td><td>0.71</td><td><span class="quality fair">Fair</span></td><td><input class="pick-approved" type="checkbox" aria-label="Approve pick at 1068.7 meters" data-od-id="approve-pick-1068"></td></tr>
+            </tbody></table></div>
+            <div class="table-foot"><span id="approvalCount" aria-live="polite">2 of 3 picks approved</span><span>Click a row to inspect</span></div>
+          </section>
+          <section class="panel pick-detail" aria-labelledby="pick-detail-title" data-od-id="selected-pick-detail">
+            <div class="panel-head"><h2 id="pick-detail-title" data-od-id="pick-detail-heading">Pick detail</h2><span class="head-meta mono" id="detailDepth">1,024.4 m</span></div>
+            <div class="pick-detail-content">
+              <div class="detail-values">
+                <div class="detail-row"><span>Dip angle</span><strong id="detailDip">27.8°</strong></div>
+                <div class="detail-row"><span>Azimuth</span><strong id="detailAz">138°</strong></div>
+                <div class="detail-row"><span>Fit R²</span><strong id="detailR2">0.94</strong></div>
+                <div class="detail-row"><span>Feature</span><strong>Planar · bedding</strong></div>
+                <div class="detail-row"><span>Interpreter</span><strong>M. Rios</strong></div>
+              </div>
+              <div class="dip-glyph" aria-label="Dip orientation glyph">
+                <svg viewBox="0 0 112 112" role="img" aria-label="Stereonet showing selected dip orientation">
+                  <circle cx="56" cy="56" r="45" fill="#111720" stroke="#4b586b" stroke-width="1"/><circle cx="56" cy="56" r="30" fill="none" stroke="#344055"/><circle cx="56" cy="56" r="15" fill="none" stroke="#344055"/>
+                  <path d="M11 56h90M56 11v90M24 24l64 64M88 24 24 88" stroke="#344055" stroke-width=".7"/>
+                  <path class="orientation-line" d="M56 56 L67 43" fill="none" stroke="#d4a853" stroke-width="2.2"/><circle class="orientation-dot" cx="67" cy="43" r="3.3" fill="#d4a853" stroke="#111720" stroke-width="1.5"/>
+                  <text x="56" y="7" fill="#9aa8b8" text-anchor="middle" font-size="7" font-family="JetBrains Mono">N</text><text x="106" y="58" fill="#9aa8b8" text-anchor="middle" font-size="7" font-family="JetBrains Mono">E</text>
+                </svg><p>Equal-area · lower hemisphere</p>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+      <section class="upload-bar" id="uploadBar" aria-label="Upload image log data" data-od-id="image-upload-dropzone">
+        <svg class="upload-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M10 13V4m0 0L6.7 7.3M10 4l3.3 3.3M3 12.5v3.2h14v-3.2"/></svg>
+        <span><strong>Drop image log file</strong> or <button class="button secondary" type="button" id="chooseImageFile" data-od-id="choose-image-file" style="min-height:22px;padding:0 7px">Browse</button></span>
+        <span class="muted">DLIS, LIS, or raster image</span><span class="upload-meta" id="imageFileName">FMI_14-20b_A17_1000-1100m.dlis · 84 MB</span>
+        <input id="imageFile" type="file" accept=".dlis,.lis,image/*" hidden aria-label="Choose an image log file" data-od-id="image-file-input">
+      </section>
+    </main>
+    <footer class="statusbar" data-od-id="global-statusbar"><span class="status-live">Connected</span><span>Well 14/20b-A17</span><span>Depth reference: MD</span><div class="status-right"><span>Metric units</span><span>Autosaved 14:32</span><span>GeoLog 4.8.2</span></div></footer>
+  </div>
+  <script>
+    (() => {
+      const tabs = [...document.querySelectorAll('[role="tab"][data-view]')];
+      const views = [...document.querySelectorAll('[data-view-panel]')];
+      const activateView = (name, focusTab = false) => {
+        tabs.forEach(tab => {
+          const active = tab.dataset.view === name;
+          tab.setAttribute('aria-selected', String(active));
+          tab.tabIndex = active ? 0 : -1;
+          if (active && focusTab) tab.focus();
+        });
+        views.forEach(view => { const active = view.dataset.viewPanel === name; view.classList.toggle('active', active); view.hidden = !active; });
+        try { localStorage.setItem('geolog-active-view', name); } catch (_) {}
+      };
+      tabs.forEach((tab, index) => {
+        tab.addEventListener('click', () => activateView(tab.dataset.view));
+        tab.addEventListener('keydown', event => {
+          if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+          event.preventDefault();
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length;
+          activateView(tabs[next].dataset.view, true);
+        });
+      });
+      try { const remembered = localStorage.getItem('geolog-active-view'); if (views.some(v => v.dataset.viewPanel === remembered)) activateView(remembered); } catch (_) {}
+
+      const plugRows = [...document.querySelectorAll('.plug-row')];
+      const updatePlug = row => {
+        plugRows.forEach(item => item.setAttribute('aria-selected', String(item === row)));
+        document.getElementById('summaryPlug').textContent = row.dataset.plug;
+        const formation = row.children[2].textContent;
+        document.getElementById('summaryFormation').textContent = `${formation} · ${row.dataset.depth} m MD`;
+        document.getElementById('summaryR2').textContent = row.dataset.r2;
+        document.getElementById('summarySw').innerHTML = `${row.dataset.sw} <span class="muted">%</span>`;
+        document.getElementById('summaryFlow').textContent = row.dataset.flow.split(' · ')[0];
+      };
+      plugRows.forEach(row => {
+        row.addEventListener('click', () => updatePlug(row));
+        row.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); updatePlug(row); } });
+      });
+
+      const csvInput = document.getElementById('csvFile');
+      document.getElementById('importCsv').addEventListener('click', () => csvInput.click());
+      csvInput.addEventListener('change', () => {
+        if (!csvInput.files?.length) return;
+        const status = document.getElementById('datasetStatus');
+        status.className = 'badge info';
+        status.replaceChildren(Object.assign(document.createElement('i'), {className:'badge-dot'}), document.createTextNode(`CSV selected · ${csvInput.files[0].name}`));
+      });
+      let approved = false;
+      document.getElementById('approveDataset').addEventListener('click', event => {
+        approved = !approved;
+        const status = document.getElementById('datasetStatus');
+        status.className = approved ? 'badge ok' : 'badge warn';
+        status.innerHTML = `<i class="badge-dot"></i>${approved ? 'Approved · v3.0' : 'Draft · not approved'}`;
+        event.currentTarget.innerHTML = approved ? 'Reopen draft' : '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m3 8.2 3.1 3L13 4.5"/></svg>Approve dataset';
+        document.getElementById('approvedPercent').textContent = approved ? '100' : '76';
+      });
+
+      document.getElementById('computeModel').addEventListener('click', () => {
+        const now = new Date();
+        const stamp = now.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', timeZone:'UTC'});
+        document.getElementById('computeState').textContent = `Computed just now · ${stamp} UTC`;
+      });
+      document.getElementById('exportPdf').addEventListener('click', () => window.print());
+
+      const pickRows = [...document.querySelectorAll('.pick-row')];
+      const selectPick = row => {
+        pickRows.forEach(item => item.setAttribute('aria-selected', String(item === row)));
+        document.getElementById('detailDepth').textContent = `${row.dataset.pick} m`;
+        document.getElementById('detailDip').textContent = `${row.dataset.dip}°`;
+        document.getElementById('detailAz').textContent = `${row.dataset.az}°`;
+        document.getElementById('detailR2').textContent = row.dataset.r2;
+        const az = Number(row.dataset.az) * Math.PI / 180;
+        const radius = 45 * (1 - Number(row.dataset.dip) / 90);
+        const x = 56 + radius * Math.sin(az);
+        const y = 56 - radius * Math.cos(az);
+        document.querySelector('.orientation-line').setAttribute('d', `M56 56 L${x.toFixed(1)} ${y.toFixed(1)}`);
+        document.querySelector('.orientation-dot').setAttribute('cx', x.toFixed(1));
+        document.querySelector('.orientation-dot').setAttribute('cy', y.toFixed(1));
+      };
+      pickRows.forEach(row => {
+        row.addEventListener('click', event => { if (event.target.closest('input')) return; selectPick(row); });
+        row.addEventListener('keydown', event => { if (event.target.closest('input')) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectPick(row); } });
+      });
+      const checkboxes = [...document.querySelectorAll('.pick-approved')];
+      const syncApprovalCount = () => {
+        const count = checkboxes.filter(box => box.checked).length;
+        document.getElementById('approvalCount').textContent = `${count} of ${checkboxes.length} picks approved`;
+      };
+      checkboxes.forEach(box => box.addEventListener('change', syncApprovalCount));
+      document.getElementById('approvePicks').addEventListener('click', () => {
+        checkboxes.forEach(box => { box.checked = true; }); syncApprovalCount();
+      });
+      document.getElementById('fitDip').addEventListener('click', () => {
+        document.querySelector('.dip-trace').setAttribute('stroke-width', '2.6');
+        window.setTimeout(() => document.querySelector('.dip-trace')?.setAttribute('stroke-width', '2'), 650);
+      });
+
+      const canvas = document.getElementById('boreholeCanvas');
+      const ctx = canvas.getContext('2d', {alpha:false});
+      const image = ctx.createImageData(canvas.width, canvas.height);
+      for (let y = 0; y < canvas.height; y++) {
+        const bedding = 14 * Math.sin(y * .043) + 8 * Math.sin(y * .117) + 5 * Math.sin(y * .29);
+        for (let x = 0; x < canvas.width; x++) {
+          const grain = (Math.sin(x * 12.9898 + y * 78.233) * 43758.5453) % 1;
+          const band = 12 * Math.sin(x * .045 + y * .012) + 7 * Math.sin(x * .13 - y * .009);
+          const fracture = Math.abs((x - (86 + 17 * Math.sin(y * .021))) % 73) < 1.4 ? -34 : 0;
+          const value = Math.max(22, Math.min(222, 106 + bedding + band + grain * 24 - 12 + fracture));
+          const i = (y * canvas.width + x) * 4;
+          image.data[i] = value; image.data[i+1] = value; image.data[i+2] = value; image.data[i+3] = 255;
+        }
+      }
+      ctx.putImageData(image, 0, 0);
+
+      const imageInput = document.getElementById('imageFile');
+      const uploadBar = document.getElementById('uploadBar');
+      document.getElementById('chooseImageFile').addEventListener('click', () => imageInput.click());
+      imageInput.addEventListener('change', () => {
+        if (imageInput.files?.length) document.getElementById('imageFileName').textContent = imageInput.files[0].name;
+      });
+      ['dragenter','dragover'].forEach(type => uploadBar.addEventListener(type, event => { event.preventDefault(); uploadBar.classList.add('dragover'); }));
+      ['dragleave','drop'].forEach(type => uploadBar.addEventListener(type, event => { event.preventDefault(); uploadBar.classList.remove('dragover'); }));
+      uploadBar.addEventListener('drop', event => {
+        const file = event.dataTransfer?.files?.[0];
+        if (file) document.getElementById('imageFileName').textContent = file.name;
+      });
+    })();
+  </script>
+</body>
+</html>

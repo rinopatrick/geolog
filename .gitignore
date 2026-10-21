@@ -53,3 +53,5 @@ backend/artifacts/
 artifacts/
 *.db
 __pycache__/
+
+.tmp-ui/
