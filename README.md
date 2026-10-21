@@ -44,12 +44,13 @@ GeoLog currently includes **35+ analysis views/panels** and **100+ API capabilit
 - Batch petrophysics workflows (sync + async)
 - **Multi-mineral solver workflows** via calculator/derived-curve tooling
 - **NMR T2** vendor-bin interpretation and raw CPMG NNLS inversion (`docs/NMR.md`)
-- **Core/SCAL** plugs, RCA/SCAL, capillary pressure, FZI flow units and J-function saturation height (`docs/CORE_SCAL.md`)
-- **Geomechanics** screening stress/pore-pressure/mud-window model with provenance labels (`docs/GEOMECHANICS.md`)
+- **Core/SCAL** plugs, RCA/SCAL, capillary pressure, FZI flow units, five saturation-height models, XLSX import and staged depth matching (`docs/CORE_SCAL.md`)
+- **Geomechanics** screening stress/pore-pressure/mud-window model, provenance labels and breakout calibration (`docs/GEOMECHANICS.md`)
 - **Borehole images** conditioned image assets and manual dip picking (`docs/IMAGE_LOGS.md`)
-- **WITSML/OSDU** read-first 1.4.1.1 and Wellbore DDMS adapters (`docs/INTEROP.md`)
+- **WITSML/OSDU** 1.4.1.1 and Wellbore DDMS well/log adapters (`docs/INTEROP.md`)
 - **PostgreSQL** opt-in dual-dialect deployment with copy/verify/rollback tools (`docs/POSTGRES.md`)
 - **Petrophysics workbench** Core/SCAL, geomechanics and image-log panels (`docs/PETROPHYSICS_UI.md`)
+- **Token lifecycle** rotating refresh tokens and jti revocation (`docs/AUTH_REFRESH.md`)
 
 ### 4) Well Correlation
 - Interactive **2-well correlation panel**

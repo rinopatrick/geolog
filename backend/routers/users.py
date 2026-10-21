@@ -10,15 +10,69 @@ try:
     from database import get_db
     from deps import require_admin, require_viewer
     from models import User
-    from security import AuthConfig, create_access_token
+    from security import (
+        AuthConfig, create_access_token, create_refresh_token, decode_token,
+        is_token_revoked, revoke_token,
+    )
 except ImportError:
     from backend.database import get_db
     from backend.deps import require_admin, require_viewer
     from backend.models import User
-    from backend.security import AuthConfig, create_access_token
+    from backend.security import (
+        AuthConfig, create_access_token, create_refresh_token, decode_token,
+        is_token_revoked, revoke_token,
+    )
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
+
+
+
+@router.post("/refresh")
+def refresh_user_token(data: dict, db: Session = Depends(get_db)):
+    """Exchange a valid refresh token for a new access/refresh pair.
+
+    The old refresh token is revoked (rotation). Refresh tokens are public-path
+    requests but still signature- and expiry-verified.
+    """
+    raw = (data.get("refresh_token") or "").strip()
+    if not raw:
+        raise HTTPException(400, "refresh_token required")
+    cfg = AuthConfig.from_env()
+    try:
+        claims = decode_token(raw, cfg)
+    except HTTPException as exc:
+        raise HTTPException(401, exc.detail)
+    if claims.get("typ") != "refresh":
+        raise HTTPException(401, "not a refresh token")
+    if is_token_revoked(claims.get("jti")):
+        raise HTTPException(401, "refresh token revoked")
+    username = claims.get("sub")
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(401, "user no longer exists")
+    revoke_token(raw, cfg, "refresh_rotation")
+    return {
+        "access_token": create_access_token(subject=user.username, role=user.role, cfg=cfg),
+        "refresh_token": create_refresh_token(subject=user.username, role=user.role, cfg=cfg),
+        "token_type": "bearer",
+        "expires_in": cfg.jwt_ttl_seconds,
+        "refresh_expires_in": cfg.jwt_refresh_ttl_seconds,
+        "username": user.username,
+        "role": user.role,
+    }
+
+@router.post("/revoke")
+def revoke_user_token(data: dict, _role: str = Depends(require_viewer)):
+    raw = (data.get("token") or "").strip()
+    if not raw:
+        raise HTTPException(400, "token required")
+    cfg = AuthConfig.from_env()
+    try:
+        result = revoke_token(raw, cfg, str(data.get("reason") or "logout"))
+    except HTTPException as exc:
+        raise HTTPException(401, exc.detail)
+    return {"status": "revoked", **result}
 
 @router.get("")
 def list_users(db: Session = Depends(get_db), _role: str = Depends(require_viewer)):
@@ -102,10 +156,13 @@ def issue_user_token(data: dict, db: Session = Depends(get_db)):
         raise HTTPException(503, "JWT secret is not configured (set AUTH_JWT_SECRET)")
 
     access_token = create_access_token(subject=user.username, role=user.role, cfg=cfg)
+    refresh_token = create_refresh_token(subject=user.username, role=user.role, cfg=cfg)
     return {
         "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "expires_in": cfg.jwt_ttl_seconds,
+        "refresh_expires_in": cfg.jwt_refresh_ttl_seconds,
         "username": user.username,
         "role": user.role,
     }

@@ -44,6 +44,7 @@ class AuthConfig:
     jwt_jwks_url: Optional[str] = None
     jwt_algorithms: tuple[str, ...] = ("HS256",)
     jwt_ttl_seconds: int = 86400
+    jwt_refresh_ttl_seconds: int = 2592000
     jwt_leeway_seconds: int = 0
 
     @classmethod
@@ -78,6 +79,12 @@ class AuthConfig:
         if ttl <= 0:
             raise RuntimeError("AUTH_JWT_TTL_SECONDS must be > 0")
         try:
+            refresh_ttl = int(os.getenv("AUTH_JWT_REFRESH_TTL_SECONDS", "2592000") or 2592000)
+        except ValueError as exc:
+            raise RuntimeError("AUTH_JWT_REFRESH_TTL_SECONDS must be an integer") from exc
+        if refresh_ttl <= 0:
+            raise RuntimeError("AUTH_JWT_REFRESH_TTL_SECONDS must be > 0")
+        try:
             leeway = int(os.getenv("AUTH_JWT_LEEWAY_SECONDS", "0") or 0)
         except ValueError as exc:
             raise RuntimeError("AUTH_JWT_LEEWAY_SECONDS must be an integer") from exc
@@ -94,6 +101,7 @@ class AuthConfig:
             jwt_jwks_url=jwks_url,
             jwt_algorithms=algs,
             jwt_ttl_seconds=ttl,
+            jwt_refresh_ttl_seconds=refresh_ttl,
             jwt_leeway_seconds=leeway,
         )
 
@@ -171,6 +179,54 @@ def _decode_jwt(token: str, cfg: AuthConfig) -> Dict[str, Any]:
         raise HTTPException(status_code=401, detail=f"invalid bearer token: {e}")
 
 
+def decode_token(token: str, cfg: AuthConfig) -> Dict[str, Any]:
+    """Public wrapper used by refresh/revocation endpoints."""
+    return _decode_jwt(token, cfg)
+
+def revoke_token(token: str, cfg: AuthConfig, reason: str = "logout") -> Dict[str, Any]:
+    """Persist a token's jti so later requests are rejected."""
+    import datetime
+    try:
+        from database import SessionLocal
+        from models import RevokedToken
+    except ImportError:
+        from backend.database import SessionLocal
+        from backend.models import RevokedToken
+    claims = _decode_jwt(token, cfg)
+    jti = claims.get("jti")
+    if not jti:
+        raise HTTPException(400, "token has no jti")
+    db = SessionLocal()
+    try:
+        existing = db.query(RevokedToken).filter(RevokedToken.jti == jti).first()
+        if existing is None:
+            exp = claims.get("exp")
+            expires_at = datetime.datetime.fromtimestamp(exp, datetime.UTC).replace(tzinfo=None) if exp else None
+            db.add(RevokedToken(jti=jti, subject=str(claims.get("sub") or ""),
+                                reason=reason, expires_at=expires_at))
+            db.commit()
+        return {"jti": jti, "subject": claims.get("sub"), "expires_at": claims.get("exp")}
+    finally:
+        db.close()
+
+def is_token_revoked(jti: Optional[str]) -> bool:
+    if not jti:
+        return False
+    try:
+        from database import SessionLocal
+        from models import RevokedToken
+    except ImportError:
+        from backend.database import SessionLocal
+        from backend.models import RevokedToken
+    db = SessionLocal()
+    try:
+        return db.query(RevokedToken).filter(RevokedToken.jti == jti).first() is not None
+    finally:
+        db.close()
+
+def create_refresh_token(subject: str, role: str, cfg: AuthConfig) -> str:
+    return create_access_token(subject, role, cfg, cfg.jwt_refresh_ttl_seconds, token_type="refresh")
+
 def resolve_auth_context(request: Request, cfg: AuthConfig) -> AuthContext:
     """Resolve authenticated role for current request.
 
@@ -231,6 +287,7 @@ def create_access_token(
     role: str,
     cfg: AuthConfig,
     expires_delta_seconds: int | None = None,
+    token_type: str = "access",
 ) -> str:
     """Generate a signed JWT bearer token matching server auth configuration."""
     try:
@@ -254,6 +311,7 @@ def create_access_token(
         "iat": int(now.timestamp()),
         "exp": int(exp.timestamp()),
         "jti": uuid.uuid4().hex,
+        "typ": token_type,
     }
     if cfg.jwt_issuer:
         payload["iss"] = cfg.jwt_issuer

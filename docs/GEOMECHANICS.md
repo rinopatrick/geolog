@@ -51,6 +51,7 @@ GET/POST  /api/wells/{wid}/geomechanics/models
 GET/PUT   /api/wells/{wid}/geomechanics/models/{id}
 POST      /api/wells/{wid}/geomechanics/models/{id}/approve
 POST      /api/wells/{wid}/geomechanics/compute
+POST      /api/wells/{wid}/geomechanics/breakout-calibration
 GET       /api/wells/{wid}/geomechanics/runs
 GET       /api/wells/{wid}/geomechanics/report?format=json|csv|pdf
 ```
@@ -58,9 +59,18 @@ GET       /api/wells/{wid}/geomechanics/report?format=json|csv|pdf
 `compute` accepts `model_id`, optional `log_run_id`, `start`, `stop`, `step`.
 Approved models are immutable; edit by creating a new version.
 
+## Breakout calibration
+
+`breakout-calibration` accepts `{model_id, breakouts: [{depth, width_deg, mud_weight?}], save}`.
+It inverts SHmax from the vertical-well Kirsch hoop stress at the breakout edge
+using the model Pp/Shmin, Biot coefficient and UCS. Saving writes the points to
+the draft model calibration as `shmax` with `shmax_source=breakout_inversion`.
+This is a review aid based on manually entered widths, not image processing.
+
 ## Limits
 
 - No 3D stress field, faults, poroelastic coupling or thermal stress.
-- No automatic breakout image inversion; calibration must be supplied.
+- Breakout calibration assumes a vertical well and manually entered widths; no
+automatic image breakout picking.
 - No anisotropic elastic model.
 - PDF is a compact summary table, not a full engineering report.

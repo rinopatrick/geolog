@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import io
+
+from pathlib import Path
+
 import numpy as np
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 
-from backend.main import app
+from backend.main import SessionLocal, app
+from backend.models import LogRun
 
 client = TestClient(app)
 I = {"X-User-Role": "interpreter"}
@@ -36,12 +42,33 @@ def test_core_plug_crud_and_measurements(make_well):
     r = client.post(f"/api/wells/{wid}/core/plugs/{pid}/photos", headers=I,
                     json={"file_path": "core/1/P1.jpg", "caption": "P1"})
     assert r.status_code == 201, r.text
+    png = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108000000003a7e9b550000000a49444154789c6360000000020001e221bc330000000049454e44ae426082")
+    r = client.post(f"/api/wells/{wid}/core/plugs/{pid}/photos/upload", headers=I,
+                    files={"file": ("P1.png", png, "image/png")}, data={"caption": "uploaded"})
+    assert r.status_code == 201, r.text
+    assert Path(r.json()["file_path"]).exists()
+    r = client.post(f"/api/wells/{wid}/core/plugs/{pid}/thin-sections/upload", headers=I,
+                    files={"file": ("P1-ts.png", png, "image/png")}, data={"caption": "TS"})
+    assert r.status_code == 201, r.text
 
     detail = client.get(f"/api/wells/{wid}/core/plugs/{pid}")
     assert detail.status_code == 200
     body = detail.json()
     assert body["measurements"] == 1
     assert body["pc_rows"][0]["points"][0] == [10.0, 0.95]
+
+    db = SessionLocal()
+    try:
+        lr = db.query(LogRun).filter(LogRun.well_id == wid).one()
+    finally:
+        db.close()
+    match = client.post(f"/api/wells/{wid}/core/plugs/{pid}/depth-match", headers=I,
+                        json={"log_run_id": lr.id, "shift": 2.5})
+    assert match.status_code == 201, match.text
+    assert match.json()["log_md"] == 1003.0
+    applied = client.post(f"/api/wells/{wid}/core/depth-matches/{match.json()['id']}/apply", headers=I)
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["matched_log_md"] == 1003.0
 
     datasets = client.get(f"/api/wells/{wid}/core/datasets").json()
     assert datasets and datasets[0]["status"] == "draft"
@@ -69,6 +96,23 @@ def test_core_csv_import_and_conflict(make_well):
     r = client.post(f"/api/wells/{wid}/core/import", headers=I, files=files)
     assert r.status_code == 200
     assert len(r.json()["conflicts"]) == 2
+
+def test_core_excel_import(make_well):
+    wid = make_well("CORE-XLSX", {"DEPT": [1000.0], "GR": [10.0]})
+    wb = Workbook(); ws = wb.active
+    ws.append(["plug_name", "depth_md", "porosity", "perm_air"])
+    ws.append(["X1", 1001.0, 0.21, 120.0])
+    ws.append(["X2", 1002.0, 0.19, 60.0])
+    buf = io.BytesIO(); wb.save(buf)
+    files = {"file": ("core.xlsx", buf.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    r = client.post(f"/api/wells/{wid}/core/import?dry_run=true", headers=I, files=files)
+    assert r.status_code == 200, r.text
+    assert r.json()["would_import"] == 2
+    files = {"file": ("core.xlsx", buf.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    r = client.post(f"/api/wells/{wid}/core/import", headers=I, files=files)
+    assert r.status_code == 200, r.text
+    assert r.json()["imported"] == 2
+    assert len(client.get(f"/api/wells/{wid}/core/plugs").json()) == 2
 
 def test_flow_units_cluster(make_well):
     wid = make_well("FZI", {"DEPT": [1000.0], "GR": [10.0]})
@@ -106,3 +150,12 @@ def test_saturation_height_fit_and_apply(make_well):
                         json={"model_id": model["id"]})
     assert apply.status_code == 200, apply.text
     assert len(apply.json()["sw"]) == 3
+
+    bc = client.post(f"/api/wells/{wid}/core/saturation-height/fit", headers=I,
+                     json={"model_type": "brooks_corey"})
+    assert bc.status_code == 200, bc.text
+    assert bc.json()["model_type"] == "brooks_corey"
+    bc_apply = client.post(f"/api/wells/{wid}/core/saturation-height/apply", headers=I,
+                           json={"model_id": bc.json()["id"]})
+    assert bc_apply.status_code == 200, bc_apply.text
+    assert len(bc_apply.json()["sw"]) == 3

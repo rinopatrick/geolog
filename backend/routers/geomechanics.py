@@ -169,6 +169,69 @@ def compute(wid: int, data: dict, db: Session = Depends(get_db)):
     return {"run_id": run.id, "model_id": model.id, "model_version": model.version,
             "log_run_id": lr.id, **result}
 
+@router.post("/breakout-calibration")
+def breakout_calibration(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Estimate SHmax from vertical-well breakout widths.
+
+    Uses the Kirsch hoop-stress equation at the breakout edge with the current
+    model Pp/Shmin and the requested mud weight. This is a review aid, not an
+    image-processing picker.
+    """
+    import math
+
+    _well(db, wid)
+    model = _model(db, wid, int(data.get("model_id"))) if data.get("model_id") is not None else None
+    if model is None:
+        raise HTTPException(400, "model_id is required")
+    _, _, result = _run(db, wid, {"model_id": model.id})
+    params = _params(model)
+    alpha = float(params.get("biot", 0.9) or 0.9)
+    ucs = float(params.get("ucs", 1500.0) or 1500.0)
+    breakouts = data.get("breakouts") or []
+    if not isinstance(breakouts, list) or not breakouts:
+        raise HTTPException(400, "breakouts must be a non-empty list")
+    curves = result["curves"]
+    points = []
+    for item in breakouts:
+        try:
+            depth = float(item.get("depth"))
+            width = float(item.get("width_deg"))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if not (0 < width < 120):
+            raise HTTPException(400, "breakout width_deg must be between 0 and 120")
+        idx = min(range(len(curves["DEPTH"])), key=lambda i: abs(float(curves["DEPTH"][i]) - depth))
+        pp = float(curves["PP"][idx])
+        shmin = float(curves["SHMIN"][idx])
+        tvd = float(curves["TVD"][idx])
+        mw = float(item.get("mud_weight", params.get("mud_weight", 9.0)) or 9.0)
+        pw = mw * 0.052 * tvd
+        w = math.radians(width)
+        denom = 1.0 + 2.0 * math.cos(w)
+        if abs(denom) < 1e-6:
+            continue
+        shmax = (ucs + 2.0 * pw + alpha * pp - shmin * (1.0 - 2.0 * math.cos(w))) / denom
+        if not math.isfinite(shmax) or shmax <= 0:
+            continue
+        points.append({
+            "depth": round(depth, 3), "value": round(shmax, 2),
+            "width_deg": width, "mud_weight": mw, "tvd": round(tvd, 3),
+            "pp": round(pp, 2), "shmin": round(shmin, 2),
+        })
+    if not points:
+        raise HTTPException(400, "no valid breakout calibration points")
+    avg = sum(p["value"] for p in points) / len(points)
+    if data.get("save"):
+        if model.status != "draft":
+            raise HTTPException(423, "Approved geomechanics models are immutable")
+        cal = _calibration(model)
+        cal["shmax"] = [[p["depth"], p["value"]] for p in points]
+        cal["shmax_source"] = "breakout_inversion"
+        model.calibration_json = json.dumps(cal, sort_keys=True)
+        model.input_hash = geo._hash_payload({"params": _params(model), "calibration": cal})
+        db.commit()
+    return {"model_id": model.id, "points": points, "average_shmax": round(avg, 2), "saved": bool(data.get("save"))}
+
 @router.get("/runs")
 def list_runs(wid: int, db: Session = Depends(get_db)):
     _well(db, wid)

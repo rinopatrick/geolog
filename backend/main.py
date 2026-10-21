@@ -118,6 +118,7 @@ try:
         ROLE_RANK,
         AuthConfig,
         current_env,
+        is_token_revoked,
         resolve_auth_context,
         role_from_request,
     )
@@ -140,6 +141,7 @@ except ImportError:
         ROLE_RANK,
         AuthConfig,
         current_env,
+        is_token_revoked,
         resolve_auth_context,
         role_from_request,
     )
@@ -279,6 +281,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 PUBLIC_PATHS = frozenset({
     "/api/health",
     "/api/users/token",
+    "/api/users/refresh",
     "/docs",
     "/docs/oauth2-redirect",
     "/redoc",
@@ -303,6 +306,8 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
             auth_ctx = resolve_auth_context(request, AUTH_CONFIG)
         except HTTPException as e:
             return SafeJSONResponse(status_code=e.status_code, content={"detail": e.detail})
+        if auth_ctx.source == "jwt" and is_token_revoked((auth_ctx.claims or {}).get("jti")):
+            return SafeJSONResponse(status_code=401, content={"detail": "token revoked"})
         request.state.user_role = auth_ctx.role
         request.state.auth_subject = auth_ctx.subject
         request.state.auth_source = auth_ctx.source
@@ -369,6 +374,8 @@ class RequestMetricsMiddleware(BaseHTTPMiddleware):
 
 class RBACWriteGuardMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        if _is_public_request(request):
+            return await call_next(request)
         method = request.method.upper()
         path = request.url.path
         if method in {"POST", "PUT", "DELETE"} and path.startswith("/api/"):
@@ -388,7 +395,7 @@ class RBACWriteGuardMiddleware(BaseHTTPMiddleware):
             required = "interpreter"
             if path in admin_exact_post and method == "POST":
                 required = "admin"
-            elif path == "/api/users/token":
+            elif path in {"/api/users/token", "/api/users/revoke"}:
                 required = "viewer"
             elif any(path.startswith(p) for p in admin_prefixes):
                 required = "admin"

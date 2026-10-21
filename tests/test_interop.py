@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend import interop
 from backend.main import SessionLocal, app
-from backend.models import Project, Well
+from backend.models import LogRun, Project, Well
 
 client = TestClient(app)
 I = {"X-User-Role": "interpreter"}
@@ -78,3 +78,24 @@ def test_osdu_pull(monkeypatch):
     r = client.post(f"/api/interop/osdu/pull?project_id={pid}", headers=I)
     assert r.status_code == 200, r.text
     assert r.json()["created"] >= 1
+
+
+def test_osdu_log_pull(monkeypatch, make_well):
+    wid = make_well("OSDU-LOG", {"DEPT": [1000.0, 1001.0], "GR": [10.0, 20.0]})
+    monkeypatch.setenv("GEOLOG_OSDU_URL", "https://osdu.example")
+    payload = {"results": [{"data": {
+        "Name": "L1",
+        "Curves": [{"Mnemonic": "DEPT", "Unit": "m"}, {"Mnemonic": "GR", "Unit": "gAPI"}],
+        "LogData": [[1000, 10], [1001, 20], [1002, 30]],
+    }}]}
+    monkeypatch.setattr(interop, "osdu_request", lambda cfg, method, path, body=None: (200, payload))
+    r = client.post(f"/api/interop/osdu/pull-logs?well_id={wid}&wellbore_id=OSDU-WB", headers=I)
+    assert r.status_code == 200, r.text
+    assert r.json()["logs"][0]["status"] == "imported"
+    assert r.json()["logs"][0]["points"] == 3
+
+    db = SessionLocal()
+    try:
+        assert db.query(LogRun).filter(LogRun.well_id == wid, LogRun.filename == "osdu::L1").count() == 1
+    finally:
+        db.close()

@@ -113,6 +113,26 @@ def osdu_pull(project_id: int = Query(...), limit: int = Query(100),
         db.rollback()
         raise HTTPException(400, str(exc))
 
+
+
+@router.post("/osdu/pull-logs")
+def osdu_pull_logs(well_id: int = Query(...), wellbore_id: str | None = Query(None),
+                   limit: int = Query(100), db: Session = Depends(get_db)):
+    well = db.query(Well).filter(Well.id == well_id).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+    ident = (wellbore_id or well.uwi or "").strip()
+    if not ident:
+        raise HTTPException(400, "wellbore_id is required when the well has no UWI")
+    try:
+        return interop.osdu_pull_logs(db, well, ident, limit)
+    except RuntimeError as exc:
+        db.rollback()
+        raise HTTPException(502, str(exc))
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(400, str(exc))
+
 @router.post("/osdu/push/wells/{wid}")
 def osdu_push_well(wid: int, db: Session = Depends(get_db)):
     well = db.query(Well).filter(Well.id == wid).first()

@@ -60,6 +60,7 @@ class Well(Base):
     saturation_height_models = relationship("SaturationHeightModel", back_populates="well", cascade="all, delete-orphan")
     geomechanics_models = relationship("GeomechanicsModel", back_populates="well", cascade="all, delete-orphan")
     image_assets = relationship("ImageAsset", back_populates="well", cascade="all, delete-orphan")
+    core_depth_matches = relationship("CoreDepthMatch", back_populates="well", cascade="all, delete-orphan")
 
 
 class LogRun(Base):
@@ -396,6 +397,8 @@ class CorePlug(Base):
     plug_name = Column(String(120), nullable=False)
     depth_md = Column(Float, nullable=False)
     depth_tvd = Column(Float, nullable=True)
+    matched_log_md = Column(Float, nullable=True)
+    depth_matches = relationship("CoreDepthMatch", back_populates="plug", cascade="all, delete-orphan")
     formation = Column(String(200), default="")
     lithology = Column(String(200), default="")
     porosity = Column(Float, nullable=True)
@@ -633,6 +636,40 @@ class DipPick(Base):
     created_at = Column(DateTime, default=utcnow)
 
     asset = relationship("ImageAsset", back_populates="dips")
+
+
+
+class CoreDepthMatch(Base):
+    """Staged core-to-log depth match. Apply copies log_md to CorePlug.matched_log_md."""
+    __tablename__ = "core_depth_matches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, index=True)
+    plug_id = Column(Integer, ForeignKey("core_plugs.id"), nullable=False, index=True)
+    log_run_id = Column(Integer, ForeignKey("log_runs.id"), nullable=False, index=True)
+    core_md = Column(Float, nullable=False)
+    log_md = Column(Float, nullable=False)
+    shift = Column(Float, default=0.0)
+    residual = Column(Float, default=0.0)
+    method = Column(String(30), default="manual_shift")
+    status = Column(String(20), default="proposed", index=True)
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=utcnow)
+
+    well = relationship("Well", back_populates="core_depth_matches")
+    plug = relationship("CorePlug", back_populates="depth_matches")
+
+
+
+class RevokedToken(Base):
+    __tablename__ = "revoked_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    jti = Column(String(64), nullable=False, unique=True, index=True)
+    subject = Column(String(120), default="")
+    reason = Column(String(120), default="")
+    expires_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, default=utcnow)
 
 class AuditLog(Base):
     """Track all user actions for audit trail."""

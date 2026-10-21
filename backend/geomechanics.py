@@ -142,8 +142,9 @@ def _borehole_hoop(tensor: np.ndarray, inclination: float, azimuth: float) -> tu
     rot = np.stack([e1, e2, b])
     transformed = np.einsum("ij,njk,lk->nil", rot, tensor, rot)
     s11, s22, s12 = transformed[:, 0, 0], transformed[:, 1, 1], transformed[:, 0, 1]
-    base_max = s11 + s22 + 2.0 * np.sqrt(((s11 - s22) / 2.0) ** 2 + s12 ** 2)
-    base_min = s11 + s22 - 2.0 * np.sqrt(((s11 - s22) / 2.0) ** 2 + s12 ** 2)
+    amplitude = 4.0 * np.sqrt(((s11 - s22) / 2.0) ** 2 + s12 ** 2)
+    base_max = s11 + s22 + amplitude
+    base_min = s11 + s22 - amplitude
     return base_max, base_min, s11 + s22
 
 def _plane_slip(tensor: np.ndarray, planes: Any, pp: np.ndarray, mu: float, cohesion: float) -> np.ndarray | None:
