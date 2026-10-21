@@ -259,11 +259,16 @@ def _parse_lis_dlisio(content: bytes, filename: str) -> ParsedFile:
         with lis_mod.load(tf.name) as physical:
             for lf_idx, logical in enumerate(physical):
                 header = getattr(logical, "header", None)
+                if callable(header):
+                    header = header()
                 if header is not None and not well_name:
-                    well_name = _as_string(getattr(header, "well_name", ""))
+                    well_name = _as_string(getattr(header, "well_name", "")) or _as_string(getattr(header, "file_name", ""))
                     uwi = _as_string(getattr(header, "well_id", ""))
 
-                for dfs_idx, dfsr in enumerate(getattr(logical, "data_format_specs", []) or []):
+                specs = getattr(logical, "data_format_specs", [])
+                if callable(specs):
+                    specs = specs()
+                for dfs_idx, dfsr in enumerate(specs or []):
                     try:
                         arr = lis_mod.curves(logical, dfsr, strict=False)
                         meta = lis_mod.curves_metadata(dfsr, strict=False)
@@ -293,7 +298,7 @@ def _parse_lis_dlisio(content: bytes, filename: str) -> ParsedFile:
 
                         md = (meta or {}).get(raw_name)
                         unit = _as_string(getattr(md, "units", "")) if md is not None else ""
-                        desc = _as_string(getattr(md, "name", "")) if md is not None else _as_string(raw_name)
+                        desc = (_as_string(getattr(md, "name", "")) or _as_string(getattr(md, "mnemonic", ""))) if md is not None else _as_string(raw_name)
                         curves.append(ParsedCurve(mnemonic=canon, unit=unit, description=desc))
 
                     depth_key = _choose_depth_key(list(data.keys()))
