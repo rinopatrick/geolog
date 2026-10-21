@@ -22,6 +22,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from backend.database import Base, SQLALCHEMY_DATABASE_URL  # noqa: E402
+
+_IS_SQLITE = SQLALCHEMY_DATABASE_URL.startswith("sqlite")
 from backend import models  # noqa: E402,F401  (import registers the tables)
 
 config = context.config
@@ -50,7 +52,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        render_as_batch=True,
+        render_as_batch=_IS_SQLITE,
         include_object=_include_object,
         compare_type=True,
     )
@@ -68,7 +70,7 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            render_as_batch=True,
+            render_as_batch=_IS_SQLITE,
             include_object=_include_object,
             compare_type=True,
         )
