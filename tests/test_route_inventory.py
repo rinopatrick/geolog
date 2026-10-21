@@ -102,6 +102,10 @@ EXPECTED_ROUTES = [
     "GET /api/wells/{wid}/export-las",
     "GET /api/wells/{wid}/export-package",
     "GET /api/wells/{wid}/formation-tester",
+    "GET /api/wells/{wid}/geomechanics/models",
+    "GET /api/wells/{wid}/geomechanics/models/{model_id}",
+    "GET /api/wells/{wid}/geomechanics/report",
+    "GET /api/wells/{wid}/geomechanics/runs",
     "GET /api/wells/{wid}/image-log",
     "GET /api/wells/{wid}/lock-status",
     "GET /api/wells/{wid}/log-runs",
@@ -185,6 +189,9 @@ EXPECTED_ROUTES = [
     "POST /api/wells/{wid}/dual-water",
     "POST /api/wells/{wid}/electrofacies",
     "POST /api/wells/{wid}/electrofacies-async",
+    "POST /api/wells/{wid}/geomechanics/compute",
+    "POST /api/wells/{wid}/geomechanics/models",
+    "POST /api/wells/{wid}/geomechanics/models/{model_id}/approve",
     "POST /api/wells/{wid}/hingle",
     "POST /api/wells/{wid}/image-log",
     "POST /api/wells/{wid}/lithology",
@@ -233,6 +240,7 @@ EXPECTED_ROUTES = [
     "PUT /api/users/{uid}",
     "PUT /api/wells/{wid}",
     "PUT /api/wells/{wid}/core/plugs/{plug_id}",
+    "PUT /api/wells/{wid}/geomechanics/models/{model_id}",
 ]
 
 

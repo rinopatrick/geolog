@@ -47,6 +47,7 @@ try:
     from well_state import get_well_lock as _get_well_lock
     from routers.audit import router as audit_router
     from routers.core import router as core_router
+    from routers.geomechanics import router as geomechanics_router
     from routers.correlation import router as corr_router
     from routers.log_runs import router as log_runs_router
     from routers.nmr import router as nmr_router
@@ -77,6 +78,7 @@ except ImportError:
     from backend.well_state import get_well_lock as _get_well_lock
     from backend.routers.audit import router as audit_router
     from backend.routers.core import router as core_router
+    from backend.routers.geomechanics import router as geomechanics_router
     from backend.routers.correlation import router as corr_router
     from backend.routers.log_runs import router as log_runs_router
     from backend.routers.nmr import router as nmr_router
@@ -185,6 +187,7 @@ async def _request_validation_error_handler(request: Request, exc: RequestValida
 
 app.include_router(qc_router)
 app.include_router(core_router)
+app.include_router(geomechanics_router)
 app.include_router(corr_router)
 app.include_router(zonation_router)
 app.include_router(units_router)

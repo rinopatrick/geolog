@@ -1,0 +1,66 @@
+# Geomechanics screening
+
+This is a deterministic screening module, not a 3D finite-element or
+wellbore-stability simulator. Every output carries a provenance label:
+`measured`, `calibrated`, `correlation`, `assumption` or `not_available`.
+
+## Inputs
+
+One log run with `RHOB` and `DT`; `DTS` and `GR` are optional. Curves pass
+through the shared semantics layer (aliases, units, depth correction, TVD).
+If `DTS` is missing, Vs uses the Castagna mudrock relation and the result is
+labelled a correlation.
+
+Calibration JSON accepts two-point-or-more lists:
+
+```json
+{
+  "pp":     [[1000, 433], [1010, 437]],
+  "shmin":  [[1000, 700], [1010, 707]],
+  "shmax":  [[1000, 1100], [1010, 1110]],
+  "shmax_azimuth": 30,
+  "fracture_planes": [{"strike": 45, "dip": 60}]
+}
+```
+
+Absolute `Shmin`/`Shmax` are assumptions unless calibration is supplied.
+Without `shmax` calibration the response includes a warning and the values are
+labelled `assumption`.
+
+## Calculations
+
+- Overburden: `Sv = sum(rho * 0.4335 * dz)` in psi, using TVD in ft.
+- Pore pressure: Eaton (`Pp = Sv - (Sv - Phyd) * (DTn/DT)^n`), Bowers, or
+  hydrostatic. The normal trend is fitted to shale `DT` when enough points
+  exist; otherwise a deterministic fallback is used.
+- Elastic: dynamic `E`, `nu`, `G`, `K` from `Vp`, `Vs`, `RHOB`.
+- Stresses: far-field tensor from `Sv`, `Shmin`, `Shmax` and azimuth. The
+  borehole hoop stress uses a generalized-Kirsch screening approximation from
+  the transformed tensor; it is not a full inclined-well solution.
+- Mud window: `MW_MIN` from shear breakout, `MW_MAX` from tensile failure;
+  `MW` is the requested mud weight (`ppg`).
+- Failure indicators: Mohr-Coulomb, Hoek-Brown and Drucker-Prager at the
+  far-field effective principal stresses, plus `SAND_CDP` and optional
+  fracture-plane slip.
+- Breakout (`BO`) is true where the current mud weight is below `MW_MIN`.
+
+## API
+
+```text
+GET/POST  /api/wells/{wid}/geomechanics/models
+GET/PUT   /api/wells/{wid}/geomechanics/models/{id}
+POST      /api/wells/{wid}/geomechanics/models/{id}/approve
+POST      /api/wells/{wid}/geomechanics/compute
+GET       /api/wells/{wid}/geomechanics/runs
+GET       /api/wells/{wid}/geomechanics/report?format=json|csv|pdf
+```
+
+`compute` accepts `model_id`, optional `log_run_id`, `start`, `stop`, `step`.
+Approved models are immutable; edit by creating a new version.
+
+## Limits
+
+- No 3D stress field, faults, poroelastic coupling or thermal stress.
+- No automatic breakout image inversion; calibration must be supplied.
+- No anisotropic elastic model.
+- PDF is a compact summary table, not a full engineering report.
