@@ -8,6 +8,10 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-21
+
+Security, data-integrity and ingestion hardening release.
+
 ### Fixed
 
 - **JWT mode locked out login, health checks, docs and the SPA.** The auth
