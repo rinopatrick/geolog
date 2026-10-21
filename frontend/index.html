@@ -1105,7 +1105,7 @@
                     </label>
                     <span class="px-toolbar-spacer"></span>
                     <button class="px-button px-secondary" type="button" id="csImportBtn" data-role-required="interpreter,admin"><i data-lucide="upload"></i>Import CSV</button>
-                    <input id="csCsvFile" type="file" accept=".csv,text/csv" hidden aria-label="Choose a core data CSV file">
+                    <input id="csCsvFile" type="file" accept=".csv,.xlsx,.xlsm,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden aria-label="Choose a core data CSV file">
                     <button class="px-button px-secondary" type="button" id="csClusterBtn" data-role-required="interpreter,admin">Flow units</button>
                     <select id="csShFitType" class="px-sh-select" aria-label="Saturation-height model type"><option value="j_function">J-function</option><option value="brooks_corey">Brooks-Corey</option><option value="lambda">Lambda</option><option value="thomeer">Thomeer</option><option value="skelt_harrison">Skelt-Harrison</option></select>
                     <button class="px-button px-secondary" type="button" id="csFitShBtn" data-role-required="interpreter,admin">Fit SH</button>
@@ -1278,7 +1278,7 @@
                         <label>Type <select id="imgAssetType" class="px-text-control" style="width:74px;height:24px"><option>FMI</option><option>UBI</option><option>OBMI</option><option>manual</option></select></label>
                     </div>
                     <span class="px-upload-meta" id="imgFileName">no file selected</span>
-                    <input id="imgFile" type="file" accept=".png,.jpg,.jpeg,.tif,.tiff,.bmp,image/*" hidden aria-label="Choose an image log file">
+                    <input id="imgFile" type="file" accept=".png,.jpg,.jpeg,.tif,.tiff,.bmp,.dlis,image/*" hidden aria-label="Choose an image log file">
                 </section>
             </div>
         </div>
