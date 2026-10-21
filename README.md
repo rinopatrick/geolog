@@ -46,6 +46,7 @@ GeoLog currently includes **35+ analysis views/panels** and **100+ API capabilit
 - **NMR T2** vendor-bin interpretation and raw CPMG NNLS inversion (`docs/NMR.md`)
 - **Core/SCAL** plugs, RCA/SCAL, capillary pressure, FZI flow units and J-function saturation height (`docs/CORE_SCAL.md`)
 - **Geomechanics** screening stress/pore-pressure/mud-window model with provenance labels (`docs/GEOMECHANICS.md`)
+- **Borehole images** conditioned image assets and manual dip picking (`docs/IMAGE_LOGS.md`)
 
 ### 4) Well Correlation
 - Interactive **2-well correlation panel**

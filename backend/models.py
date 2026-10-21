@@ -1,5 +1,5 @@
 """Database models for well log viewer."""
-from sqlalchemy import Column, Integer, Float, String, Text, Date, DateTime, ForeignKey, LargeBinary, UniqueConstraint
+from sqlalchemy import Column, Integer, Float, String, Text, Date, DateTime, ForeignKey, LargeBinary, UniqueConstraint, Boolean
 from sqlalchemy.orm import relationship
 try:
     from database import Base
@@ -59,6 +59,7 @@ class Well(Base):
     contacts = relationship("Contact", back_populates="well", cascade="all, delete-orphan")
     saturation_height_models = relationship("SaturationHeightModel", back_populates="well", cascade="all, delete-orphan")
     geomechanics_models = relationship("GeomechanicsModel", back_populates="well", cascade="all, delete-orphan")
+    image_assets = relationship("ImageAsset", back_populates="well", cascade="all, delete-orphan")
 
 
 class LogRun(Base):
@@ -586,6 +587,52 @@ class GeomechanicsRun(Base):
     created_at = Column(DateTime, default=utcnow)
 
     model = relationship("GeomechanicsModel", back_populates="runs")
+
+
+
+class ImageAsset(Base):
+    """A conditioned, unwrapped borehole image stored as an artifact."""
+    __tablename__ = "image_assets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, index=True)
+    log_run_id = Column(Integer, ForeignKey("log_runs.id"), nullable=True, index=True)
+    image_type = Column(String(50), default="manual")
+    source = Column(String(120), default="")
+    file_path = Column(Text, nullable=False)
+    width = Column(Integer, default=0)
+    height = Column(Integer, default=0)
+    depth_top = Column(Float, nullable=False)
+    depth_bottom = Column(Float, nullable=False)
+    azimuth_start = Column(Float, default=0.0)
+    azimuth_end = Column(Float, default=360.0)
+    borehole_radius = Column(Float, nullable=True)
+    status = Column(String(20), default="draft")
+    metadata_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=utcnow)
+
+    well = relationship("Well", back_populates="image_assets")
+    dips = relationship("DipPick", back_populates="asset", cascade="all, delete-orphan")
+
+class DipPick(Base):
+    __tablename__ = "dip_picks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(Integer, ForeignKey("image_assets.id"), nullable=False, index=True)
+    depth = Column(Float, nullable=False)
+    dip_angle = Column(Float, nullable=False)
+    dip_azimuth = Column(Float, nullable=False)
+    amplitude = Column(Float, nullable=True)
+    r2 = Column(Float, nullable=True)
+    quality = Column(String(20), default="")
+    method = Column(String(30), default="manual_trace")
+    picked_by = Column(String(120), default="")
+    approved = Column(Boolean, default=False)
+    notes = Column(Text, default="")
+    trace_json = Column(Text, default="[]")
+    created_at = Column(DateTime, default=utcnow)
+
+    asset = relationship("ImageAsset", back_populates="dips")
 
 class AuditLog(Base):
     """Track all user actions for audit trail."""

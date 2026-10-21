@@ -10,6 +10,11 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
+- **Borehole images and manual dip picks v1.** Conditioned image upload,
+  artifact storage, optional DLIS image-channel extraction, trace-to-sinusoid
+  dip fitting, dip quality/approval, migration `f6a7b8c9d0e1`, and
+  `docs/IMAGE_LOGS.md`. Automatic picking, vendor conditioning and aperture
+  analysis remain out of scope.
 - **Geomechanics screening v1.** Versioned well/zone models, calibration-gated
   `Pp`/`Shmin`/`Shmax`, dynamic elastic moduli, generalized-Kirsch screening
   hoop stress, mud window, Mohr-Coulomb/Hoek-Brown/Drucker-Prager flags,

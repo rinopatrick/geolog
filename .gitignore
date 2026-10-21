@@ -50,5 +50,6 @@ test-data/
 data/public/
 node_modules/
 backend/artifacts/
+artifacts/
 *.db
 __pycache__/
