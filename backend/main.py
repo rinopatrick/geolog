@@ -48,6 +48,7 @@ try:
     from routers.audit import router as audit_router
     from routers.correlation import router as corr_router
     from routers.log_runs import router as log_runs_router
+    from routers.nmr import router as nmr_router
     from routers.ops import router as ops_router
     from routers.projects import router as projects_router
     from routers.qc import router as qc_router
@@ -76,6 +77,7 @@ except ImportError:
     from backend.routers.audit import router as audit_router
     from backend.routers.correlation import router as corr_router
     from backend.routers.log_runs import router as log_runs_router
+    from backend.routers.nmr import router as nmr_router
     from backend.routers.ops import router as ops_router
     from backend.routers.projects import router as projects_router
     from backend.routers.qc import router as qc_router
@@ -187,6 +189,7 @@ app.include_router(templates_router)
 app.include_router(reports_router)
 app.include_router(users_router)
 app.include_router(log_runs_router)
+app.include_router(nmr_router)
 app.include_router(projects_router)
 app.include_router(audit_router)
 app.include_router(ops_router)

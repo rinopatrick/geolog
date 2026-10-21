@@ -10,6 +10,11 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
+- **NMR T2 interpretation.** Vendor T2-bin curves are interpreted synchronously;
+  raw CPMG echoes use regularized NNLS as a background job. Adds
+  `nmr_inversions`/`nmr_distributions`, derived `NMRP`/`BVI`/`FFI`/`T2GM`/
+  `KSDR`/`KCOATES` curves, distribution API, SciPy dependency and
+  `docs/NMR.md`.
 - **Data semantics v1 (`data-semantics-v1`).** Log data now resolves well-level
   curve aliases, converts known units to a per-well field/SI target, applies
   piecewise MD→corrected-depth control points (legacy shift/stretch still maps
