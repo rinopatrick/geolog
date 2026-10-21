@@ -2256,3 +2256,50 @@ def test_ops_runbook_shape_and_alert_entries():
 def test_ops_runbook_unknown_role_allowed_as_viewer_floor():
     r = client.get("/api/ops/runbook", headers=_h("unknown"))
     assert r.status_code == 200
+
+
+def test_refresh_and_revocation_helpers(monkeypatch):
+    from backend.models import RevokedToken
+    from backend.security import (
+        AuthConfig, create_access_token, create_refresh_token, decode_token,
+        is_token_revoked, revoke_token,
+    )
+
+    monkeypatch.setenv("AUTH_MODE", "jwt")
+    monkeypatch.setenv("GEOLOG_ENV", "test")
+    monkeypatch.setenv("AUTH_JWT_SECRET", "x" * 32)
+    monkeypatch.setenv("AUTH_JWT_REFRESH_TTL_SECONDS", "3600")
+    cfg = AuthConfig.from_env()
+    assert cfg.mode == "jwt"
+    assert cfg.jwt_refresh_ttl_seconds == 3600
+
+    token = create_refresh_token("coverage-user", "viewer", cfg)
+    claims = decode_token(token, cfg)
+    assert claims["typ"] == "refresh"
+    assert is_token_revoked(None) is False
+    assert is_token_revoked(claims["jti"]) is False
+
+    result = revoke_token(token, cfg, "test")
+    assert result["jti"] == claims["jti"]
+    assert is_token_revoked(claims["jti"]) is True
+    # Duplicate revoke follows the existing-row branch.
+    revoke_token(token, cfg, "test")
+
+    db = SessionLocal()
+    try:
+        db.query(RevokedToken).filter(RevokedToken.jti == claims["jti"]).delete()
+        db.commit()
+    finally:
+        db.close()
+
+def test_create_access_token_rejects_non_hmac_and_bad_ttl():
+    import pytest
+    from fastapi import HTTPException
+    from backend.security import AuthConfig, create_access_token
+
+    cfg = AuthConfig(mode="jwt", jwt_secret="x" * 32, jwt_algorithms=("RS256",))
+    with pytest.raises(HTTPException):
+        create_access_token("u", "viewer", cfg)
+    cfg = AuthConfig(mode="jwt", jwt_secret="x" * 32)
+    with pytest.raises(HTTPException):
+        create_access_token("u", "viewer", cfg, expires_delta_seconds=0)
