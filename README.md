@@ -48,6 +48,7 @@ GeoLog currently includes **35+ analysis views/panels** and **100+ API capabilit
 - **Geomechanics** screening stress/pore-pressure/mud-window model with provenance labels (`docs/GEOMECHANICS.md`)
 - **Borehole images** conditioned image assets and manual dip picking (`docs/IMAGE_LOGS.md`)
 - **WITSML/OSDU** read-first 1.4.1.1 and Wellbore DDMS adapters (`docs/INTEROP.md`)
+- **PostgreSQL** opt-in dual-dialect deployment with copy/verify/rollback tools (`docs/POSTGRES.md`)
 
 ### 4) Well Correlation
 - Interactive **2-well correlation panel**

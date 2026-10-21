@@ -10,6 +10,11 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
+- **PostgreSQL opt-in.** `GEOLOG_DATABASE_URL` with SQLite default, dialect-aware
+  Alembic batching, `psycopg` dependency, and `backend.pg_tools`
+  copy/verify/rollback with content hashes and sequence advancement
+  (`docs/POSTGRES.md`). File-backed state and the app-level audit chain remain
+  unchanged.
 - **WITSML/OSDU read-first adapters v1.** WITSML 1.4.1.1 SOAP well/log pull and
   curve import; OSDU Wellbore DDMS well pull and explicit well push; env-based
   credentials, TLS verification, tests and `docs/INTEROP.md`. WITSML 2.1/ETP

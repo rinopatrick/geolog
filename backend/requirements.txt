@@ -9,4 +9,5 @@ reportlab==4.5.1
 PyJWT==2.15.1
 dlisio==1.0.4; python_version >= "3.10"
 cryptography==50.0.2; python_version >= "3.10"
+psycopg[binary]==3.2.9; python_version >= "3.10"
 scipy==1.17.0; python_version >= "3.11"
