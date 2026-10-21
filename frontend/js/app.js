@@ -579,6 +579,8 @@ class GeoLogApp {
         document.getElementById('tornadoPanel').style.display = view === 'tornado' ? 'block' : 'none';
         document.getElementById('vclmodelsPanel').style.display = view === 'vclmodels' ? 'block' : 'none';
         document.getElementById('corecalPanel').style.display = view === 'corecal' ? 'block' : 'none';
+        document.getElementById('corescalPanel').style.display = view === 'corescal' ? 'block' : 'none';
+        document.getElementById('geomechanicsPanel').style.display = view === 'geomechanics' ? 'block' : 'none';
         document.getElementById('qcautofixPanel').style.display = view === 'qcautofix' ? 'block' : 'none';
         document.getElementById('seismicPanel').style.display = view === 'seismic' ? 'block' : 'none';
         document.getElementById('imagelogPanel').style.display = view === 'imagelog' ? 'block' : 'none';
@@ -631,6 +633,9 @@ class GeoLogApp {
         if (view === 'zonation' && this.currentWell) this._initZonation();
         if (view === 'units' && this.currentWell) this._initUnits();
         if (view === 'templates' && this.currentWell) this._initTemplates();
+        if (view === 'corescal' && this.currentWell && window.CoreScalView) CoreScalView.load();
+        if (view === 'geomechanics' && this.currentWell && window.GeomechanicsView) GeomechanicsView.load();
+        if (view === 'imagelog' && this.currentWell && window.ImageLogView) ImageLogView.load();
         if (view === 'multiwell') { if (typeof MultiWellView !== 'undefined') MultiWellView.load(); }
         if (view === 'formationtester') { if (typeof FormationTesterView !== 'undefined') FormationTesterView.run(); }
         localStorage.setItem('geolog_last_view', view);
@@ -1056,7 +1061,15 @@ class GeoLogApp {
             await this._loadZones();
             this._renderWellHeader(well);
             if (this.currentLogRun) localStorage.setItem('geolog_last_run', logRunId);
+            this._refreshPetrophysicsView();
         } catch (e) { console.error('Failed to select log run:', e); }
+    }
+
+    _refreshPetrophysicsView() {
+        const view = localStorage.getItem('geolog_last_view');
+        if (view === 'corescal' && window.CoreScalView) CoreScalView.load();
+        else if (view === 'geomechanics' && window.GeomechanicsView) GeomechanicsView.load();
+        else if (view === 'imagelog' && window.ImageLogView) ImageLogView.load();
     }
 
     _populateLogRunSelector(logRuns = [], selectedId = null) {
@@ -8462,99 +8475,6 @@ class GeoLogApp {
                 this._publishDepthSync(depth, 'seismic');
             };
         }, 100);
-    }
-
-    // ─── Sprint 28: Image Log ───────────────────────────────────
-    async runImageLog() {
-        if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
-        GeoLoading.show('Generating borehole image...');
-        try {
-            const resp = await fetch(`/api/wells/${this.currentWell.id}/image-log`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
-                body: JSON.stringify({})
-            });
-            const data = await resp.json();
-            GeoLoading.hide();
-            if (data.detail) { GeoToast.error(data.detail); return; }
-            this._renderImageLog(data);
-        } catch (e) {
-            GeoLoading.hide();
-            GeoToast.error('Image log failed');
-        }
-    }
-
-    _renderImageLog(data) {
-        const canvas = document.getElementById('imageLogCanvas');
-        const empty = document.getElementById('imageLogEmpty');
-        if (!canvas) return;
-        canvas.style.display = 'block';
-        if (empty) empty.style.display = 'none';
-
-        const ctx = canvas.getContext('2d');
-        const W = canvas.parentElement.getBoundingClientRect().width;
-        const nDepths = data.depth.length;
-        const nBins = data.n_bins;
-        const cellW = Math.max(1, (W - 80) / nBins);
-        const cellH = Math.max(1, 2);
-        const H = Math.max(400, nDepths * cellH + 80);
-
-        canvas.width = W * 2;
-        canvas.height = H * 2;
-        ctx.scale(2, 2);
-        ctx.fillStyle = '#0a0e14';
-        ctx.fillRect(0, 0, W, H);
-
-        const startX = 60;
-
-        // Draw image
-        for (let d = 0; d < nDepths; d++) {
-            for (let b = 0; b < nBins; b++) {
-                const [r, g, bC] = data.image[d][b];
-                ctx.fillStyle = `rgb(${r},${g},${bC})`;
-                ctx.fillRect(startX + b * cellW, 20 + d * cellH, cellW + 0.5, cellH + 0.5);
-            }
-            // Depth labels (every 20th)
-            if (d % 20 === 0) {
-                ctx.fillStyle = '#6b7a8d';
-                ctx.font = '9px JetBrains Mono';
-                ctx.textAlign = 'right';
-                ctx.fillText(data.depth[d].toFixed(0), startX - 5, 20 + d * cellH + 3);
-            }
-        }
-
-        // Color scale legend
-        const legendX = startX + nBins * cellW + 10;
-        const legendH = 200;
-        for (let i = 0; i < legendH; i++) {
-            const val = i / legendH;
-            let r, g, bC;
-            if (val < 0.5) {
-                r = val * 2 * 255; g = val * 2 * 255; bC = 255;
-            } else {
-                r = 255; g = (1 - val) * 2 * 255; bC = (1 - val) * 2 * 255;
-            }
-            ctx.fillStyle = `rgb(${r},${g},${bC})`;
-            ctx.fillRect(legendX, 20 + i, 15, 1);
-        }
-        ctx.fillStyle = '#6b7a8d';
-        ctx.font = '10px JetBrains Mono';
-        ctx.textAlign = 'left';
-        ctx.fillText(`${data.params.v_max} Ωm`, legendX + 18, 25);
-        ctx.fillText(`${data.params.v_min} Ωm`, legendX + 18, 20 + legendH);
-        ctx.fillText('High', legendX + 18, 20 + legendH / 2 - 10);
-        ctx.fillText('Low', legendX + 18, 20 + legendH / 2 + 15);
-
-        const baseImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        this._imageSyncCtx = { ctx, startX, drawTop: 20, cellH, nDepths, depthArr: data.depth, totalW: W, baseImage };
-        if (Number.isFinite(this.depthSync?.activeDepth)) this._drawImageDepthMarker(this.depthSync.activeDepth);
-
-        canvas.onmousemove = (ev) => {
-            const rect = canvas.getBoundingClientRect();
-            const y = ev.clientY - rect.top;
-            const dMin = data.depth[0], dMax = data.depth[data.depth.length - 1];
-            const depth = dMin + ((y - 20) / ((nDepths * cellH) || 1)) * (dMax - dMin);
-            this._publishDepthSync(depth, 'imagelog');
-        };
     }
 
     // ─── Sprint 28: Offset-Well Analogs ─────────────────────────
