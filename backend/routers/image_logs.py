@@ -192,6 +192,33 @@ def get_asset_file(wid: int, asset_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Image file not found")
     return FileResponse(str(path))
 
+@router.put("/{asset_id}")
+def update_asset(wid: int, asset_id: int, data: dict, db: Session = Depends(get_db)):
+    _well(db, wid)
+    row = _asset(db, wid, asset_id)
+    if "image_type" in data:
+        row.image_type = str(data.get("image_type") or row.image_type)
+    if "source" in data:
+        row.source = str(data.get("source") or "")
+    if "status" in data and data.get("status") in {"draft", "approved"}:
+        row.status = data["status"]
+    if "depth_top" in data:
+        row.depth_top = float(data["depth_top"])
+    if "depth_bottom" in data:
+        row.depth_bottom = float(data["depth_bottom"])
+    if row.depth_bottom <= row.depth_top:
+        raise HTTPException(400, "depth_bottom must be greater than depth_top")
+    if "borehole_radius" in data:
+        value = data.get("borehole_radius")
+        row.borehole_radius = float(value) if value not in (None, "") else None
+    if "azimuth_start" in data:
+        row.azimuth_start = float(data["azimuth_start"])
+    if "azimuth_end" in data:
+        row.azimuth_end = float(data["azimuth_end"])
+    db.commit()
+    db.refresh(row)
+    return _asset_dict(row)
+
 @router.delete("/{asset_id}", status_code=204)
 def delete_asset(wid: int, asset_id: int, db: Session = Depends(get_db)):
     _well(db, wid)

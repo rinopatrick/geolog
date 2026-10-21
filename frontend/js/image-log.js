@@ -231,23 +231,90 @@
 
     async upload(file) {
       if (!file) return;
-      if (/\.(dlis|lis)$/i.test(file.name)) return GeoToast.warn('DLIS/LIS import uses the API endpoint /image-assets/import-dlis.');
       const top = Number($('imgDepthTop').value), bottom = Number($('imgDepthBottom').value), radius = Number($('imgUploadRadius').value);
-      if (!Number.isFinite(top) || !Number.isFinite(bottom) || bottom <= top) return GeoToast.warn('Set valid upload depth top/base.');
-      const fd = new FormData();
-      fd.append('file', file); fd.append('depth_top', String(top)); fd.append('depth_bottom', String(bottom));
-      fd.append('borehole_radius', String(radius || 0.15)); fd.append('image_type', $('imgAssetType').value || 'manual');
-      fd.append('source', file.name);
+      const validDepth = Number.isFinite(top) && Number.isFinite(bottom) && bottom > top;
       $('imgFileName').textContent = file.name;
+      const fd = new FormData();
+      fd.append('file', file);
+      if (validDepth) { fd.append('depth_top', String(top)); fd.append('depth_bottom', String(bottom)); }
+      fd.append('borehole_radius', String(radius || 0.15));
+      fd.append('image_type', $('imgAssetType').value || 'manual');
+      let endpoint = `/api/wells/${this.state.wid}/image-assets`;
+      if (/\.dlis$/i.test(file.name)) {
+        const channel = ($('imgChannel').value || '').trim();
+        if (!channel) return GeoToast.warn('Enter the DLIS image channel.');
+        fd.append('channel', channel);
+        fd.append('depth_channel', 'DEPT');
+        endpoint += '/import-dlis';
+      } else if (/\.lis$/i.test(file.name)) {
+        return GeoToast.warn('LIS image import is not implemented; use DLIS or a raster export.');
+      } else if (!validDepth) {
+        return GeoToast.warn('Set valid upload depth top/base.');
+      } else {
+        fd.append('source', file.name);
+      }
       try {
-        const resp = await fetch(`/api/wells/${this.state.wid}/image-assets`, { method: 'POST', headers: app._authHeaders(), body: fd });
+        const resp = await fetch(endpoint, { method: 'POST', headers: app._authHeaders(), body: fd });
         const body = await resp.json().catch(() => ({}));
         if (!resp.ok) throw new Error(body.detail || `Upload failed (${resp.status})`);
-        GeoToast.success('Image asset uploaded');
+        GeoToast.success(`Image asset uploaded · ${body.width || '?'} × ${body.height || '?'} px`);
         this.state.selectedId = body.id;
         await this.load();
       } catch (e) { GeoToast.error(e.message); }
     },
+
+    editAsset() {
+      const a = this.state.asset;
+      if (!a) return GeoToast.warn('Select an image asset first.');
+      PxModal.open({
+        title: 'Edit image asset',
+        body: `<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px">
+            <label style="color:var(--px-muted);font-size:9px">Type<input id="imgEditType" class="px-text-control" value="${esc(a.image_type || '')}" style="width:100%;margin-top:3px"></label>
+            <label style="color:var(--px-muted);font-size:9px">Source<input id="imgEditSource" class="px-text-control" value="${esc(a.source || '')}" style="width:100%;margin-top:3px"></label>
+            <label style="color:var(--px-muted);font-size:9px">Depth top<input id="imgEditTop" class="px-text-control" type="number" step="0.1" value="${a.depth_top}" style="width:100%;margin-top:3px"></label>
+            <label style="color:var(--px-muted);font-size:9px">Depth base<input id="imgEditBottom" class="px-text-control" type="number" step="0.1" value="${a.depth_bottom}" style="width:100%;margin-top:3px"></label>
+            <label style="color:var(--px-muted);font-size:9px">Radius (m)<input id="imgEditRadius" class="px-text-control" type="number" step="0.001" value="${a.borehole_radius ?? ''}" style="width:100%;margin-top:3px"></label>
+          </div>`,
+        primaryLabel: 'Save asset',
+        onPrimary: async () => {
+          const payload = {
+            image_type: document.getElementById('imgEditType').value,
+            source: document.getElementById('imgEditSource').value,
+            depth_top: Number(document.getElementById('imgEditTop').value),
+            depth_bottom: Number(document.getElementById('imgEditBottom').value),
+            borehole_radius: document.getElementById('imgEditRadius').value || null,
+          };
+          if (!(payload.depth_bottom > payload.depth_top)) return GeoToast.error('Depth base must exceed depth top.');
+          try {
+            await app._api(`/wells/${this.state.wid}/image-assets/${a.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+            PxModal.close();
+            GeoToast.success('Image asset updated');
+            await this.selectAsset(a.id);
+            await this.load();
+          } catch (e) { GeoToast.error(e.message); }
+        },
+      });
+    },
+
+    deleteAsset() {
+      const a = this.state.asset;
+      if (!a) return GeoToast.warn('Select an image asset first.');
+      PxModal.open({
+        title: 'Delete image asset',
+        body: `<p>Delete <strong>${esc(a.image_type || 'image')}</strong> at ${num(a.depth_top, 1)}–${num(a.depth_bottom, 1)} m and all ${a.dip_rows?.length || 0} dip picks?</p><p>This removes the artifact file and cannot be undone.</p>`,
+        primaryLabel: 'Delete asset',
+        onPrimary: async () => {
+          try {
+            await app._api(`/wells/${this.state.wid}/image-assets/${a.id}`, { method: 'DELETE' });
+            PxModal.close();
+            GeoToast.success('Image asset deleted');
+            this.state.selectedId = null;
+            this.state.asset = null;
+            await this.load();
+          } catch (e) { GeoToast.error(e.message); }
+        },
+      });
+    }
   };
 
   window.ImageLogView = View;
@@ -256,6 +323,8 @@
     $('imgCanvas')?.addEventListener('click', (e) => View.onCanvasClick(e));
     $('imgFitBtn')?.addEventListener('click', () => View.fitDip());
     $('imgApproveBtn')?.addEventListener('click', () => View.approveAll());
+    $('imgEditBtn')?.addEventListener('click', () => View.editAsset());
+    $('imgDeleteBtn')?.addEventListener('click', () => View.deleteAsset());
     $('imgChooseFile')?.addEventListener('click', () => $('imgFile').click());
     $('imgFile')?.addEventListener('change', (e) => View.upload(e.target.files?.[0]));
     const bar = $('imgUploadBar');

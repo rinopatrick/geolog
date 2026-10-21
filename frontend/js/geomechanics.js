@@ -87,6 +87,40 @@
       } catch (e) { GeoToast.error(e.message); }
     },
 
+    editCalibration() {
+      const model = this.state.model;
+      if (!model) return GeoToast.warn('Create a model first.');
+      if (model.status === 'approved') {
+        PxModal.open({
+          title: 'Calibration · approved model',
+          body: '<p>This model is approved and immutable. Create a new model to change calibration.</p>',
+          primaryLabel: '',
+        });
+        return;
+      }
+      const body = `<p>Calibration points are <code>[depth, value]</code> pairs in psi. Supported keys: <code>pp</code>, <code>shmin</code>, <code>shmax</code>, <code>shmax_azimuth</code>, and optional <code>fracture_planes</code>.</p>
+        <textarea id="geoCalJson" aria-label="Calibration JSON">${esc(JSON.stringify(model.calibration || {}, null, 2))}</textarea>`;
+      PxModal.open({
+        title: `Calibration · model v${model.version}`,
+        body,
+        primaryLabel: 'Save calibration',
+        onPrimary: async () => {
+          let parsed;
+          try { parsed = JSON.parse(document.getElementById('geoCalJson').value || '{}'); }
+          catch (e) { return GeoToast.error(`Invalid JSON: ${e.message}`); }
+          if (Array.isArray(parsed) || typeof parsed !== 'object' || parsed === null) return GeoToast.error('Calibration must be a JSON object.');
+          try {
+            await app._api(`/wells/${this.state.wid}/geomechanics/models/${model.id}`, {
+              method: 'PUT', body: JSON.stringify({ calibration: parsed }),
+            });
+            PxModal.close();
+            GeoToast.success('Calibration saved');
+            await this.load();
+          } catch (e) { GeoToast.error(e.message); }
+        },
+      });
+    },
+
     async saveModel() {
       const model = this.state.model;
       if (!model) return this.createModel();
@@ -294,6 +328,7 @@
     });
     $('geoNewBtn')?.addEventListener('click', () => View.createModel());
     $('geoSaveBtn')?.addEventListener('click', () => View.saveModel());
+    $('geoCalBtn')?.addEventListener('click', () => View.editCalibration());
     $('geoComputeBtn')?.addEventListener('click', () => View.compute());
     $('geoExportBtn')?.addEventListener('click', () => View.exportPdf());
   });

@@ -1136,7 +1136,7 @@
                             <canvas class="px-chart-svg" id="csCrossplot" role="img" aria-label="Porosity versus air permeability crossplot"></canvas>
                         </figure>
                         <figure class="px-panel px-chart-panel" aria-labelledby="cs-pc-title" style="margin:0">
-                            <div class="px-panel-head"><div class="px-chart-heading"><h2 id="cs-pc-title">Capillary pressure</h2><span class="px-chart-sub" id="csPcHead">select a plug</span></div><div class="px-chart-tools"><span class="px-badge px-info" id="csPcMethod">AIR–BRINE</span></div></div>
+                            <div class="px-panel-head"><div class="px-chart-heading"><h2 id="cs-pc-title">Capillary pressure</h2><span class="px-chart-sub" id="csPcHead">select a plug</span></div><div class="px-chart-tools"><select id="csShModel" class="px-sh-select" aria-label="Saturation-height model"></select><button class="px-button px-secondary" type="button" id="csApplyShBtn" data-role-required="interpreter,admin">Apply SH</button><button class="px-button px-secondary" type="button" id="csPcToggle" hidden>Pc</button><span class="px-badge px-info" id="csPcMethod">Pc</span></div></div>
                             <canvas class="px-chart-svg" id="csPcPlot" role="img" aria-label="Capillary pressure curve for selected plug"></canvas>
                         </figure>
                     </section>
@@ -1158,6 +1158,7 @@
                     <span class="px-toolbar-title">Geomechanics</span>
                     <select id="geoModel" aria-label="Geomechanics model version"></select>
                     <button class="px-button px-secondary" type="button" id="geoNewBtn" data-role-required="interpreter,admin">New model</button>
+                    <button class="px-button px-secondary" type="button" id="geoCalBtn" data-role-required="interpreter,admin">Calibration</button>
                     <span class="px-badge px-info" id="geoBadgePp"><i class="px-badge-dot"></i>Pp</span>
                     <span class="px-badge px-info" id="geoBadgeShmin"><i class="px-badge-dot"></i>Shmin</span>
                     <span class="px-badge px-warn" id="geoBadgeShmax"><i class="px-badge-dot"></i>Shmax assumed</span>
@@ -1218,6 +1219,8 @@
                     <span class="px-toolbar-spacer"></span>
                     <button class="px-button px-primary" type="button" id="imgFitBtn" data-role-required="interpreter,admin"><i data-lucide="spline"></i>Fit dip</button>
                     <button class="px-button px-secondary" type="button" id="imgApproveBtn" data-role-required="interpreter,admin">Approve picks</button>
+                    <button class="px-button px-secondary" type="button" id="imgEditBtn" data-role-required="interpreter,admin">Edit</button>
+                    <button class="px-button px-secondary" type="button" id="imgDeleteBtn" data-role-required="admin">Delete asset</button>
                 </section>
                 <div class="px-image-main">
                     <figure class="px-panel px-image-panel" aria-labelledby="img-unwrapped-title" style="margin:0">
@@ -1270,6 +1273,7 @@
                         <label>Top <input id="imgDepthTop" type="number" step="0.1" aria-label="Upload depth top"></label>
                         <label>Base <input id="imgDepthBottom" type="number" step="0.1" aria-label="Upload depth bottom"></label>
                         <label>Radius m <input id="imgUploadRadius" type="number" step="0.001" min="0.01" value="0.15" aria-label="Borehole radius for new image"></label>
+                        <label>DLIS ch <input id="imgChannel" value="IMG" aria-label="DLIS image channel"></label>
                         <label>Type <select id="imgAssetType" class="px-text-control" style="width:74px;height:24px"><option>FMI</option><option>UBI</option><option>OBMI</option><option>manual</option></select></label>
                     </div>
                     <span class="px-upload-meta" id="imgFileName">no file selected</span>
@@ -1592,6 +1596,16 @@
         <div class="status-item" id="statusCoords">—</div>
     </div>
 
+
+    <!-- Petrophysics workbench modal -->
+    <div id="pxModal" class="px-modal" hidden>
+        <div class="px-modal-card" role="dialog" aria-modal="true" aria-labelledby="pxModalTitle">
+            <div class="px-modal-head"><h2 id="pxModalTitle"></h2><button type="button" id="pxModalClose" class="px-modal-close" aria-label="Close dialog">×</button></div>
+            <div class="px-modal-body" id="pxModalBody"></div>
+            <div class="px-modal-foot" id="pxModalFoot"></div>
+        </div>
+    </div>
+
     <!-- Loading Overlay -->
     <div id="loadingOverlay" class="loading-overlay" style="display:none">
         <div class="loading-spinner"></div>
@@ -1606,6 +1620,7 @@
     <script src="/static/js/templates.js"></script>
     <script src="/static/js/multi-well.js"></script>
     <script src="/static/js/seismic-tie.js"></script>
+    <script src="/static/js/petrophysics-common.js"></script>
     <script src="/static/js/core-scal.js"></script>
     <script src="/static/js/geomechanics.js"></script>
     <script src="/static/js/image-log.js"></script>

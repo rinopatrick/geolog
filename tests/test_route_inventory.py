@@ -257,6 +257,7 @@ EXPECTED_ROUTES = [
     "PUT /api/wells/{wid}",
     "PUT /api/wells/{wid}/core/plugs/{plug_id}",
     "PUT /api/wells/{wid}/geomechanics/models/{model_id}",
+    "PUT /api/wells/{wid}/image-assets/{asset_id}",
 ]
 
 

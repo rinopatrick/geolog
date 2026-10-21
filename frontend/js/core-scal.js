@@ -11,7 +11,7 @@
   };
 
   const View = {
-    state: { wid: null, datasets: [], plugs: [], rocks: [], units: [], models: [], selectedId: null, datasetId: null, source: '' },
+    state: { wid: null, datasets: [], plugs: [], rocks: [], units: [], models: [], selectedId: null, datasetId: null, source: '', shModelId: null, shResult: null, pcMode: 'pc', pendingImport: null },
 
     async load() {
       if (!app.currentWell) return;
@@ -29,6 +29,7 @@
         if (this.state.selectedId && !plugs.some((p) => p.id === this.state.selectedId)) this.state.selectedId = null;
         if (!this.state.selectedId && plugs.length) this.state.selectedId = plugs[0].id;
         this.render();
+        this.renderShModels();
         this.selectPlug(this.state.selectedId, true);
       } catch (e) {
         GeoToast.error(`Core data: ${e.message}`);
@@ -106,6 +107,46 @@
       this.drawCrossplot(plugs);
     },
 
+    renderShModels() {
+      const select = $('csShModel');
+      if (!select) return;
+      const models = this.state.models || [];
+      if (!models.length) { select.innerHTML = '<option value="">No SH model</option>'; return; }
+      if (!models.some((m) => m.id === this.state.shModelId)) this.state.shModelId = models[0].id;
+      select.innerHTML = models.map((m) => `<option value="${m.id}" ${m.id === this.state.shModelId ? 'selected' : ''}>SH v${esc(m.version)} · ${esc(m.model_type)} · R² ${num(m.r2, 2)}</option>`).join('');
+    },
+
+    async applySh() {
+      if (!this.state.shModelId) return GeoToast.warn('Fit a saturation-height model first.');
+      try {
+        const result = await app._api(`/wells/${this.state.wid}/core/saturation-height/apply`, {
+          method: 'POST', body: JSON.stringify({ model_id: this.state.shModelId }),
+        });
+        this.state.shResult = result;
+        this.state.pcMode = 'sh';
+        $('csPcToggle').hidden = false;
+        $('csPcToggle').textContent = 'Show Pc';
+        $('csPcMethod').textContent = 'SH';
+        const target = Number(result.contact_depth) - 100;
+        let best = null;
+        (result.depth || []).forEach((d, i) => {
+          if (result.sw[i] == null) return;
+          if (!best || Math.abs(Number(d) - target) < Math.abs(Number(best.d) - target)) best = { d: Number(d), sw: Number(result.sw[i]) };
+        });
+        if (best) $('csSummarySw').textContent = `${(best.sw * 100).toFixed(1)} %`;
+        GeoToast.success(`SH applied to ${result.sw.length} samples`);
+        this.drawPc([]);
+      } catch (e) { GeoToast.error(e.message); }
+    },
+
+    togglePc() {
+      this.state.pcMode = this.state.pcMode === 'sh' ? 'pc' : 'sh';
+      $('csPcMethod').textContent = this.state.pcMode === 'sh' ? 'SH' : 'Pc';
+      $('csPcToggle').textContent = this.state.pcMode === 'sh' ? 'Show Pc' : 'Show SH';
+      const plug = this.state.plugs.find((p) => p.id === this.state.selectedId);
+      this.drawPc(plug?.pc_rows || []);
+    },
+
     async selectPlug(id, draw = true) {
       if (!id) return;
       this.state.selectedId = id;
@@ -163,8 +204,44 @@
       pts.forEach((p) => { ctx.fillStyle = '#d4a853'; ctx.strokeStyle = '#111720'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(px(p.phi), py(p.k), 3.4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); });
     },
 
+    drawShProfile(result) {
+      const canvas = $('csPcPlot');
+      if (!canvas || !canvas.clientWidth) return;
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.clientWidth, h = canvas.clientHeight || 150;
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      const ctx = canvas.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+      const depths = result.depth.map(Number), sw = result.sw.map(Number);
+      const valid = depths.map((d, i) => [d, sw[i]]).filter(([, v]) => Number.isFinite(v));
+      $('csPcHead').textContent = `SH profile · ${result.contact_depth} m contact`;
+      if (!valid.length) { ctx.fillStyle = '#6b7a8d'; ctx.font = '10px Geologica'; ctx.textAlign = 'center'; ctx.fillText('No valid SH samples', w / 2, h / 2); return; }
+      const pad = { l: 46, r: 12, t: 12, b: 26 };
+      const d0 = Math.min(...valid.map((p) => p[0])), d1 = Math.max(...valid.map((p) => p[0]));
+      const px = (v) => pad.l + (1 - v) * (w - pad.l - pad.r);
+      const py = (d) => pad.t + ((d - d0) / Math.max(1e-9, d1 - d0)) * (h - pad.t - pad.b);
+      ctx.strokeStyle = '#2a3446'; ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const v = i / 4;
+        ctx.beginPath(); ctx.moveTo(px(v), pad.t); ctx.lineTo(px(v), h - pad.b); ctx.stroke();
+        ctx.fillStyle = '#9aa8b8'; ctx.font = '9px JetBrains Mono'; ctx.textAlign = 'center'; ctx.fillText(`${Math.round(v * 100)}`, px(v), h - 10);
+      }
+      for (let i = 0; i <= 3; i++) {
+        const d = d0 + (d1 - d0) * i / 3;
+        ctx.beginPath(); ctx.moveTo(pad.l, py(d)); ctx.lineTo(w - pad.r, py(d)); ctx.stroke();
+        ctx.fillStyle = '#9aa8b8'; ctx.textAlign = 'right'; ctx.fillText(d.toFixed(0), pad.l - 5, py(d) + 3);
+      }
+      ctx.beginPath();
+      valid.forEach(([d, v], i) => { const X = px(v), Y = py(d); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+      ctx.strokeStyle = '#d4a853'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#9aa8b8'; ctx.textAlign = 'center'; ctx.fillText('Sw (fraction)', w / 2, h - 1);
+    },
+
     drawPc(rows) {
       const canvas = $('csPcPlot');
+      if (this.state.pcMode === 'sh' && this.state.shResult) {
+        this.drawShProfile(this.state.shResult);
+        return;
+      }
       if (!canvas || !canvas.clientWidth) return;
       const dpr = window.devicePixelRatio || 1;
       const w = canvas.clientWidth, h = canvas.clientHeight || 150;
@@ -202,17 +279,61 @@
       catch (e) { GeoToast.error(e.message); }
     },
 
-    async importCsv(file) {
+    async previewImport(file) {
       if (!file) return;
-      const fd = new FormData(); fd.append('file', file);
+      const fd = new FormData();
+      fd.append('file', file);
       try {
-        const resp = await fetch(`/api/wells/${this.state.wid}/core/import`, { method: 'POST', headers: app._authHeaders(), body: fd });
-        const body = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(body.detail || `Import failed (${resp.status})`);
-        GeoToast.success(`Imported ${body.imported} plugs${body.conflicts?.length ? `, ${body.conflicts.length} conflicts` : ''}`);
-        await this.load();
+        const resp = await fetch(`/api/wells/${this.state.wid}/core/import?dry_run=true`, {
+          method: 'POST', headers: app._authHeaders(), body: fd,
+        });
+        const report = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(report.detail || `Preview failed (${resp.status})`);
+        this.state.pendingImport = { file, report };
+        const conflicts = (report.conflicts || []).slice(0, 10);
+        const errors = (report.errors || []).slice(0, 10);
+        const rows = (items, kind) => items.length
+          ? `<table><thead><tr><th>Line</th><th>${kind === 'conflict' ? 'Plug' : 'Error'}</th><th>MD</th></tr></thead><tbody>${items.map((x) => `<tr><td>${esc(x.line)}</td><td>${esc(kind === 'conflict' ? x.plug_name : x.error)}</td><td>${kind === 'conflict' ? num(x.depth_md, 2) : '—'}</td></tr>`).join('')}</tbody></table>`
+          : '<p>None.</p>';
+        const body = `
+          <div class="px-import-summary">
+            <div class="px-import-stat"><span>DATA ROWS</span><strong>${report.rows ?? 0}</strong></div>
+            <div class="px-import-stat"><span>WOULD IMPORT</span><strong>${report.would_import ?? 0}</strong></div>
+            <div class="px-import-stat"><span>CONFLICTS</span><strong>${(report.conflicts || []).length}</strong></div>
+            <div class="px-import-stat"><span>ERRORS</span><strong>${(report.errors || []).length}</strong></div>
+          </div>
+          <p><strong>${esc(file.name)}</strong> · dry run only, nothing has been written yet.</p>
+          <h3 style="font-size:10px;margin:12px 0 5px;color:var(--px-muted)">CONFLICTS</h3>${rows(conflicts, 'conflict')}
+          <h3 style="font-size:10px;margin:12px 0 5px;color:var(--px-muted)">ERRORS</h3>${rows(errors, 'error')}
+          <p style="margin-top:12px">Conflicts are existing <code>(plug_name, depth_md)</code> keys. Import new skips them; update existing overwrites the plug fields.</p>`;
+        PxModal.open({
+          title: 'Core CSV import preview',
+          body,
+          primaryLabel: report.would_import ? 'Import new' : '',
+          secondaryLabel: (report.conflicts || []).length ? 'Update existing' : '',
+          onPrimary: () => this.confirmImport(false),
+          onSecondary: () => this.confirmImport(true),
+        });
       } catch (e) { GeoToast.error(e.message); }
     },
+
+    async confirmImport(update) {
+      const pending = this.state.pendingImport;
+      if (!pending) return;
+      const fd = new FormData();
+      fd.append('file', pending.file);
+      try {
+        const resp = await fetch(`/api/wells/${this.state.wid}/core/import${update ? '?update=true' : ''}`, {
+          method: 'POST', headers: app._authHeaders(), body: fd,
+        });
+        const body = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(body.detail || `Import failed (${resp.status})`);
+        PxModal.close();
+        GeoToast.success(`Imported ${body.imported} plugs${body.conflicts?.length ? `, ${body.conflicts.length} skipped` : ''}`);
+        this.state.pendingImport = null;
+        await this.load();
+      } catch (e) { GeoToast.error(e.message); }
+    }
   };
 
   window.CoreScalView = View;
@@ -231,6 +352,9 @@
     $('csClusterBtn')?.addEventListener('click', () => View.cluster());
     $('csFitShBtn')?.addEventListener('click', () => View.fitSh());
     $('csImportBtn')?.addEventListener('click', () => $('csCsvFile').click());
-    $('csCsvFile')?.addEventListener('change', (e) => View.importCsv(e.target.files?.[0]));
+    $('csCsvFile')?.addEventListener('change', (e) => View.previewImport(e.target.files?.[0]));
+    $('csShModel')?.addEventListener('change', (e) => { View.state.shModelId = Number(e.target.value) || null; });
+    $('csApplyShBtn')?.addEventListener('click', () => View.applySh());
+    $('csPcToggle')?.addEventListener('click', () => View.togglePc());
   });
 })();
