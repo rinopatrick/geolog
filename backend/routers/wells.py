@@ -522,10 +522,13 @@ def create_well(data: dict, db: Session = Depends(get_db)):
         elevation=optional_float(data, "elevation"),
         total_depth=optional_float(data, "total_depth"),
         depth_unit=optional_str(data, "depth_unit", "FT"),
+        unit_system=optional_str(data, "unit_system", "field").lower(),
         operator=optional_str(data, "operator"),
         field_name=optional_str(data, "field_name"),
         spud_date=optional_str(data, "spud_date"),
     )
+    if w.unit_system not in {"field", "si"}:
+        raise HTTPException(400, "unit_system must be 'field' or 'si'")
     db.add(w)
     db.commit()
     db.refresh(w)
@@ -563,11 +566,14 @@ def update_well(wid: int, data: dict, db: Session = Depends(get_db)):
     for field, value in pick_typed(
         data,
         strings=("name", "uwi", "api_number", "operator", "field_name",
-                 "depth_unit", "spud_date"),
+                 "depth_unit", "spud_date", "unit_system"),
         floats=("latitude", "longitude", "elevation", "total_depth"),
         nullable=("latitude", "longitude", "elevation", "total_depth"),
     ).items():
         setattr(w, field, value)
+    if (w.unit_system or "field").lower() not in {"field", "si"}:
+        raise HTTPException(400, "unit_system must be 'field' or 'si'")
+    w.unit_system = (w.unit_system or "field").lower()
     db.commit()
     db.refresh(w)
     return {c.name: getattr(w, c.name) for c in Well.__table__.columns}

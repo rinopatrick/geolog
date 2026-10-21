@@ -23,13 +23,15 @@ try:
     from database import get_db
     from deps import SafeJSONResponse
     from las_parser import CURVE_TRACKS
-    from models import CurveData, LogRun, LogRunDepthShift
+    from models import CurveData, DepthControlPoint, LogRun, LogRunDepthShift
+    from semantics import apply_run_semantics
     from validation import optional_float, optional_str
 except ImportError:
     from backend.database import get_db
     from backend.deps import SafeJSONResponse
     from backend.las_parser import CURVE_TRACKS
-    from backend.models import CurveData, LogRun, LogRunDepthShift
+    from backend.models import CurveData, DepthControlPoint, LogRun, LogRunDepthShift
+    from backend.semantics import apply_run_semantics
     from backend.validation import optional_float, optional_str
 
 router = APIRouter(prefix="/api/log-runs", tags=["log-runs"])
@@ -59,8 +61,8 @@ def _parse_if_modified_since(value: str):
     except Exception:
         return None
 
-def _build_curve_cache_headers(lr_id: int, mnemonics, start, stop, step, max_points=None):
-    key = f"{lr_id}|{','.join(sorted([str(m) for m in (mnemonics or [])]))}|{start}|{stop}|{step}|{max_points}"
+def _build_curve_cache_headers(lr_id: int, mnemonics, start, stop, step, max_points=None, extra=""):
+    key = f"{lr_id}|{','.join(sorted([str(m) for m in (mnemonics or [])]))}|{start}|{stop}|{step}|{max_points}|{extra}"
     # Cache-busting only — not a security primitive, hence usedforsecurity=False.
     etag = f'W/"{hashlib.sha1(key.encode("utf-8"), usedforsecurity=False).hexdigest()}"'
     return {
@@ -319,6 +321,62 @@ def list_curves(lr_id: int, db: Session = Depends(get_db)):
     ]
 
 
+@router.get("/{lr_id}/depth-control-points")
+def list_depth_control_points(lr_id: int, db: Session = Depends(get_db)):
+    lr = db.query(LogRun).filter(LogRun.id == lr_id).first()
+    if not lr:
+        raise HTTPException(404, "Log run not found")
+    rows = (
+        db.query(DepthControlPoint)
+        .filter(DepthControlPoint.log_run_id == lr_id)
+        .order_by(DepthControlPoint.sort_order.asc(), DepthControlPoint.md.asc())
+        .all()
+    )
+    return [
+        {"md": r.md, "corrected_depth": r.corrected_depth, "sort_order": r.sort_order}
+        for r in rows
+    ]
+
+@router.put("/{lr_id}/depth-control-points")
+def replace_depth_control_points(lr_id: int, data: dict, db: Session = Depends(get_db)):
+    lr = db.query(LogRun).filter(LogRun.id == lr_id).first()
+    if not lr:
+        raise HTTPException(404, "Log run not found")
+    points = data.get("points")
+    if not isinstance(points, list) or len(points) < 2:
+        raise HTTPException(400, "points must contain at least two (md, corrected_depth) objects")
+    prepared = []
+    for i, point in enumerate(points):
+        if not isinstance(point, dict):
+            raise HTTPException(400, f"points[{i}] must be an object")
+        try:
+            md = float(point.get("md"))
+            corrected = float(point.get("corrected_depth"))
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"points[{i}] requires numeric md and corrected_depth")
+        if not (np.isfinite(md) and np.isfinite(corrected)):
+            raise HTTPException(400, f"points[{i}] must be finite")
+        prepared.append((md, corrected))
+    prepared.sort(key=lambda p: p[0])
+    if any(prepared[i][0] >= prepared[i + 1][0] for i in range(len(prepared) - 1)):
+        raise HTTPException(400, "control-point MD values must be strictly increasing")
+
+    db.query(DepthControlPoint).filter(DepthControlPoint.log_run_id == lr_id).delete()
+    for order, (md, corrected) in enumerate(prepared):
+        db.add(DepthControlPoint(
+            log_run_id=lr_id, md=md, corrected_depth=corrected, sort_order=order,
+        ))
+    db.commit()
+    return {"status": "ok", "count": len(prepared)}
+
+@router.delete("/{lr_id}/depth-control-points", status_code=204)
+def clear_depth_control_points(lr_id: int, db: Session = Depends(get_db)):
+    lr = db.query(LogRun).filter(LogRun.id == lr_id).first()
+    if not lr:
+        raise HTTPException(404, "Log run not found")
+    db.query(DepthControlPoint).filter(DepthControlPoint.log_run_id == lr_id).delete()
+    db.commit()
+
 @router.post("/{lr_id}/data")
 def get_curve_data(
     lr_id: int,
@@ -327,11 +385,14 @@ def get_curve_data(
     if_modified_since: str = Header(default=None),
     db: Session = Depends(get_db),
 ):
-    """Get curve data for specified mnemonics with optional depth-range pagination."""
+    """Get curve data for specified mnemonics with corrected depth and TVD."""
     mnemonics = req.get("curve_mnemonics", [])
     start = req.get("start_depth")
     stop = req.get("stop_depth")
-    step = req.get("step", 1)
+    try:
+        step = int(req.get("step", 1) or 1)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "step must be an integer")
 
     if not mnemonics:
         raise HTTPException(400, "No curves requested")
@@ -340,7 +401,15 @@ def get_curve_data(
     if not lr:
         raise HTTPException(404, "Log run not found")
 
-    headers = _build_curve_cache_headers(lr_id, mnemonics, start, stop, step)
+    try:
+        result = apply_run_semantics(db, lr, mnemonics, start, stop, step)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, f"invalid depth range: {exc}")
+
+    headers = _build_curve_cache_headers(
+        lr_id, mnemonics, start, stop, step,
+        extra=result["metadata"]["input_hash"],
+    )
     last_modified_dt = (lr.uploaded_at or utcnow()).replace(tzinfo=datetime.timezone.utc)
     headers["Last-Modified"] = _httpdate(last_modified_dt)
 
@@ -350,49 +419,9 @@ def get_curve_data(
     if ims is not None and last_modified_dt <= ims:
         return SafeJSONResponse(status_code=304, content=None, headers=headers)
 
-    # Get depth curve with fallback candidates, then first curve in run
-    depth_curve = db.query(CurveData).filter(
-        CurveData.log_run_id == lr_id,
-        CurveData.mnemonic.in_(["DEPT", "DEPTH", "MD", "TVD"])
-    ).first()
-    if not depth_curve:
-        depth_curve = db.query(CurveData).filter(CurveData.log_run_id == lr_id).order_by(CurveData.id.asc()).first()
-
-    depth_arr = None
-    mask = None
-    if depth_curve and depth_curve.data_binary:
-        depth_arr = np.frombuffer(depth_curve.data_binary, dtype=np.float64).copy()
-        mask = np.ones(len(depth_arr), dtype=bool)
-        if start is not None:
-            mask &= (depth_arr >= float(start))
-        if stop is not None:
-            mask &= (depth_arr <= float(stop))
-
-    curves = db.query(CurveData).filter(
-        CurveData.log_run_id == lr_id,
-        CurveData.mnemonic.in_(mnemonics)
-    ).all()
-
-    result = {}
-    for c in curves:
-        arr = np.frombuffer(c.data_binary, dtype=np.float64).copy()
-        if mask is not None and len(arr) == len(depth_arr):
-            arr = arr[mask]
-        if step > 1:
-            arr = arr[::step]
-        result[c.mnemonic] = [
-            None if np.isnan(v) else round(float(v), 4)
-            for v in arr
-        ]
-
-    if depth_arr is not None:
-        d = depth_arr[mask] if mask is not None else depth_arr
-        if step > 1:
-            d = d[::step]
-        result["DEPTH"] = [round(float(v), 2) for v in d]
-
-    return SafeJSONResponse(content=result, headers=headers)
-
+    content = dict(result["curves"])
+    content["semantics"] = result["metadata"]
+    return SafeJSONResponse(content=content, headers=headers)
 
 @router.post("/{lr_id}/shoulder-bed-correction")
 def shoulder_bed_correction(lr_id: int, data: dict, db: Session = Depends(get_db)):
@@ -806,15 +835,22 @@ def get_decimated_data(
     if_modified_since: str = Header(default=None),
     db: Session = Depends(get_db),
 ):
-    """Return curve data decimated to <= max_points using LTTB."""
+    """Return corrected curve data decimated to <= max_points using LTTB."""
     lr = db.query(LogRun).filter(LogRun.id == lr_id).first()
     if not lr:
         raise HTTPException(404, "Log run not found")
 
     max_points = max(200, min(int(max_points or 3000), 50000))
-    curves = db.query(CurveData).filter(CurveData.log_run_id == lr_id).all()
+    try:
+        result = apply_run_semantics(db, lr, None, start_depth, stop_depth, 1)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, f"invalid depth range: {exc}")
 
-    headers = _build_curve_cache_headers(lr_id, [c.mnemonic for c in curves], start_depth, stop_depth, 1, max_points=max_points)
+    headers = _build_curve_cache_headers(
+        lr_id, [c["name"] for c in result["metadata"]["aliases"]],
+        start_depth, stop_depth, 1, max_points=max_points,
+        extra=result["metadata"]["input_hash"],
+    )
     last_modified_dt = (lr.uploaded_at or utcnow()).replace(tzinfo=datetime.timezone.utc)
     headers["Last-Modified"] = _httpdate(last_modified_dt)
 
@@ -824,51 +860,40 @@ def get_decimated_data(
     if ims is not None and last_modified_dt <= ims:
         return SafeJSONResponse(status_code=304, content=None, headers=headers)
 
-    depth_curve = db.query(CurveData).filter(
-        CurveData.log_run_id == lr_id,
-        CurveData.mnemonic.in_(["DEPT", "DEPTH", "MD", "TVD"])
-    ).first()
-    if not depth_curve:
-        depth_curve = db.query(CurveData).filter(CurveData.log_run_id == lr_id).order_by(CurveData.id.asc()).first()
-    depth_arr = np.frombuffer(depth_curve.data_binary, dtype=np.float64).copy() if depth_curve and depth_curve.data_binary else None
-
-    mask = None
-    if depth_arr is not None and (start_depth is not None or stop_depth is not None):
-        mask = np.ones(len(depth_arr), dtype=bool)
-        if start_depth is not None:
-            mask &= (depth_arr >= float(start_depth))
-        if stop_depth is not None:
-            mask &= (depth_arr <= float(stop_depth))
-
-    result = {}
-    original_points = 0
-    output_points = 0
+    depth = np.asarray(result["depth"], dtype=np.float64)
+    tvd = np.asarray(result["tvd"], dtype=np.float64)
+    series = {
+        name: np.asarray(values, dtype=np.float64)
+        for name, values in result["curves"].items()
+        if name not in {"DEPTH", "TVD"}
+    }
+    n = int(len(depth))
     decimated = False
-
-    for cd in curves:
-        full_arr = np.frombuffer(cd.data_binary, dtype=np.float64).copy()
-        arr = full_arr[mask] if (mask is not None and len(full_arr) == len(depth_arr)) else full_arr
-        n = int(len(arr))
-        if n > original_points:
-            original_points = n
-
-        if n <= max_points:
-            sampled = [None if np.isnan(v) else float(v) for v in arr]
+    if n > max_points:
+        reference = next((arr for arr in series.values() if len(arr) >= n), None)
+        if reference is not None:
+            indices = _lttb_indices(depth, reference[:n], max_points)
         else:
-            x_axis = (depth_arr[mask] if mask is not None else depth_arr) if (depth_arr is not None and len(full_arr) == len(depth_arr)) else np.arange(n, dtype=np.float64)
-            indices = _lttb_indices(np.asarray(x_axis, dtype=np.float64), np.asarray(arr, dtype=np.float64), max_points)
-            sampled = [None if np.isnan(arr[i]) else float(arr[i]) for i in indices]
-            decimated = True
+            step = int(np.ceil(n / float(max_points)))
+            indices = np.arange(0, n, step, dtype=np.int64)[:max_points]
+        decimated = True
+    else:
+        indices = np.arange(n, dtype=np.int64)
 
-        if len(sampled) > output_points:
-            output_points = len(sampled)
-        result[cd.mnemonic] = sampled
-
+    curves = {}
+    for name, arr in series.items():
+        curves[name] = [
+            None if int(i) >= len(arr) or np.isnan(arr[int(i)]) else round(float(arr[int(i)]), 6)
+            for i in indices
+        ]
+    output_points = int(len(indices))
     return SafeJSONResponse(content={
-        "curves": result,
+        "curves": curves,
+        "depth": [round(float(depth[i]), 4) for i in indices],
+        "tvd": [round(float(tvd[i]), 4) for i in indices],
         "decimated": decimated,
-        "original_points": original_points,
+        "original_points": n,
         "output_points": output_points,
         "max_points": max_points,
+        "semantics": result["metadata"],
     }, headers=headers)
-

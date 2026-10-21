@@ -10,6 +10,13 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
+- **Data semantics v1 (`data-semantics-v1`).** Log data now resolves well-level
+  curve aliases, converts known units to a per-well field/SI target, applies
+  piecewise MD→corrected-depth control points (legacy shift/stretch still maps
+  to two points), and emits TVD alongside corrected MD. Responses carry a
+  semantics metadata block with an input hash and warnings; stored curves are
+  never rewritten. Adds `wells.unit_system`, `depth_control_points`, migration
+  `9f2c1a7b4d10`, control-point API endpoints and UI fields.
 - **Production hardening.** JWT verification supports JWKS and RS256 public keys,
   token TTL/leeway are configurable, issued tokens carry a `jti` and the token
   endpoint reports `expires_in`.

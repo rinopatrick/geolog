@@ -237,6 +237,7 @@
                     <input type="number" id="depthBottom" step="10" class="depth-input">
                 </div>
                 <span class="toolbar-hint">🖱️ Scroll to zoom • Drag to pan</span>
+                <span id="semanticsBadge" style="display:none;font-size:11px;color:#d29922;border:1px solid #9e6a03;border-radius:999px;padding:2px 8px" title=""></span>
                 <button class="btn-sm" id="btnLithTrack" onclick="app.toggleLithTrack()" title="Toggle lithology track">
                     <i data-lucide="paintbrush"></i> Lithology
                 </button>
@@ -612,6 +613,7 @@
                     <div class="form-row"><label>Shift (ft)</label><input type="number" id="depthShiftVal" value="0" step="0.5"></div>
                     <div class="form-row"><label>Stretch</label><input type="number" id="depthStretchVal" value="1.000" step="0.001"></div>
                     <button class="btn-primary" onclick="app.saveDepthShift()"><i data-lucide="save"></i> Apply & Save</button>
+                    <button class="btn-sm" onclick="app.editDepthControlPoints()" title="Piecewise MD to corrected-depth mapping">Control Points</button>
                 </div>
 
                 <!-- Rw Estimation -->

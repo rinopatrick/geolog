@@ -32,6 +32,9 @@ const GeoModal = {
                     const opts = f.options.map(o => `<option value="${o.value}" ${o.value === f.value ? 'selected' : ''}>${o.label}</option>`).join('');
                     return `<label>${f.label}</label><select id="m_${f.id}">${opts}</select>`;
                 }
+                if (f.type === 'textarea') {
+                    return `<label>${f.label}</label><textarea id="m_${f.id}" rows="${f.rows || 6}" style="width:100%;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:5px;padding:6px">${f.value ?? ''}</textarea>`;
+                }
                 return `<label>${f.label}</label><input id="m_${f.id}" type="${f.type || 'text'}" value="${f.value ?? ''}" placeholder="${f.placeholder || ''}"${f.step ? ` step="${f.step}"` : ''}${f.type === 'color' ? ' style="height:36px;padding:2px 4px"' : ''}>`;
             }).join('');
             const footer = document.getElementById('modalFooter');
@@ -1146,6 +1149,24 @@ class GeoLogApp {
     }
 
     _applyCurveDataToRenderer(data, curves) {
+        const badge = document.getElementById('semanticsBadge');
+        if (badge) {
+            const sem = data.semantics || {};
+            const corrected = sem.depth_source && sem.depth_source !== 'raw';
+            const unitChanged = sem.unit_system && sem.unit_system !== 'field';
+            if (corrected || unitChanged) {
+                badge.style.display = '';
+                badge.textContent = corrected ? 'CORRECTED' : 'SI UNITS';
+                badge.title = [
+                    sem.version || '',
+                    sem.depth_source ? 'depth: ' + sem.depth_source : '',
+                    sem.unit_system ? 'units: ' + sem.unit_system : '',
+                    ...(sem.warnings || []),
+                ].filter(Boolean).join(' • ');
+            } else {
+                badge.style.display = 'none';
+            }
+        }
         const depth = data.DEPTH || [];
         const curveData = {};
         for (const c of curves) {
@@ -2372,12 +2393,13 @@ class GeoLogApp {
         const r = await GeoModal.show({ title: 'Add Well', fields: [
             { id: 'name', label: 'Well Name', placeholder: 'e.g. MELANIE-1' },
             { id: 'uwi', label: 'UWI / API Number (optional)', placeholder: '42-123-45678' },
+            { id: 'unit_system', label: 'Unit System', type: 'select', value: 'field', options: [{value:'field',label:'Field (ft, g/cc, us/ft)'},{value:'si',label:'SI (m, kg/m3, us/m)'}] },
         ]});
         if (!r?.name) return;
         try {
             await this._api('/wells/', {
                 method: 'POST',
-                body: JSON.stringify({ name: r.name, uwi: r.uwi || '', project_id: this.projects[0].id }),
+                body: JSON.stringify({ name: r.name, uwi: r.uwi || '', unit_system: r.unit_system || 'field', project_id: this.projects[0].id }),
             });
             await this.loadWells(this.projects[0].id);
             GeoToast.success('Well added');
@@ -2496,14 +2518,17 @@ class GeoLogApp {
             { id: 'operator', label: 'Operator', value: this.currentWell.operator || '' },
             { id: 'field_name', label: 'Field Name', value: this.currentWell.field_name || '' },
             { id: 'depth_unit', label: 'Depth Unit', type: 'select', value: this.currentWell.depth_unit || 'FT', options: [{value:'FT',label:'Feet (FT)'},{value:'M',label:'Meters (M)'}] },
+            { id: 'unit_system', label: 'Unit System', type: 'select', value: this.currentWell.unit_system || 'field', options: [{value:'field',label:'Field (ft, g/cc, us/ft)'},{value:'si',label:'SI (m, kg/m3, us/m)'}] },
         ]});
         if (!r?.name) return;
         try {
             await this._api(`/wells/${this.currentWell.id}`, {
                 method: 'PUT',
-                body: JSON.stringify({ name: r.name, uwi: r.uwi, operator: r.operator, field_name: r.field_name, depth_unit: r.depth_unit }),
+                body: JSON.stringify({ name: r.name, uwi: r.uwi, operator: r.operator, field_name: r.field_name, depth_unit: r.depth_unit, unit_system: r.unit_system || 'field' }),
             });
+            this.curveRangeCache?.clear();
             await this.loadWells(this.projects[0].id);
+            await this._loadCurveData().catch(() => {});
             GeoToast.success('Well updated');
         } catch (e) { GeoToast.error('Failed to update well: ' + e.message); }
     }
@@ -4874,7 +4899,46 @@ class GeoLogApp {
             method: 'POST',
             body: JSON.stringify({ shift, stretch }),
         });
+        this.curveRangeCache?.clear();
+        await this._loadCurveData().catch(() => {});
         GeoToast.success('Depth shift saved: ' + shift + ' ft, stretch ' + stretch);
+    }
+
+    async editDepthControlPoints() {
+        await this._populateToolRunSelectors();
+        const runId = document.getElementById('depthShiftRun')?.value;
+        if (!runId) return GeoToast.warn('Select a log run');
+        let points = [];
+        try { points = await this._api('/log-runs/' + runId + '/depth-control-points'); } catch {}
+        const text = (points || []).map(p => `${p.md}, ${p.corrected_depth}`).join(String.fromCharCode(10));
+        const r = await GeoModal.show({
+            title: 'Depth Control Points',
+            fields: [{
+                id: 'points', type: 'textarea', rows: 8,
+                label: 'MD, corrected depth — one pair per line',
+                value: text,
+            }],
+        });
+        if (!r) return;
+        const parsed = String(r.points || '')
+            .split(String.fromCharCode(10)).map(line => line.trim()).filter(Boolean)
+            .map(line => line.split(',').map(v => parseFloat(v.trim())))
+            .filter(pair => pair.length === 2 && pair.every(Number.isFinite))
+            .map(pair => ({ md: pair[0], corrected_depth: pair[1] }));
+        try {
+            if (parsed.length === 0) {
+                await this._api('/log-runs/' + runId + '/depth-control-points', { method: 'DELETE' });
+                GeoToast.info('Control points cleared');
+            } else {
+                await this._api('/log-runs/' + runId + '/depth-control-points', {
+                    method: 'PUT',
+                    body: JSON.stringify({ points: parsed }),
+                });
+                GeoToast.success(`Saved ${parsed.length} control points`);
+            }
+            this.curveRangeCache?.clear();
+            await this._loadCurveData().catch(() => {});
+        } catch (e) { GeoToast.error('Control points failed: ' + e.message); }
     }
 
     // ─── Curve Splice ────────────────────────────────────────
