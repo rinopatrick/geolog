@@ -386,7 +386,7 @@ async def bulk_upload_las(wid: int, files: list[UploadFile] = File(...), db: Ses
             results.append({"filename": file.filename, "status": "ok", "log_run_id": lr.id, "curves": len(las.curves), "points": len(las.depth)})
         except Exception as e:
             db.rollback()
-            results.append({"filename": file.filename, "status": "error", "reason": str(e)[:200]})
+            results.append({"filename": file.filename, "status": "error", "reason": type(e).__name__})
     return {"uploaded": len([r for r in results if r["status"] == "ok"]), "results": results}
 
 
@@ -641,7 +641,7 @@ def import_tops_csv(wid: int, data: dict, db: Session = Depends(get_db)):
             imported += 1
         except Exception as e:
             skipped += 1
-            errors.append(f"line {line_no}: {str(e)}")
+            errors.append(f"line {line_no}: {type(e).__name__}")
 
     db.commit()
     return {"imported": imported, "skipped": skipped, "errors": errors}

@@ -640,6 +640,7 @@ def curve_calc(wid: int, data: dict, db: Session = Depends(get_db)):
 
     # Whitelist expression safety checks
     import re
+    import ast as _ast
     allowed_funcs = {
         "sqrt", "log", "log10", "abs", "clip", "where",
         "sin", "cos", "tan", "arcsin", "arccos", "arctan",
@@ -681,8 +682,49 @@ def curve_calc(wid: int, data: dict, db: Session = Depends(get_db)):
             continue
         raise HTTPException(400, f"Unsupported token in expression: {t}")
 
+    def _safe_eval(expr: str):
+        """Evaluate arithmetic, curve names and the allow-listed numpy calls."""
+        tree = _ast.parse(expr, mode="eval")
+        binops = {
+            _ast.Add: lambda a, b: a + b,
+            _ast.Sub: lambda a, b: a - b,
+            _ast.Mult: lambda a, b: a * b,
+            _ast.Div: lambda a, b: a / b,
+            _ast.Pow: lambda a, b: a ** b,
+            _ast.Mod: lambda a, b: a % b,
+        }
+
+        def ev(node):
+            if isinstance(node, _ast.Expression):
+                return ev(node.body)
+            if isinstance(node, _ast.Constant) and isinstance(node.value, (int, float)):
+                return node.value
+            if isinstance(node, _ast.Name):
+                if node.id in safe_ns:
+                    return safe_ns[node.id]
+                raise ValueError(f"unsupported name: {node.id}")
+            if isinstance(node, _ast.BinOp) and type(node.op) in binops:
+                return binops[type(node.op)](ev(node.left), ev(node.right))
+            if isinstance(node, _ast.UnaryOp) and isinstance(node.op, _ast.USub):
+                return -ev(node.operand)
+            if isinstance(node, _ast.UnaryOp) and isinstance(node.op, _ast.UAdd):
+                return +ev(node.operand)
+            if isinstance(node, _ast.Attribute):
+                owner = ev(node.value)
+                if owner is np and node.attr in allowed_funcs:
+                    return getattr(owner, node.attr)
+                raise ValueError(f"unsupported attribute: {node.attr}")
+            if isinstance(node, _ast.Call):
+                fn = ev(node.func)
+                if not callable(fn):
+                    raise ValueError("expression calls a non-function")
+                return fn(*[ev(arg) for arg in node.args])
+            raise ValueError(f"unsupported expression: {type(node).__name__}")
+
+        return ev(tree)
+
     try:
-        result = eval(expression, {"__builtins__": {}}, safe_ns)
+        result = _safe_eval(expression)
     except Exception as e:
         raise HTTPException(400, f"Expression evaluation error: {str(e)[:200]}")
 

@@ -358,7 +358,7 @@ def estimate_rw(wid: int, data: dict, db: Session = Depends(get_db)):
             weights.append(0.75)
             results["inputs"].update({"rmf": rmf, "ssp": ssp, "temperature": t_val, "temperature_unit": t_unit})
         except Exception as e:
-            r["notes"].append(str(e))
+            r["notes"].append("calculation failed")
         results["methods"]["sp"] = r
 
     if method in {"ro", "all"}:
@@ -382,7 +382,7 @@ def estimate_rw(wid: int, data: dict, db: Session = Depends(get_db)):
             weights.append(0.80)
             results["inputs"].update({"rt_clean": rt_clean, "phi_clean": phi_clean, "m": m_val})
         except Exception as e:
-            r["notes"].append(str(e))
+            r["notes"].append("calculation failed")
         results["methods"]["ro"] = r
 
     if method in {"hingle", "all"}:
@@ -442,7 +442,7 @@ def estimate_rw(wid: int, data: dict, db: Session = Depends(get_db)):
                 weights.append(max(0.25, float(conf)))
             results["inputs"].update({"rt_curve": rt_curve, "phi_curve": phi_curve})
         except Exception as e:
-            r["notes"].append(str(e))
+            r["notes"].append("calculation failed")
         results["methods"]["hingle"] = r
 
     if rw_candidates:

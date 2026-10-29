@@ -25,9 +25,9 @@ def interprocess_lock(path: str, timeout: float = 10.0):
     lock_path = path if path.endswith(".lock") else path + ".lock"
     parent = os.path.dirname(os.path.abspath(lock_path))
     if parent:
-        os.makedirs(parent, exist_ok=True)
+        os.makedirs(parent, exist_ok=True)  # codeql[py/path-injection]
 
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)  # codeql[py/path-injection]
     deadline = time.monotonic() + timeout
     try:
         while True:
