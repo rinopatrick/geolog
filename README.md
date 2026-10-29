@@ -504,8 +504,8 @@ control-point rules, API endpoints and response shape.
 ## Production-readiness status
 
 Current state: **release candidate for a single-team, single-host deployment**.
-It is not yet a multi-tenant SaaS: the API is still `0.x`, file-backed state is
-single-host, and project membership is project-level rather than well-level.
+It is not yet a multi-tenant SaaS: the API is still `0.x` and file-backed state
+is single-host.
 
 Version: see [`backend/version.py`](backend/version.py) (single source of truth)
 and [CHANGELOG.md](CHANGELOG.md). While the major version is `0`, the API is not
@@ -519,7 +519,7 @@ Completed hardening:
   first login.
 - Login IP rate limit + per-account lockout, upload/body size caps, and a real
   backup/restore drill covering the database and artifact directory.
-- Project-level membership ACL, enabled by default; see
+- Project and per-well membership ACL, enabled by default; see
   [`docs/PROJECT_ACL.md`](docs/PROJECT_ACL.md).
 - Pinned, self-hosted Lucide; CSP and escaping fixes for generated HTML.
 - Durable background-job registry with crash recovery.

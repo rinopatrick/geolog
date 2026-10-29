@@ -19,6 +19,12 @@ adds a second, narrower layer without changing those roles.
   restricted by default.
 - Removing the last member requires `force=true`; without it the API returns
   `400` rather than silently reopening the project.
+- A well with no rows in `well_members` inherits its project. Adding the first
+  well member restricts that well: project membership alone no longer grants
+  access, and the caller must be a well member (or a global admin).
+- Precedence: **global admin > well member > project member > open fallback**.
+- A project admin can manage a restricted well's membership without being a
+  well member, so a well cannot be locked out of administration.
 
 The middleware resolves `/api/projects/{pid}`, `/api/wells/{wid}` and
 `/api/log-runs/{id}` to a project. Routes that take well IDs in a query string or
@@ -33,6 +39,10 @@ before joining a well room.
 GET    /api/projects/{pid}/members
 POST   /api/projects/{pid}/members       {"subject": "alice", "role": "interpreter"}
 DELETE /api/projects/{pid}/members/alice?force=false
+
+GET    /api/wells/{wid}/members
+POST   /api/wells/{wid}/members          {"subject": "bob", "role": "viewer"}
+DELETE /api/wells/{wid}/members/bob?force=false
 ```
 
 `subject` is the JWT `sub` claim. With the trusted-header development shim there
@@ -51,7 +61,8 @@ old behavior where every `viewer` can read every project.
 
 ## Limits
 
-- Membership is per project, not per well. A well inherits its project.
+- Well membership restricts a well; it does not grant access to the rest of the
+  project. A well member still needs project membership for project-level routes.
 - Membership does not replace an identity provider. The JWT signature and role
   claim still decide the global role.
 - Audit records are written after the request and do not currently include the

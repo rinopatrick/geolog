@@ -27,6 +27,9 @@ While the major version is `0`, the API is not yet stable.
 - **Project membership ACL.** `project_members`, membership endpoints and
   path-level enforcement for projects, wells and log runs. See
   `docs/PROJECT_ACL.md`.
+- **Per-well ACL overrides.** `well_members` and membership endpoints; a well
+  with members stops inheriting project access. Project admins can still manage
+  a restricted well's membership.
 - **Durable background jobs.** Persisted job payloads, registered handlers,
   startup/reaper recovery and duplicate-claim protection.
 - **Deploy-step migrations.** Production verifies the schema and fails fast;
