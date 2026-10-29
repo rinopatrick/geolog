@@ -15,6 +15,8 @@ While the major version is `0`, the API is not yet stable.
 
 ### Fixed
 
+- Database job updates no longer assign the `status` column twice, which
+  PostgreSQL rejects and which left jobs stuck in `running`.
 - Baseline migration creates SQLite or PostgreSQL audit-immutability triggers
   for the active dialect. Fresh PostgreSQL databases now migrate successfully.
 

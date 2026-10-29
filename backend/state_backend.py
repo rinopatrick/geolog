@@ -256,7 +256,7 @@ def reset_well_state() -> None:
 # ─── Jobs ─────────────────────────────────────────────────────
 
 _JOB_FIELDS = {
-    "status", "progress", "error", "attempts", "worker_id",
+    "progress", "error", "attempts", "worker_id",
     "started_at", "started_epoch", "finished_at", "finished_epoch",
 }
 
