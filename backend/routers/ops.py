@@ -1141,10 +1141,12 @@ def ops_security_evidence_status(_role: str = Depends(require_viewer)):
                 rp = os.path.join(sub, "report.json")
                 sp = os.path.join(sub, "report.signature.json")
                 if os.path.isdir(sub) and os.path.exists(rp) and os.path.exists(sp):
-                    candidates.append((os.path.getmtime(rp), rp, sp))
+                    candidates.append((name, os.path.getmtime(rp), rp, sp))
             if candidates:
-                candidates.sort(key=lambda x: x[0], reverse=True)
-                _, rp, sp = candidates[0]
+                # Drill directories are ISO timestamps; use the name as the
+                # deterministic primary key and mtime only as a tiebreaker.
+                candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                _, _, rp, sp = candidates[0]
                 return rp, sp
         except Exception:
             return root_report, root_sig

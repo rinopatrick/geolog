@@ -6,15 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, the API is not yet stable.
 
-## [0.8.0] - 2026-10-21
-
-### Added
-
-- **Workbench interaction completion.** Core CSV dry-run preview with conflict
-  skip/update actions, saturation-height model apply/toggle, geomechanics
-  calibration editor, DLIS image-channel upload, and image asset edit/delete.
-
 ## [Unreleased]
+
+## [0.9.0] - 2026-10-29
 
 ### Added
 
@@ -71,6 +65,12 @@ While the major version is `0`, the API is not yet stable.
 - Escape server-controlled values in remaining `innerHTML` sinks.
 - Validate role values on user create/update.
 
+### Fixed
+
+- Job reaper only requeues queued or stale jobs, so it cannot overwrite a
+  completed/failed job.
+- Security evidence status resolves the latest nested drill directory by its
+  ISO timestamp name, with mtime as a tiebreaker.
 
 ## [0.8.1] - 2026-10-21
 
@@ -90,6 +90,14 @@ While the major version is `0`, the API is not yet stable.
   configurable collection path.
 - **JWT refresh/revocation.** Rotating refresh tokens and a `revoked_tokens`
   table enforced by middleware (migration `b8c9d0e1f2a3`).
+
+## [0.8.0] - 2026-10-21
+
+### Added
+
+- **Workbench interaction completion.** Core CSV dry-run preview with conflict
+  skip/update actions, saturation-height model apply/toggle, geomechanics
+  calibration editor, DLIS image-channel upload, and image asset edit/delete.
 
 ## [0.7.0] - 2026-10-21
 
