@@ -14,7 +14,6 @@ RUN pip install --no-cache-dir reportlab \
 # Copy application files
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
-COPY tests/ ./tests/
 COPY run.py ./run.py
 COPY requirements.txt ./requirements.txt
 # Needed at startup: backend/schema.py runs migrations, which read this file.
@@ -33,4 +32,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2).status < 500 else 1)"
 
-CMD ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Schema migrations are a deploy step, not a worker startup step. Set
+# GEOLOG_ENV=prod and run `alembic upgrade head` once before starting workers.
+ENV GEOLOG_ENV=prod
+CMD ["sh", "-c", "python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers ${GEOLOG_WORKERS:-2}"]

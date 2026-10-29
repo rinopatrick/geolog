@@ -24,6 +24,7 @@ Alembic now owns the schema. Three things happen at startup:
 from __future__ import annotations
 
 import logging
+import os
 import pathlib
 from typing import Optional
 
@@ -39,6 +40,28 @@ except ImportError:
     from backend.database import Base, engine
 
 logger = logging.getLogger("geolog")
+
+DEV_ENVIRONMENTS = {"dev", "local", "test", "ci"}
+
+
+def _env_truthy(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _current_env() -> str:
+    return (os.getenv("GEOLOG_ENV") or os.getenv("ENV") or "dev").strip().lower()
+
+
+def run_migrations_on_startup() -> bool:
+    """Dev/test convenience only. Production migrates as a deploy step."""
+    return _env_truthy("GEOLOG_RUN_MIGRATIONS_ON_STARTUP", _current_env() in DEV_ENVIRONMENTS)
+
+
+def fail_on_schema_mismatch() -> bool:
+    return _env_truthy("GEOLOG_FAIL_ON_SCHEMA_MISMATCH", _current_env() not in DEV_ENVIRONMENTS)
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALEMBIC_INI = REPO_ROOT / "alembic.ini"
@@ -146,7 +169,7 @@ def check_for_pending_migrations() -> list[str]:
 
 
 def ensure_schema(verify: bool = True) -> None:
-    """Migrate, then optionally verify. Called once at app startup."""
+    """Migrate, then optionally verify. Used by tests and one-off commands."""
     run_migrations()
 
     if not verify:
@@ -154,9 +177,6 @@ def ensure_schema(verify: bool = True) -> None:
 
     problems = verify_schema()
     if problems:
-        # Loud, but not fatal: a mismatch means the app may fail on first use of
-        # the affected field, and a silent mismatch is what this whole module
-        # exists to prevent.
         for problem in problems:
             logger.error("Schema mismatch: %s", problem)
         logger.error(
@@ -166,3 +186,41 @@ def ensure_schema(verify: bool = True) -> None:
         )
     else:
         logger.info("Schema verified at revision %s", current_revision())
+
+
+def bootstrap_schema() -> None:
+    """Startup policy: migrate in dev/test, verify (and fail) in production.
+
+    Running Alembic from every worker/replica races on the same DDL. Production
+    deploys must run `alembic upgrade head` once, then start the app with this
+    function only verifying that the live schema matches the models.
+    """
+    if run_migrations_on_startup():
+        run_migrations()
+    else:
+        logger.info(
+            "Startup migrations disabled (GEOLOG_ENV=%s); expecting a deploy-step migration",
+            _current_env(),
+        )
+
+    problems = verify_schema()
+    if problems:
+        for problem in problems:
+            logger.error("Schema mismatch: %s", problem)
+        message = (
+            f"Database schema does not match the models ({len(problems)} problem(s)); "
+            "run: alembic upgrade head"
+        )
+        if fail_on_schema_mismatch():
+            raise RuntimeError(message)
+        logger.error(message)
+    else:
+        logger.info("Schema verified at revision %s", current_revision())
+
+    pending = check_for_pending_migrations()
+    if pending:
+        logger.warning(
+            "Model changes have no migration (%d); run alembic revision --autogenerate: %s",
+            len(pending),
+            pending[:5],
+        )
