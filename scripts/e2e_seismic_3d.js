@@ -121,8 +121,11 @@ function buildVolume() {
       document.getElementById('prospectContact').value = '1000';
       await app.createProspect();
       const prospectOk = (app._segyProspects || []).length > 0 && app._segyProspects[0].result?.stoiip?.p50_m3 > 0;
+      document.getElementById('portfolioName').value = 'E2E Portfolio';
+      await app.buildProspectPortfolio();
+      const portfolioOk = (app._segyPortfolios || []).length > 0;
       return {
-        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && surfaceOk && depthOk && tieOk && prospectOk && (app._segyFaultLinks || []).length > 0,
+        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && surfaceOk && depthOk && tieOk && prospectOk && portfolioOk && (app._segyFaultLinks || []).length > 0,
         lineId: line.id,
         volumeOk,
         inlineOk,
@@ -136,6 +139,8 @@ function buildVolume() {
         tieCorrelation: app._segyTie?.correlation ?? null,
         tieShiftMs: app._segyTie?.shift_ms ?? null,
         prospectOk,
+        portfolioOk,
+        portfolioEmv: app._segyPortfolios?.[0]?.result?.portfolio?.total_emv ?? null,
         prospectP50: app._segyProspects?.[0]?.result?.stoiip?.p50_m3 ?? null,
         surfaceName: app._segySurface?.name || '',
         throwMs: geometry.throw_ms,

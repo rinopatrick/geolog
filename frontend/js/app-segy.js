@@ -87,6 +87,7 @@ Object.assign(GeoLogApp.prototype, {
             }
             await this.loadSeismicTies();
             await this.loadSeismicProspects();
+            await this.loadProspectPortfolios();
             const status = document.getElementById('segyStatus');
             if (status) {
                 const dimensions = volume?.is_3d ? ` · 3D ${volume.inline_count}×${volume.crossline_count}` : '';
@@ -119,6 +120,77 @@ Object.assign(GeoLogApp.prototype, {
                 ? `${volume.inline_count} inlines × ${volume.crossline_count} crosslines`
                 : '2D line (no inline/crossline grid)';
         }
+    },
+
+    async loadProspectPortfolios() {
+        const projectId = this._segyLine?.project_id;
+        if (!projectId) {
+            this._segyPortfolios = [];
+            this._renderProspectPortfolioList();
+            return;
+        }
+        try {
+            this._segyPortfolios = await this._api(`/projects/${projectId}/prospect-portfolios`);
+            this._renderProspectPortfolioList();
+        } catch (e) {
+            this._segyPortfolios = [];
+            this._renderProspectPortfolioList();
+        }
+    },
+
+    async buildProspectPortfolio() {
+        const projectId = this._segyLine?.project_id;
+        if (!projectId) return GeoToast.warn('Load a seismic line first.');
+        if (!(this._segyProspects || []).length) return GeoToast.warn('Evaluate at least one prospect first.');
+        const name = document.getElementById('portfolioName')?.value?.trim() || 'Portfolio';
+        const price = Number(document.getElementById('portfolioPrice')?.value) || 60;
+        const opex = Number(document.getElementById('portfolioOpex')?.value) || 0;
+        const capex = Number(document.getElementById('portfolioCapex')?.value) || 0;
+        const correlation = Number(document.getElementById('portfolioCorrelation')?.value) || 0;
+        GeoLoading.show('Building portfolio...');
+        try {
+            const portfolio = await this._api(`/projects/${projectId}/prospect-portfolios`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    name,
+                    prospect_ids: this._segyProspects.map(item => item.id),
+                    price_per_boe: price,
+                    opex_per_boe: opex,
+                    capex,
+                    correlation,
+                    iterations: 2000,
+                    seed: 42,
+                }),
+            });
+            this._segyPortfolios = [portfolio, ...(this._segyPortfolios || [])];
+            this._renderProspectPortfolioList();
+            const result = portfolio.result?.portfolio || {};
+            const status = document.getElementById('portfolioStatus');
+            if (status) {
+                status.textContent = `EMV ${Math.round(result.total_emv || 0).toLocaleString()} · P50 ${Math.round(result.total_boe_p50 || 0).toLocaleString()} BOE`;
+            }
+            GeoToast.success('Portfolio built');
+        } catch (e) {
+            GeoToast.error('Portfolio failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    },
+
+    _renderProspectPortfolioList() {
+        const host = document.getElementById('portfolioList');
+        if (!host) return;
+        const rows = this._segyPortfolios || [];
+        host.innerHTML = rows.length
+            ? rows.map(portfolio => {
+                const result = portfolio.result || {};
+                const summary = result.portfolio || {};
+                const top = (result.prospects || []).slice(0, 3).map(item =>
+                    `${escapeHtml(item.name)} (${Math.round(item.emv).toLocaleString()})`
+                ).join(', ');
+                return `<div style="padding:2px 0"><strong>${escapeHtml(portfolio.name)}</strong> · EMV ${Math.round(summary.total_emv || 0).toLocaleString()} · BOE P90/P50/P10 ${Math.round(summary.total_boe_p90 || 0).toLocaleString()} / ${Math.round(summary.total_boe_p50 || 0).toLocaleString()} / ${Math.round(summary.total_boe_p10 || 0).toLocaleString()} · top: ${top || '—'}</div>`;
+            }).join('')
+            : 'No portfolios built yet.';
     },
 
     async loadSeismicProspects() {
@@ -178,7 +250,7 @@ Object.assign(GeoLogApp.prototype, {
             if (status) {
                 const volume = result.stoiip?.p50_m3 != null
                     ? `STOIIP ${Math.round(result.stoiip.p50_m3).toLocaleString()} m³`
-                    : `GIIP ${Math.round(result.giip?.p50_m3 || 0).toLocaleString()} m³ · BOE ${Math.round(result.boe?.p50_m3 || 0).toLocaleString()}`;
+                    : `GIIP ${Math.round(result.giip?.p50_m3 || 0).toLocaleString()} m³ · BOE ${Math.round(result.boe?.p50_bbl || 0).toLocaleString()} bbl`;
                 status.textContent = `GRV ${Math.round(prospect.grv_m3).toLocaleString()} m³ · ${volume}`;
             }
             GeoToast.success('Prospect evaluated');
@@ -198,7 +270,7 @@ Object.assign(GeoLogApp.prototype, {
                 const result = item.result || {};
                 const volume = result.stoiip || result.giip || {};
                 const label = result.fluid_type === 'oil' ? 'STOIIP' : 'GIIP';
-                const extra = result.boe?.p50_m3 != null ? ` · BOE ${Math.round(result.boe.p50_m3).toLocaleString()} m³` : '';
+                const extra = result.boe?.p50_bbl != null ? ` · BOE ${Math.round(result.boe.p50_bbl).toLocaleString()} bbl` : '';
                 const risk = result.risk || {};
                 return `<div style="padding:2px 0"><strong>${escapeHtml(item.name)}</strong> · ${escapeHtml(item.fluid_type || 'oil')} · GRV ${Math.round(item.grv_m3 || 0).toLocaleString()} m³ · ${label} P90/P50/P10 ${Math.round(volume.p90_m3 || 0).toLocaleString()} / ${Math.round(volume.p50_m3 || 0).toLocaleString()} / ${Math.round(volume.p10_m3 || 0).toLocaleString()} m³${extra} · risk ${Math.round((risk.probability ?? 1) * 100)}%</div>`;
             }).join('')

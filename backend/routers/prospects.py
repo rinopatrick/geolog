@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 try:
     from acl import require_project_access
     from database import get_db
-    from models import Project, Prospect, SeismicLine, SeismicSurface
+    from models import Project, Prospect, ProspectPortfolio, SeismicLine, SeismicSurface
+    from portfolio import build_portfolio
     from volumetrics import calculate_prospect
 except ImportError:
     from backend.acl import require_project_access
     from backend.database import get_db
-    from backend.models import Project, Prospect, SeismicLine, SeismicSurface
+    from backend.models import Project, Prospect, ProspectPortfolio, SeismicLine, SeismicSurface
+    from backend.portfolio import build_portfolio
     from backend.volumetrics import calculate_prospect
 
 router = APIRouter(prefix="/api", tags=["prospects"])
@@ -40,6 +42,150 @@ def _serialized(row: Prospect, include_result: bool = True) -> dict:
         except json.JSONDecodeError:
             payload["result"] = {}
     return payload
+
+
+def _portfolio_serialized(row: ProspectPortfolio) -> dict:
+    try:
+        inputs = json.loads(row.inputs_json or "{}")
+    except json.JSONDecodeError:
+        inputs = {}
+    try:
+        result = json.loads(row.result_json or "{}")
+    except json.JSONDecodeError:
+        result = {}
+    return {
+        "id": row.id,
+        "project_id": row.project_id,
+        "name": row.name,
+        "inputs": inputs,
+        "result": result,
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+    }
+
+
+@router.post("/projects/{pid}/prospect-portfolios", status_code=201)
+def create_prospect_portfolio(pid: int, data: dict, request: Request, db: Session = Depends(get_db)):
+    if not db.query(Project.id).filter(Project.id == pid).first():
+        raise HTTPException(404, "Project not found")
+    require_project_access(db, request, pid, write=True)
+    name = str(data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name is required")
+    query = db.query(Prospect).filter(Prospect.project_id == pid)
+    ids = data.get("prospect_ids")
+    if ids:
+        try:
+            query = query.filter(Prospect.id.in_([int(value) for value in ids]))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "prospect_ids must be integers")
+    rows = query.order_by(Prospect.id.asc()).all()
+    if not rows:
+        raise HTTPException(400, "no prospects selected")
+    payloads = []
+    for row in rows:
+        try:
+            result = json.loads(row.result_json or "{}")
+        except json.JSONDecodeError:
+            result = {}
+        payloads.append({
+            "id": row.id,
+            "name": row.name,
+            "fluid_type": row.fluid_type or "oil",
+            "result": result,
+        })
+    try:
+        result = build_portfolio(
+            payloads,
+            price_per_boe=data.get("price_per_boe", 60.0),
+            opex_per_boe=data.get("opex_per_boe", 10.0),
+            capex=data.get("capex", 0.0),
+            dry_hole_cost=data.get("dry_hole_cost", 0.0),
+            correlation=data.get("correlation", 0.0),
+            iterations=data.get("iterations", 2000),
+            seed=data.get("seed"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    item = ProspectPortfolio(
+        project_id=pid,
+        name=name,
+        inputs_json=json.dumps(result["inputs"]),
+        result_json=json.dumps(result),
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return _portfolio_serialized(item)
+
+
+@router.get("/projects/{pid}/prospect-portfolios")
+def list_prospect_portfolios(pid: int, request: Request, db: Session = Depends(get_db)):
+    if not db.query(Project.id).filter(Project.id == pid).first():
+        raise HTTPException(404, "Project not found")
+    require_project_access(db, request, pid)
+    rows = (
+        db.query(ProspectPortfolio)
+        .filter(ProspectPortfolio.project_id == pid)
+        .order_by(ProspectPortfolio.id.desc())
+        .all()
+    )
+    return [_portfolio_serialized(row) for row in rows]
+
+
+@router.get("/projects/{pid}/prospect-portfolios/{portfolio_id}")
+def get_prospect_portfolio(pid: int, portfolio_id: int, request: Request, db: Session = Depends(get_db)):
+    if not db.query(Project.id).filter(Project.id == pid).first():
+        raise HTTPException(404, "Project not found")
+    require_project_access(db, request, pid)
+    item = (
+        db.query(ProspectPortfolio)
+        .filter(ProspectPortfolio.id == portfolio_id, ProspectPortfolio.project_id == pid)
+        .first()
+    )
+    if not item:
+        raise HTTPException(404, "Portfolio not found")
+    return _portfolio_serialized(item)
+
+
+@router.get("/projects/{pid}/prospect-portfolios/{portfolio_id}/export.csv")
+def export_prospect_portfolio(pid: int, portfolio_id: int, request: Request, db: Session = Depends(get_db)):
+    if not db.query(Project.id).filter(Project.id == pid).first():
+        raise HTTPException(404, "Project not found")
+    require_project_access(db, request, pid)
+    item = (
+        db.query(ProspectPortfolio)
+        .filter(ProspectPortfolio.id == portfolio_id, ProspectPortfolio.project_id == pid)
+        .first()
+    )
+    if not item:
+        raise HTTPException(404, "Portfolio not found")
+    payload = _portfolio_serialized(item)
+    lines = ["rank,name,fluid_type,chance,boe_p90,boe_p50,boe_p10,net_revenue,emv"]
+    for prospect in payload["result"].get("prospects", []):
+        lines.append(",".join(str(prospect.get(key, "")) for key in (
+            "rank", "name", "fluid_type", "chance", "boe_p90", "boe_p50", "boe_p10", "net_revenue", "emv"
+        )))
+    return Response(
+        "\n".join(lines),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="portfolio_{item.id}.csv"'},
+    )
+
+
+@router.delete("/projects/{pid}/prospect-portfolios/{portfolio_id}", status_code=204)
+def delete_prospect_portfolio(pid: int, portfolio_id: int, request: Request, db: Session = Depends(get_db)):
+    if not db.query(Project.id).filter(Project.id == pid).first():
+        raise HTTPException(404, "Project not found")
+    require_project_access(db, request, pid, write=True)
+    item = (
+        db.query(ProspectPortfolio)
+        .filter(ProspectPortfolio.id == portfolio_id, ProspectPortfolio.project_id == pid)
+        .first()
+    )
+    if not item:
+        raise HTTPException(404, "Portfolio not found")
+    db.delete(item)
+    db.commit()
 
 
 @router.get("/projects/{pid}/prospects")
