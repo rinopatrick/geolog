@@ -79,6 +79,12 @@ Object.assign(GeoLogApp.prototype, {
             this._drawSeismic();
             this._renderSeismicHorizonList();
             await this._populateSeismicSurfaces(surfaces);
+            try {
+                const models = await this._api(`/projects/${payload.line.project_id}/velocity-models`);
+                this._populateVelocityModels(models);
+            } catch (e) {
+                this._populateVelocityModels([]);
+            }
             const status = document.getElementById('segyStatus');
             if (status) {
                 const dimensions = volume?.is_3d ? ` · 3D ${volume.inline_count}×${volume.crossline_count}` : '';
@@ -110,6 +116,61 @@ Object.assign(GeoLogApp.prototype, {
             info.textContent = is3d
                 ? `${volume.inline_count} inlines × ${volume.crossline_count} crosslines`
                 : '2D line (no inline/crossline grid)';
+        }
+    },
+
+    _populateVelocityModels(models) {
+        this._segyVelocityModels = models || [];
+        const select = document.getElementById('segyVelocityModel');
+        if (!select) return;
+        select.innerHTML = this._segyVelocityModels.map(model =>
+            `<option value="${model.id}">${escapeHtml(model.name)} · ${model.kind === 'constant' ? `${model.velocity_m_s} m/s` : `${(model.layers || []).length} layers`}</option>`
+        ).join('');
+    },
+
+    async saveVelocityModel() {
+        const line = this._segyLine;
+        if (!line) return GeoToast.warn('Load a SEG-Y line first.');
+        const name = document.getElementById('segyVelocityName')?.value?.trim();
+        const velocity = Number(document.getElementById('segyVelocity')?.value);
+        if (!name) return GeoToast.warn('Velocity model name is required.');
+        if (!(velocity >= 500 && velocity <= 8000)) return GeoToast.warn('Velocity must be between 500 and 8000 m/s.');
+        try {
+            await this._api(`/projects/${line.project_id}/velocity-models`, {
+                method: 'POST',
+                body: JSON.stringify({ name, kind: 'constant', velocity_m_s: velocity }),
+            });
+            const models = await this._api(`/projects/${line.project_id}/velocity-models`);
+            this._populateVelocityModels(models);
+            GeoToast.success('Velocity model added');
+        } catch (e) {
+            GeoToast.error('Velocity model failed: ' + e.message);
+        }
+    },
+
+    async convertSurfaceDepth() {
+        const line = this._segyLine;
+        const surface = this._segySurface;
+        if (!line || !surface) return GeoToast.warn('Build or load a surface first.');
+        const modelId = Number(document.getElementById('segyVelocityModel')?.value);
+        if (!modelId) return GeoToast.warn('Add a velocity model first.');
+        try {
+            const updated = await this._api(`/seismic/${line.id}/surfaces/${surface.id}/depth`, {
+                method: 'POST',
+                body: JSON.stringify({ velocity_model_id: modelId }),
+            });
+            this._segySurface = updated;
+            const domain = document.getElementById('segySurfaceDomain');
+            if (domain) domain.value = 'depth';
+            this._drawSeismicSurfaceMap();
+            const status = document.getElementById('segySurfaceStatus');
+            if (status) {
+                const stats = updated.depth_stats || {};
+                status.textContent = `${updated.name} · ${stats.min_depth_m}–${stats.max_depth_m} m`;
+            }
+            GeoToast.success('Surface converted to depth');
+        } catch (e) {
+            GeoToast.error('Depth conversion failed: ' + e.message);
         }
     },
 
@@ -207,13 +268,17 @@ Object.assign(GeoLogApp.prototype, {
         ctx.fillStyle = '#0d1117';
         ctx.fillRect(0, 0, w, h);
         const surface = this._segySurface;
-        if (!surface?.grid?.length) {
+        const domain = document.getElementById('segySurfaceDomain')?.value || 'time';
+        const depthGrid = surface?.depth_grid || [];
+        const useDepth = domain === 'depth' && depthGrid.length > 0;
+        const grid = useDepth ? depthGrid : surface?.grid;
+        const unit = useDepth ? 'm' : 'ms';
+        if (!surface?.grid?.length || !grid?.length) {
             ctx.fillStyle = '#8b949e';
             ctx.font = '13px sans-serif';
             ctx.fillText('Build a surface from inline/crossline picks', 18, 28);
             return;
         }
-        const grid = surface.grid;
         const rows = grid.length;
         const cols = grid[0]?.length || 0;
         if (!rows || !cols) return;
@@ -263,7 +328,7 @@ Object.assign(GeoLogApp.prototype, {
         ctx.fillText('inline', 0, 0);
         ctx.restore();
         ctx.fillStyle = '#c9d1d9';
-        ctx.fillText(`${surface.name} · ${min.toFixed(1)}–${max.toFixed(1)} ms`, left + 6, top + 14);
+        ctx.fillText(`${surface.name} · ${min.toFixed(1)}–${max.toFixed(1)} ${unit}`, left + 6, top + 14);
         for (const link of this._segyFaultLinks || []) {
             const ordered = (link.points || []).slice().sort((a, b) => Number(a.inline) - Number(b.inline));
             if (ordered.length < 2) continue;

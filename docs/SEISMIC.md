@@ -69,6 +69,21 @@ points and caps the grid at 96 × 96 by default (`max_grid` up to 200). It retur
 The Seismic panel can build a surface by name, select a stored surface and draw
 its time map. Fault traces are overlaid on the same inline/crossline map.
 
+## Depth conversion
+
+Project velocity models live under `/api/projects/{pid}/velocity-models`:
+
+- `constant`: `{name, kind, velocity_m_s}`; depth = `velocity * twt_ms / 2000`.
+- `layers`: `{name, kind, layers:[{top_ms, velocity_m_s}, ...]}`. The first layer
+  must start at `top_ms: 0`; intervals are integrated cumulatively.
+
+`POST /api/projects/{pid}/velocity-models/{id}/convert` converts a list of
+`times_ms` for inspection. `POST /api/seismic/{line_id}/surfaces/{surface_id}/depth`
+converts a stored surface with a model from the same project, stores
+`depth_grid`, `depth_stats` and `velocity_model_id`, and makes the CSV export
+include a `depth_m` column. The Seismic panel can add constant models, convert
+the selected surface and toggle the map between time and depth.
+
 ## Fault detection
 
 `POST /api/seismic/{line_id}/faults/detect` computes adjacent-trace coherence in

@@ -12,6 +12,8 @@ While the major version is `0`, the API is not yet stable.
 
 - **3D surface grids.** Build time surfaces from inline/crossline horizon picks
   with IDW, store them, export CSV and draw the surface map with fault overlays.
+- **Velocity models and depth conversion.** Project constant/layer models,
+  time-to-depth conversion for surfaces, depth grids/stats and depth CSV export.
 
 ## [0.14.0] - 2026-10-31
 

@@ -21,6 +21,7 @@ try:
         SeismicHorizon,
         SeismicLine,
         SeismicSurface,
+        VelocityModel,
     )
     from seismic import (
         auto_track,
@@ -34,6 +35,7 @@ try:
         volume_section,
     )
     from uploads import read_upload
+    from velocity import time_to_depth_ms
     from well_state import ARTIFACT_DIR
 except ImportError:
     from backend.acl import require_project_access
@@ -45,6 +47,7 @@ except ImportError:
         SeismicHorizon,
         SeismicLine,
         SeismicSurface,
+        VelocityModel,
     )
     from backend.seismic import (
         auto_track,
@@ -58,6 +61,7 @@ except ImportError:
         volume_section,
     )
     from backend.uploads import read_upload
+    from backend.velocity import time_to_depth_ms
     from backend.well_state import ARTIFACT_DIR
 
 router = APIRouter(prefix="/api", tags=["seismic"])
@@ -203,6 +207,14 @@ def _surface(row: SeismicSurface, include_grid: bool = True) -> dict:
         stats = json.loads(row.stats_json or "{}")
     except json.JSONDecodeError:
         stats = {}
+    try:
+        depth_grid = json.loads(row.depth_grid_json or "[]")
+    except json.JSONDecodeError:
+        depth_grid = []
+    try:
+        depth_stats = json.loads(row.depth_stats_json or "{}")
+    except json.JSONDecodeError:
+        depth_stats = {}
     payload = {
         "id": row.id,
         "line_id": row.line_id,
@@ -213,10 +225,13 @@ def _surface(row: SeismicSurface, include_grid: bool = True) -> dict:
         "inline_spacing_m": row.inline_spacing_m,
         "crossline_spacing_m": row.crossline_spacing_m,
         "stats": stats,
+        "velocity_model_id": row.velocity_model_id,
+        "depth_stats": depth_stats,
         "created_at": row.created_at.isoformat() if row.created_at else "",
     }
     if include_grid:
         payload["grid"] = grid
+        payload["depth_grid"] = depth_grid
     return payload
 
 
@@ -559,6 +574,57 @@ def get_seismic_surface(line_id: int, surface_id: int, request: Request, db: Ses
     return _surface(item)
 
 
+@router.post("/seismic/{line_id}/surfaces/{surface_id}/depth")
+def convert_seismic_surface_depth(
+    line_id: int,
+    surface_id: int,
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    row = _line(db, line_id)
+    require_project_access(db, request, row.project_id, write=True)
+    item = (
+        db.query(SeismicSurface)
+        .filter(SeismicSurface.id == surface_id, SeismicSurface.line_id == line_id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(404, "Surface not found")
+    try:
+        model_id = int(data.get("velocity_model_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "velocity_model_id is required")
+    model = (
+        db.query(VelocityModel)
+        .filter(VelocityModel.id == model_id, VelocityModel.project_id == row.project_id)
+        .first()
+    )
+    if not model:
+        raise HTTPException(404, "Velocity model not found for this project")
+    try:
+        grid = json.loads(item.grid_json or "[]")
+    except json.JSONDecodeError:
+        grid = []
+    if not grid:
+        raise HTTPException(400, "surface has no time grid")
+    times = np.asarray(grid, dtype=float)
+    layers = json.loads(model.layers_json or "[]")
+    depths = time_to_depth_ms(times, model.kind or "constant", model.velocity_m_s, layers)
+    depth_grid = [[round(float(value), 3) for value in depth_row] for depth_row in depths]
+    finite = depths[np.isfinite(depths)]
+    item.depth_grid_json = json.dumps(depth_grid)
+    item.depth_stats_json = json.dumps({
+        "min_depth_m": round(float(np.min(finite)), 3) if len(finite) else None,
+        "max_depth_m": round(float(np.max(finite)), 3) if len(finite) else None,
+        "mean_depth_m": round(float(np.mean(finite)), 3) if len(finite) else None,
+    })
+    item.velocity_model_id = model.id
+    db.commit()
+    db.refresh(item)
+    return _surface(item)
+
+
 @router.get("/seismic/{line_id}/surfaces/{surface_id}/export.csv")
 def export_seismic_surface(line_id: int, surface_id: int, request: Request, db: Session = Depends(get_db)):
     row = _line(db, line_id)
@@ -571,10 +637,14 @@ def export_seismic_surface(line_id: int, surface_id: int, request: Request, db: 
     if not item:
         raise HTTPException(404, "Surface not found")
     payload = _surface(item)
-    lines = ["inline,crossline,time_ms"]
-    for inline, grid_row in zip(payload["inlines"], payload.get("grid", [])):
-        for crossline, value in zip(payload["crosslines"], grid_row):
-            lines.append(f"{inline},{crossline},{value}")
+    depth_grid = payload.get("depth_grid") or []
+    lines = ["inline,crossline,time_ms" + (",depth_m" if depth_grid else "")]
+    for row_index, (inline, grid_row) in enumerate(zip(payload["inlines"], payload.get("grid", []))):
+        for column_index, (crossline, value) in enumerate(zip(payload["crosslines"], grid_row)):
+            suffix = ""
+            if depth_grid and row_index < len(depth_grid) and column_index < len(depth_grid[row_index]):
+                suffix = f",{depth_grid[row_index][column_index]}"
+            lines.append(f"{inline},{crossline},{value}{suffix}")
     return Response(
         "\n".join(lines),
         media_type="text/csv",

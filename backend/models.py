@@ -767,6 +767,20 @@ class SeismicFault(Base):
 
 
 
+class VelocityModel(Base):
+    """Project time-depth model for seismic depth conversion."""
+
+    __tablename__ = "velocity_models"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    kind = Column(String(20), default="constant")
+    velocity_m_s = Column(Float, nullable=True)
+    layers_json = Column(Text, default="[]")
+    created_at = Column(DateTime, default=utcnow)
+
+
 class SeismicSurface(Base):
     """A gridded time surface built from inline/crossline horizon picks."""
 
@@ -782,6 +796,9 @@ class SeismicSurface(Base):
     inline_spacing_m = Column(Float, nullable=True)
     crossline_spacing_m = Column(Float, nullable=True)
     stats_json = Column(Text, default="{}")
+    depth_grid_json = Column(Text, default="[]")
+    depth_stats_json = Column(Text, default="{}")
+    velocity_model_id = Column(Integer, ForeignKey("velocity_models.id"), nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
     line = relationship("SeismicLine", back_populates="surfaces")

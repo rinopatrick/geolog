@@ -1424,6 +1424,14 @@
                         <select id="segySurfaceSelect" data-action="app.loadSeismicSurface" data-on="change" data-args-value="true" style="min-width:180px"></select>
                         <span id="segySurfaceStatus" class="toolbar-hint"></span>
                     </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+                        <input id="segyVelocityName" placeholder="Velocity model" style="min-width:150px">
+                        <input id="segyVelocity" type="number" min="500" max="8000" placeholder="m/s" style="width:90px">
+                        <button class="btn-sm" data-action="app.saveVelocityModel"><i data-lucide="plus"></i> Add velocity</button>
+                        <select id="segyVelocityModel" style="min-width:180px"></select>
+                        <select id="segySurfaceDomain"><option value="time">Time</option><option value="depth">Depth</option></select>
+                        <button class="btn-sm" data-action="app.convertSurfaceDepth"><i data-lucide="arrow-down-up"></i> Convert depth</button>
+                    </div>
                     <canvas id="segySurfaceMap" width="1000" height="320" style="width:100%;margin-top:10px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
                     <div id="segyHorizonList" style="font-size:12px;color:#8b949e;margin-top:8px"></div>
                 </div>
