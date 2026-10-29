@@ -3,15 +3,20 @@
 The current public API is **v0**, mounted at `/api`. Responses carry
 `X-API-Version: v0`.
 
+`/api/v1/*` is also available as a stable alias for the same handlers while the
+contract is frozen. Responses on that prefix carry `X-API-Version: v1`.
+`GET /api/version` (or `/api/v1/version`) reports the app version and the prefix
+that served the request.
+
 While the major version in `backend/version.py` is `0`, the schema and request
 contracts may change between minor releases. Treat `CHANGELOG.md` as the
 compatibility record.
 
 ## Compatibility rules
 
-- Existing `/api` paths are not renamed in a patch release.
-- A breaking request or response change requires either a new path under a new
-  prefix (for example `/api/v1`) or a major version bump with a migration guide.
+- Existing `/api` and `/api/v1` paths are not renamed in a patch release.
+- A breaking request or response change requires a new prefix (for example
+  `/api/v2`) with a migration guide. `/api/v1` stays on the current contract.
 - New optional response fields are allowed; clients must ignore unknown fields.
 - New required request fields are a breaking change.
 - Auth and error envelope shapes are part of the contract:

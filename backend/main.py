@@ -124,6 +124,7 @@ try:
         resolve_auth_context,
         role_from_request,
     )
+    from api_version import APIVersionAliasMiddleware
     from uploads import BodySizeLimitMiddleware
     from acl import ProjectAccessMiddleware, can_access_project, can_access_well, require_project_access, require_well_access, request_role, request_subject, visible_project_ids
 except ImportError:
@@ -149,6 +150,7 @@ except ImportError:
         resolve_auth_context,
         role_from_request,
     )
+    from backend.api_version import APIVersionAliasMiddleware
     from backend.uploads import BodySizeLimitMiddleware
     from backend.acl import ProjectAccessMiddleware, can_access_project, can_access_well, require_project_access, require_well_access, request_role, request_subject, visible_project_ids
 
@@ -292,6 +294,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 # auth in jwt mode.
 PUBLIC_PATHS = frozenset({
     "/api/health",
+    "/api/version",
     "/api/users/token",
     "/api/users/refresh",
     "/docs",
@@ -566,6 +569,8 @@ app.add_middleware(RequestIdMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 # Outermost: reject declared oversized bodies before auth or audit work.
 app.add_middleware(BodySizeLimitMiddleware)
+# Rewrite /api/v1 -> /api before routing; response header reports v1.
+app.add_middleware(APIVersionAliasMiddleware)
 
 
 def _enforce_secrets_source_policy() -> None:
@@ -710,6 +715,15 @@ def _auto_seed():
 @app.get("/api/health")
 def health():
     return {"status": "ok", "app": "GeoLog", "version": __version__}
+
+
+@app.get("/api/version")
+def api_version(request: Request):
+    return {
+        "app": "GeoLog",
+        "version": __version__,
+        "api_version": getattr(request.state, "api_version", "v0"),
+    }
 
 
 # ─── Projects ─────────────────────────────────────────────────

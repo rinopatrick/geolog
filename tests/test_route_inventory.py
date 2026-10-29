@@ -84,6 +84,7 @@ EXPECTED_ROUTES = [
     "GET /api/templates/{name}",
     "GET /api/unit-conversions",
     "GET /api/users",
+    "GET /api/version",
     "GET /api/well-compare",
     "GET /api/wells/",
     "GET /api/wells/{wid}",
