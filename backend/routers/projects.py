@@ -11,19 +11,19 @@ import csv
 import io
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
 try:
+    from acl import MEMBER_ROLES, membership_role, request_role, request_subject, visible_project_ids
     from database import SessionLocal, get_db
-    from deps import require_interpreter
+    from deps import require_interpreter, require_viewer
     from validation import optional_str, require_str
     from jobs import (
-        JOB_EXECUTOR,
-        create_job as _create_job,
+        register_handler as _register_handler,
+        submit_job as _submit_job,
         update_job as _update_job,
-        utc_now_iso as _utc_now_iso,
     )
     from models import (
         CurveData,
@@ -31,19 +31,20 @@ try:
         LogRun,
         PetroParams,
         Project,
+        ProjectMember,
         Well,
         Zone,
     )
     from well_state import delete_well_data as _delete_well_data
 except ImportError:
+    from backend.acl import MEMBER_ROLES, membership_role, request_role, request_subject, visible_project_ids
     from backend.database import SessionLocal, get_db
-    from backend.deps import require_interpreter
+    from backend.deps import require_interpreter, require_viewer
     from backend.validation import optional_str, require_str
     from backend.jobs import (
-        JOB_EXECUTOR,
-        create_job as _create_job,
+        register_handler as _register_handler,
+        submit_job as _submit_job,
         update_job as _update_job,
-        utc_now_iso as _utc_now_iso,
     )
     from backend.models import (
         CurveData,
@@ -51,6 +52,7 @@ except ImportError:
         LogRun,
         PetroParams,
         Project,
+        ProjectMember,
         Well,
         Zone,
     )
@@ -60,8 +62,13 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 
 @router.get("/")
-def list_projects(db: Session = Depends(get_db)):
+def list_projects(request: Request, db: Session = Depends(get_db)):
     projects = db.query(Project).all()
+    visible = visible_project_ids(
+        db, request_subject(request), request_role(request), [p.id for p in projects]
+    )
+    if visible is not None:
+        projects = [p for p in projects if p.id in visible]
     result = []
     for p in projects:
         d = {c.name: getattr(p, c.name) for c in Project.__table__.columns}
@@ -71,7 +78,7 @@ def list_projects(db: Session = Depends(get_db)):
 
 
 @router.post("/", status_code=201)
-def create_project(data: dict, db: Session = Depends(get_db)):
+def create_project(data: dict, request: Request, db: Session = Depends(get_db)):
     # Was Project(**data): mass assignment, so a client could choose the primary
     # key and any unknown key raised TypeError -> 500.
     p = Project(
@@ -84,7 +91,106 @@ def create_project(data: dict, db: Session = Depends(get_db)):
     db.add(p)
     db.commit()
     db.refresh(p)
+    # The creator becomes the project admin, so a new project is restricted by
+    # default and nobody else can read it until they are added.
+    db.add(ProjectMember(project_id=p.id, subject=request_subject(request), role="admin"))
+    db.commit()
     return {c.name: getattr(p, c.name) for c in Project.__table__.columns}
+
+
+def _require_project_admin(db: Session, pid: int, request: Request) -> None:
+    if request_role(request) == "admin":
+        return
+    if membership_role(db, pid, request_subject(request)) != "admin":
+        raise HTTPException(403, "project admin role required")
+
+
+@router.get("/{pid}/members")
+def list_project_members(
+    pid: int,
+    db: Session = Depends(get_db),
+    _role: str = Depends(require_viewer),
+):
+    rows = (
+        db.query(ProjectMember)
+        .filter(ProjectMember.project_id == pid)
+        .order_by(ProjectMember.id.asc())
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "project_id": row.project_id,
+            "subject": row.subject,
+            "role": row.role,
+            "created_at": row.created_at.isoformat() if row.created_at else "",
+        }
+        for row in rows
+    ]
+
+
+@router.post("/{pid}/members", status_code=201)
+def add_project_member(
+    pid: int,
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    _role: str = Depends(require_interpreter),
+):
+    if not db.query(Project.id).filter(Project.id == pid).first():
+        raise HTTPException(404, "Project not found")
+    _require_project_admin(db, pid, request)
+    subject = str(data.get("subject") or "").strip()
+    if not subject:
+        raise HTTPException(400, "subject is required")
+    role = str(data.get("role") or "viewer").strip().lower()
+    if role not in MEMBER_ROLES:
+        raise HTTPException(400, "role must be viewer, interpreter or admin")
+    existing = (
+        db.query(ProjectMember)
+        .filter(ProjectMember.project_id == pid, ProjectMember.subject == subject)
+        .first()
+    )
+    if existing:
+        existing.role = role
+        db.commit()
+        return {"id": existing.id, "project_id": pid, "subject": subject, "role": role}
+    row = ProjectMember(project_id=pid, subject=subject, role=role)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id, "project_id": pid, "subject": subject, "role": row.role}
+
+
+@router.delete("/{pid}/members/{subject}", status_code=204)
+def remove_project_member(
+    pid: int,
+    subject: str,
+    request: Request,
+    force: bool = False,
+    db: Session = Depends(get_db),
+    _role: str = Depends(require_interpreter),
+):
+    _require_project_admin(db, pid, request)
+    row = (
+        db.query(ProjectMember)
+        .filter(ProjectMember.project_id == pid, ProjectMember.subject == subject)
+        .first()
+    )
+    if not row:
+        raise HTTPException(404, "Member not found")
+    remaining = (
+        db.query(ProjectMember)
+        .filter(ProjectMember.project_id == pid, ProjectMember.id != row.id)
+        .count()
+    )
+    if remaining == 0 and not force:
+        raise HTTPException(
+            400,
+            "cannot remove the last member; pass force=true to reopen the project",
+        )
+    db.delete(row)
+    db.commit()
 
 
 @router.delete("/{pid}", status_code=204)
@@ -495,21 +601,7 @@ def crossplot_matrix(pid: int, curve_x: str = "GR", curve_y: str = "RT",
 @router.post("/{pid}/batch-petro-async", status_code=202)
 def batch_petro_async(pid: int, data: dict, _role: str = Depends(require_interpreter)):
     """Queue batch petrophysics in background job."""
-    job_id = _create_job("batch-petro")
-
-    def _run():
-        db = SessionLocal()
-        try:
-            _update_job(job_id, status="running", progress=10, started_at=_utc_now_iso())
-            result = batch_petro_params(pid, data, db)
-            _update_job(job_id, status="done", progress=100, result=result)
-        except Exception as e:
-            _update_job(job_id, status="failed", progress=100, error=str(e))
-        finally:
-            _update_job(job_id, finished_at=_utc_now_iso())
-            db.close()
-
-    JOB_EXECUTOR.submit(_run)
+    job_id = _submit_job("batch-petro", {"pid": pid, "data": data})
     return {"job_id": job_id, "status": "queued"}
 
 
@@ -519,8 +611,8 @@ def well_analogs(pid: int, reference_well_id: int, db: Session = Depends(get_db)
     Compares mean/std of GR, RT, NPHI, RHOB across wells.
     """
     ref_well = db.query(Well).filter(Well.id == reference_well_id).first()
-    if not ref_well:
-        raise HTTPException(404, "Reference well not found")
+    if not ref_well or ref_well.project_id != pid:
+        raise HTTPException(404, "Reference well not found in this project")
 
     wells = db.query(Well).filter(Well.project_id == pid).all()
     compare_curves = ["GR", "RT", "NPHI", "RHOB"]
@@ -584,3 +676,15 @@ def well_analogs(pid: int, reference_well_id: int, db: Session = Depends(get_db)
     analogs.sort(key=lambda x: x["similarity"], reverse=True)
     return {"reference_well": ref_well.name, "ref_stats": ref_stats, "analogs": analogs}
 
+
+
+def _run_batch_petro_job(payload: dict, job_id: str):
+    db = SessionLocal()
+    try:
+        _update_job(job_id, progress=10)
+        return batch_petro_params(int(payload["pid"]), payload.get("data") or {}, db)
+    finally:
+        db.close()
+
+
+_register_handler("batch-petro", _run_batch_petro_job)

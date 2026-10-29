@@ -24,6 +24,7 @@ except ImportError:
     from backend.timeutils import utcnow
 
 try:
+    from acl import require_project_access, require_well_access, request_role, request_subject, visible_project_ids
     from audit import (
         compute_audit_chain_report,
         resolve_audit_export_signing_key,
@@ -34,6 +35,7 @@ try:
     from models import AuditLog
     from version import __version__
 except ImportError:
+    from backend.acl import require_project_access, require_well_access, request_role, request_subject, visible_project_ids
     from backend.audit import (
         compute_audit_chain_report,
         resolve_audit_export_signing_key,
@@ -73,14 +75,21 @@ class AuditSignatureVerifyResponse(BaseModel):
 
 
 @router.get("")
-def get_audit_log(project_id: int = None, well_id: int = None, limit: int = 100,
-                  db: Session = Depends(get_db)):
+def get_audit_log(request: Request, project_id: int = None, well_id: int = None,
+                  limit: int = 100, db: Session = Depends(get_db)):
     """Return audit trail, optionally filtered by project or well."""
     q = db.query(AuditLog)
     if project_id:
+        require_project_access(db, request, project_id)
         q = q.filter(AuditLog.project_id == project_id)
     if well_id:
+        require_well_access(db, request, well_id)
         q = q.filter(AuditLog.well_id == well_id)
+    if not project_id and not well_id:
+        all_ids = [row[0] for row in db.query(AuditLog.project_id).distinct().all() if row[0] is not None]
+        visible = visible_project_ids(db, request_subject(request), request_role(request), all_ids)
+        if visible is not None:
+            q = q.filter(AuditLog.project_id.in_(visible))
     rows = q.order_by(AuditLog.created_at.desc()).limit(min(limit, 500)).all()
     result = []
     for r in rows:

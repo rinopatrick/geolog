@@ -3,12 +3,14 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 try:
+    from acl import require_well_access
     from database import get_db
 except Exception:  # pragma: no cover
+    from backend.acl import require_well_access
     from backend.database import get_db
 
 try:
@@ -132,7 +134,7 @@ def _shape_score(gr_a_depth: np.ndarray, gr_a: np.ndarray, top_a: float,
 
 
 @router.get("/cross-section")
-def get_cross_section(well_ids: str, curve: str = "GR", db: Session = Depends(get_db)):
+def get_cross_section(well_ids: str, request: Request, curve: str = "GR", db: Session = Depends(get_db)):
     ids: List[int] = []
     for x in (well_ids or "").split(","):
         x = x.strip()
@@ -154,6 +156,7 @@ def get_cross_section(well_ids: str, curve: str = "GR", db: Session = Depends(ge
         well = db.query(Well).filter(Well.id == wid).first()
         if not well:
             continue
+        require_well_access(db, request, wid)
         lr, depth, values, unit = _load_curve(db, wid, curve)
         tops = db.query(FormationTop).filter(FormationTop.well_id == wid).order_by(FormationTop.depth.asc()).all()
         tops_payload = []
@@ -198,7 +201,9 @@ def get_cross_section(well_ids: str, curve: str = "GR", db: Session = Depends(ge
 
 
 @router.get("/tie-lines")
-def get_tie_lines(well_a_id: int, well_b_id: int, include_top_matches: bool = True, db: Session = Depends(get_db)):
+def get_tie_lines(well_a_id: int, well_b_id: int, request: Request, include_top_matches: bool = True, db: Session = Depends(get_db)):
+    require_well_access(db, request, well_a_id)
+    require_well_access(db, request, well_b_id)
     rows = db.query(CorrelationMarker).filter(
         ((CorrelationMarker.well_a_id == well_a_id) & (CorrelationMarker.well_b_id == well_b_id)) |
         ((CorrelationMarker.well_a_id == well_b_id) & (CorrelationMarker.well_b_id == well_a_id))
@@ -256,7 +261,7 @@ def get_tie_lines(well_a_id: int, well_b_id: int, include_top_matches: bool = Tr
 
 
 @router.post("/auto-correlate")
-def auto_correlate(payload: dict, db: Session = Depends(get_db)):
+def auto_correlate(payload: dict, request: Request, db: Session = Depends(get_db)):
     well_a_id = int(payload.get("well_a_id", 0) or 0)
     well_b_id = int(payload.get("well_b_id", 0) or 0)
     curve = str(payload.get("curve", "GR") or "GR")
@@ -268,6 +273,8 @@ def auto_correlate(payload: dict, db: Session = Depends(get_db)):
     if well_a_id == well_b_id:
         raise HTTPException(status_code=400, detail="well_a_id and well_b_id must be different")
 
+    require_well_access(db, request, well_a_id, write=True)
+    require_well_access(db, request, well_b_id, write=True)
     _, da, ga, _ = _load_curve(db, well_a_id, curve)
     _, dbb, gb, _ = _load_curve(db, well_b_id, curve)
 
