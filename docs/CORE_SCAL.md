@@ -105,3 +105,11 @@ preview without writing assignments.
 
 RQI = `0.0314 * sqrt(k/phi)` and FZI = `RQI / (phi/(1-phi))` with `k` in mD and
 `phi` as a fraction. Winland R35 uses `phi` in percent.
+
+
+## Combined PDF report
+
+`GET /api/wells/{wid}/report/rock-source.pdf` produces a PDF with rock-type
+counts (Winland class, R35 range and mean FZI) and the latest stored TOC/VKER
+statistics plus a TOC histogram. The buttons live in the Source Rock card and
+the Core/SCAL toolbar. Missing data is reported as a note rather than an error.
