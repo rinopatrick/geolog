@@ -85,6 +85,7 @@ Object.assign(GeoLogApp.prototype, {
             } catch (e) {
                 this._populateVelocityModels([]);
             }
+            await this.loadSeismicTies();
             const status = document.getElementById('segyStatus');
             if (status) {
                 const dimensions = volume?.is_3d ? ` · 3D ${volume.inline_count}×${volume.crossline_count}` : '';
@@ -117,6 +118,132 @@ Object.assign(GeoLogApp.prototype, {
                 ? `${volume.inline_count} inlines × ${volume.crossline_count} crosslines`
                 : '2D line (no inline/crossline grid)';
         }
+    },
+
+    async loadSeismicTies() {
+        const wid = this.currentWell?.id;
+        if (!wid) {
+            this._segyTies = [];
+            this._renderSeismicTieList();
+            return;
+        }
+        try {
+            const ties = await this._api(`/wells/${wid}/seismic-ties`);
+            this._segyTies = (ties || []).filter(tie => tie.line_id === this._segyLine?.id);
+            this._renderSeismicTieList();
+        } catch (e) {
+            this._segyTies = [];
+            this._renderSeismicTieList();
+        }
+    },
+
+    async createSeismicTie() {
+        const wid = this.currentWell?.id;
+        const line = this._segyLine;
+        if (!wid) return GeoToast.warn('Select a well first.');
+        if (!line) return GeoToast.warn('Load a SEG-Y line first.');
+        const inline = Number(document.getElementById('segyTieInline')?.value);
+        const crossline = Number(document.getElementById('segyTieCrossline')?.value);
+        const maxShift = Number(document.getElementById('segyTieMaxShift')?.value) || 40;
+        if (!inline || !crossline) return GeoToast.warn('Enter the tie inline and crossline.');
+        GeoLoading.show('Tying well to seismic...');
+        try {
+            const tie = await this._api(`/wells/${wid}/seismic-ties`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    line_id: line.id,
+                    inline,
+                    crossline,
+                    max_shift_ms: maxShift,
+                }),
+            });
+            this._segyTie = tie;
+            this._segyTies = [tie, ...(this._segyTies || [])];
+            this._drawSeismicTie();
+            this._renderSeismicTieList();
+            const status = document.getElementById('segyTieStatus');
+            if (status) {
+                status.textContent = `shift ${tie.shift_ms} ms · correlation ${tie.correlation}`;
+            }
+            GeoToast.success(`Tie created · shift ${tie.shift_ms} ms`);
+        } catch (e) {
+            GeoToast.error('Well tie failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    },
+
+    _renderSeismicTieList() {
+        const host = document.getElementById('segyTieList');
+        if (!host) return;
+        const ties = this._segyTies || [];
+        host.innerHTML = ties.length
+            ? ties.map(tie => `<span style="margin-right:14px">${escapeHtml(tie.name)} · inline ${tie.inline}/${tie.crossline} · shift ${tie.shift_ms} ms · corr ${tie.correlation}</span>`).join('')
+            : 'No well ties on this line.';
+    },
+
+    _drawSeismicTie() {
+        const canvas = document.getElementById('segyTieCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, w, h);
+        const result = this._segyTie?.result;
+        if (!result?.twt_ms?.length) {
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '13px sans-serif';
+            ctx.fillText('Create a well tie from a well, line and inline/crossline', 18, 28);
+            return;
+        }
+        const times = result.twt_ms;
+        const seismic = result.seismic;
+        const synthetic = result.synthetic_shifted || result.synthetic;
+        const left = 62;
+        const right = w - 18;
+        const top = 20;
+        const bottom = h - 34;
+        const plotW = right - left;
+        const plotH = bottom - top;
+        const tMin = Math.min(...times);
+        const tMax = Math.max(...times);
+        const norm = values => {
+            const finite = values.filter(value => Number.isFinite(Number(value)));
+            const min = Math.min(...finite);
+            const max = Math.max(...finite);
+            return { min, span: Math.max(1e-9, max - min) };
+        };
+        const sNorm = norm(seismic);
+        const yNorm = norm(synthetic);
+        const drawTrack = (values, x0, width, color, scale) => {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            let started = false;
+            values.forEach((value, index) => {
+                const x = x0 + ((Number(value) - scale.min) / scale.span) * width;
+                const y = top + ((times[index] - tMin) / Math.max(1e-9, tMax - tMin)) * plotH;
+                if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+        };
+        drawTrack(seismic, left, plotW * 0.38, '#58a6ff', sNorm);
+        drawTrack(synthetic, left + plotW * 0.52, plotW * 0.38, '#f78166', yNorm);
+        ctx.strokeStyle = '#30363d';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(left, top, plotW, plotH);
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '11px sans-serif';
+        ctx.fillText('seismic', left + 4, top + 12);
+        ctx.fillText('synthetic', left + plotW * 0.52 + 4, top + 12);
+        for (let index = 0; index <= 4; index += 1) {
+            const value = tMin + (index / 4) * (tMax - tMin);
+            const y = bottom - (index / 4) * plotH;
+            ctx.fillText(`${Math.round(value)} ms`, 4, y + 4);
+        }
+        ctx.fillStyle = '#c9d1d9';
+        ctx.fillText(`shift ${result.shift_ms} ms · corr ${result.correlation}${result.checkshot_used ? ' · checkshot' : ''}`, left + 4, h - 10);
     },
 
     _populateVelocityModels(models) {

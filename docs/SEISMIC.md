@@ -84,6 +84,18 @@ converts a stored surface with a model from the same project, stores
 include a `depth_m` column. The Seismic panel can add constant models, convert
 the selected surface and toggle the map between time and depth.
 
+## Well-to-seismic tie
+
+`POST /api/wells/{wid}/seismic-ties` builds a synthetic trace from DT/RHOB,
+extracts the seismic trace at `inline`/`crossline`, resamples the synthetic onto
+the seismic time axis and searches a cross-correlation shift (`max_shift_ms`).
+
+An optional `checkshot` list of `{depth, twt_ms}` replaces the DT-derived
+time-depth mapping. The response stores the seismic/synthetic traces, `shift_ms`
+and `correlation`; list/detail/delete endpoints are under
+`/api/wells/{wid}/seismic-ties`. The Seismic panel can create a tie from the
+current well and line and draw both traces.
+
 ## Fault detection
 
 `POST /api/seismic/{line_id}/faults/detect` computes adjacent-trace coherence in

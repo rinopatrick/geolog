@@ -256,7 +256,7 @@ def _compute_synthetic_seismogram(wid: int, data: dict, db: Session):
     if max_w > 0:
         wav = wav / max_w
 
-    synthetic = np.convolve(rc, wav, mode='same')
+    synthetic = np.convolve(rc, wav, mode="full")[len(wav) // 2:len(wav) // 2 + len(rc)]
     if phase == 90:
         synthetic = _hilbert_transform(synthetic)
     if polarity == "reversed":

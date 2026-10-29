@@ -767,6 +767,24 @@ class SeismicFault(Base):
 
 
 
+class WellSeismicTie(Base):
+    """A synthetic-seismogram tie at one inline/crossline location."""
+
+    __tablename__ = "well_seismic_ties"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, index=True)
+    line_id = Column(Integer, ForeignKey("seismic_lines.id"), nullable=False, index=True)
+    name = Column(String(160), nullable=False)
+    inline = Column(Integer, nullable=False)
+    crossline = Column(Integer, nullable=False)
+    checkshot_json = Column(Text, default="[]")
+    result_json = Column(Text, default="{}")
+    shift_ms = Column(Float, nullable=True)
+    correlation = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+
 class VelocityModel(Base):
     """Project time-depth model for seismic depth conversion."""
 
