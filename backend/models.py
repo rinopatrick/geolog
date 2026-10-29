@@ -673,6 +673,69 @@ class RevokedToken(Base):
     expires_at = Column(DateTime, nullable=True)
     revoked_at = Column(DateTime, default=utcnow)
 
+class SharedRateBucket(Base):
+    """Fixed-window counter used when GEOLOG_STATE_BACKEND=database."""
+
+    __tablename__ = "shared_rate_buckets"
+
+    key = Column(String(255), primary_key=True)
+    count = Column(Integer, nullable=False, default=0)
+    reset_at = Column(Float, nullable=False, default=0.0)
+
+
+class SharedRateLock(Base):
+    """Account/credential lock shared across app instances."""
+
+    __tablename__ = "shared_rate_locks"
+
+    key = Column(String(255), primary_key=True)
+    until = Column(Float, nullable=False, default=0.0)
+    failures = Column(Integer, nullable=False, default=0)
+
+
+class SharedMetricWorker(Base):
+    """Per-worker metrics snapshot; readers aggregate every row."""
+
+    __tablename__ = "shared_metric_workers"
+
+    worker_id = Column(String(120), primary_key=True)
+    payload = Column(Text, nullable=False, default="{}")
+    updated_at = Column(Float, nullable=False, default=0.0)
+
+
+class SharedWellState(Base):
+    """Opaque per-well state (locks, snapshots, template lock) shared by instances."""
+
+    __tablename__ = "shared_well_state"
+
+    key = Column(String(120), primary_key=True)
+    payload = Column(Text, nullable=False, default="null")
+    version = Column(Integer, nullable=False, default=0)
+    updated_at = Column(Float, nullable=False, default=0.0)
+
+
+class SharedJob(Base):
+    """Durable job record shared by every app instance."""
+
+    __tablename__ = "shared_jobs"
+
+    id = Column(String(64), primary_key=True)
+    type = Column(String(80), nullable=False, default="")
+    payload = Column(Text, nullable=False, default="{}")
+    status = Column(String(20), nullable=False, default="queued", index=True)
+    progress = Column(Integer, nullable=False, default=0)
+    result = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    worker_id = Column(String(120), nullable=True)
+    created_at = Column(String(40), nullable=False, default="")
+    created_epoch = Column(Float, nullable=False, default=0.0)
+    started_at = Column(String(40), nullable=True)
+    started_epoch = Column(Float, nullable=True)
+    finished_at = Column(String(40), nullable=True)
+    finished_epoch = Column(Float, nullable=True)
+
+
 class AuditLog(Base):
     """Track all user actions for audit trail."""
     __tablename__ = "audit_log"

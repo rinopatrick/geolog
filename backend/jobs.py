@@ -44,6 +44,14 @@ WORKER_ID = f"{os.getpid()}:{uuid.uuid4().hex[:8]}"
 STALE_SECONDS = int(os.getenv("GEOLOG_JOB_STALE_SECONDS", "900") or 900)
 
 
+def _db_enabled() -> bool:
+    try:
+        from state_backend import enabled
+    except ImportError:
+        from backend.state_backend import enabled
+    return enabled()
+
+
 def _load_jobs_file() -> dict[str, dict]:
     if not os.path.exists(JOBS_FILE):
         return {}
@@ -84,6 +92,13 @@ def register_handler(job_type: str, handler: Callable[[dict[str, Any], str], Any
 
 def create_job(job_type: str, payload: dict[str, Any] | None = None) -> str:
     job_id = f"job_{uuid.uuid4().hex[:12]}"
+    if _db_enabled():
+        try:
+            from state_backend import create_job as db_create_job
+        except ImportError:
+            from backend.state_backend import create_job as db_create_job
+        db_create_job(job_id, job_type, payload or {}, utc_now_iso())
+        return job_id
 
     def _add(jobs):
         jobs[job_id] = {
@@ -106,6 +121,17 @@ def create_job(job_type: str, payload: dict[str, Any] | None = None) -> str:
 
 
 def update_job(job_id: str, **fields) -> None:
+    if _db_enabled():
+        try:
+            from state_backend import update_job as db_update_job, update_job_result as db_update_result
+        except ImportError:
+            from backend.state_backend import update_job as db_update_job, update_job_result as db_update_result
+        result = fields.pop("result", "__missing__")
+        db_update_job(job_id, **fields)
+        if result != "__missing__":
+            db_update_result(job_id, result)
+        return
+
     def _update(jobs):
         job = jobs.get(job_id)
         if not job:
@@ -117,6 +143,12 @@ def update_job(job_id: str, **fields) -> None:
 
 
 def get_job(job_id: str) -> dict | None:
+    if _db_enabled():
+        try:
+            from state_backend import get_job as db_get_job
+        except ImportError:
+            from backend.state_backend import get_job as db_get_job
+        return db_get_job(job_id)
     with JOBS_LOCK:
         jobs = _load_jobs_file()
         job = jobs.get(job_id)
@@ -124,6 +156,12 @@ def get_job(job_id: str) -> dict | None:
 
 
 def list_jobs() -> list[dict]:
+    if _db_enabled():
+        try:
+            from state_backend import list_jobs as db_list_jobs
+        except ImportError:
+            from backend.state_backend import list_jobs as db_list_jobs
+        return db_list_jobs()
     with JOBS_LOCK:
         jobs = _load_jobs_file()
         return [dict(j) for j in jobs.values()]
@@ -151,6 +189,13 @@ def _is_stale(job: dict) -> bool:
 
 
 def _claim(job_id: str) -> dict | None:
+    if _db_enabled():
+        try:
+            from state_backend import claim_job
+        except ImportError:
+            from backend.state_backend import claim_job
+        return claim_job(job_id, WORKER_ID, STALE_SECONDS)
+
     def _apply(jobs):
         job = jobs.get(job_id)
         if not job:
@@ -197,12 +242,29 @@ def submit_job(job_type: str, payload: dict[str, Any] | None = None) -> str:
 
 
 def _requeue(job_id: str) -> None:
-    update_job(job_id, status="queued")
+    if _db_enabled():
+        try:
+            from state_backend import requeue_job
+        except ImportError:
+            from backend.state_backend import requeue_job
+        requeue_job(job_id)
+    else:
+        update_job(job_id, status="queued")
     JOB_EXECUTOR.submit(_execute, job_id)
 
 
 def recover_jobs() -> int:
     """Requeue jobs orphaned by a crash or left queued at shutdown."""
+    if _db_enabled():
+        try:
+            from state_backend import recoverable_job_ids
+        except ImportError:
+            from backend.state_backend import recoverable_job_ids
+        ids = recoverable_job_ids(STALE_SECONDS)
+        for job_id in ids:
+            _requeue(job_id)
+        return len(ids)
+
     recovered = 0
     for job in list_jobs():
         status = job.get("status")

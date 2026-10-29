@@ -62,6 +62,14 @@ os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 LOCK_FILE = os.path.join(ARTIFACT_DIR, "locks.json")
 
 
+def _db_enabled() -> bool:
+    try:
+        from state_backend import enabled
+    except ImportError:
+        from backend.state_backend import enabled
+    return enabled()
+
+
 def compute_template_signature(params: dict) -> str:
     canonical = json.dumps(params, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -107,6 +115,13 @@ def current_petro_params_payload(db: Session, wid: int) -> dict:
 
 
 def load_locks() -> dict:
+    if _db_enabled():
+        try:
+            from state_backend import load_well_state
+        except ImportError:
+            from backend.state_backend import load_well_state
+        data = load_well_state("locks", {})
+        return data if isinstance(data, dict) else {}
     if not os.path.exists(LOCK_FILE):
         return {}
     try:
@@ -117,6 +132,13 @@ def load_locks() -> dict:
 
 
 def save_locks(data: dict):
+    if _db_enabled():
+        try:
+            from state_backend import save_well_state
+        except ImportError:
+            from backend.state_backend import save_well_state
+        save_well_state("locks", data)
+        return
     os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
     tmp = LOCK_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -130,6 +152,25 @@ def get_well_lock(wid: int) -> dict:
 
 
 def set_well_lock(wid: int, locked: bool, actor: str = "system", snapshot_id: str = None):
+    if _db_enabled():
+        try:
+            from state_backend import mutate_well_state
+        except ImportError:
+            from backend.state_backend import mutate_well_state
+
+        def _apply(locks):
+            current = locks.get(str(wid), {}) if isinstance(locks.get(str(wid), {}), dict) else {}
+            current.update({
+                "locked": bool(locked),
+                "actor": actor,
+                "snapshot_id": snapshot_id,
+                "updated_at": utcnow().isoformat() + "Z",
+            })
+            locks[str(wid)] = current
+
+        mutate_well_state("locks", _apply, {})
+        return
+
     with interprocess_lock(LOCK_FILE):
         locks = load_locks()
         current = locks.get(str(wid), {}) if isinstance(locks.get(str(wid), {}), dict) else {}
@@ -153,6 +194,20 @@ def get_template_lock(wid: int) -> dict:
 
 
 def set_template_lock(wid: int, lock_payload: dict):
+    if _db_enabled():
+        try:
+            from state_backend import mutate_well_state
+        except ImportError:
+            from backend.state_backend import mutate_well_state
+
+        def _apply(locks):
+            entry = locks.get(str(wid), {}) if isinstance(locks.get(str(wid), {}), dict) else {}
+            entry["template_lock"] = lock_payload
+            locks[str(wid)] = entry
+
+        mutate_well_state("locks", _apply, {})
+        return
+
     with interprocess_lock(LOCK_FILE):
         locks = load_locks()
         entry = locks.get(str(wid), {}) if isinstance(locks.get(str(wid), {}), dict) else {}
@@ -170,6 +225,13 @@ def snapshot_lock(wid: int):
 
 
 def load_snapshots(wid: int):
+    if _db_enabled():
+        try:
+            from state_backend import load_well_state
+        except ImportError:
+            from backend.state_backend import load_well_state
+        data = load_well_state(f"snapshots:{wid}", [])
+        return data if isinstance(data, list) else []
     p = snapshot_path(wid)
     if not os.path.exists(p):
         return []
@@ -182,6 +244,13 @@ def load_snapshots(wid: int):
 
 
 def save_snapshots(wid: int, snapshots):
+    if _db_enabled():
+        try:
+            from state_backend import save_well_state
+        except ImportError:
+            from backend.state_backend import save_well_state
+        save_well_state(f"snapshots:{wid}", snapshots)
+        return
     # Atomic write + datetime-safe serialization
     out = snapshot_path(wid)
     tmp = out + ".tmp"
@@ -191,6 +260,12 @@ def save_snapshots(wid: int, snapshots):
 
 def mutate_snapshots(wid: int, fn):
     """Read-modify-write one well's snapshot list under a cross-process lock."""
+    if _db_enabled():
+        try:
+            from state_backend import mutate_well_state
+        except ImportError:
+            from backend.state_backend import mutate_well_state
+        return mutate_well_state(f"snapshots:{wid}", fn, [])
     with snapshot_lock(wid):
         snapshots = load_snapshots(wid)
         result = fn(snapshots)
@@ -205,6 +280,19 @@ def snapshot_template_signature(db: Session, wid: int):
 
 def delete_well_state(wid: int) -> None:
     """Remove the lock entry and snapshot file for a well."""
+    if _db_enabled():
+        try:
+            from state_backend import delete_well_state as db_delete_well_state, mutate_well_state
+        except ImportError:
+            from backend.state_backend import delete_well_state as db_delete_well_state, mutate_well_state
+
+        def _drop(locks):
+            locks.pop(str(wid), None)
+
+        mutate_well_state("locks", _drop, {})
+        db_delete_well_state(f"snapshots:{wid}")
+        return
+
     with interprocess_lock(LOCK_FILE):
         locks = load_locks()
         if str(wid) in locks:

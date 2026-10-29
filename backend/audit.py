@@ -25,12 +25,15 @@ from threading import Lock
 from typing import Optional
 
 from fastapi import HTTPException
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 try:
+    from database import engine
     from models import AuditLog
     from validation import canonical_json
 except ImportError:
+    from backend.database import engine
     from backend.models import AuditLog
     from backend.validation import canonical_json
 
@@ -111,7 +114,7 @@ def append_audit_entry(
     The only writer of `audit_log`. Reads the previous entry's hash and inserts
     under a lock, so the chain cannot fork.
     """
-    with _CHAIN_LOCK, interprocess_lock(AUDIT_LOCK_FILE):
+    def _append_locked() -> str:
         previous = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
         prev_hash = (getattr(previous, "entry_hash", "") or "") if previous else ""
 
@@ -151,7 +154,15 @@ def append_audit_entry(
             db.commit()
         return entry_hash
 
+    if engine.dialect.name == "postgresql":
+        with _CHAIN_LOCK:
+            # Postgres transaction-scoped advisory lock serialises the chain
+            # across every instance, not just this host.
+            db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": 0x47454F4C})
+            return _append_locked()
 
+    with _CHAIN_LOCK, interprocess_lock(AUDIT_LOCK_FILE):
+        return _append_locked()
 
 def log_audit(db: Session, action: str, entity_type: str = "", entity_id: int = None,
               well_id: int = None, project_id: int = None, details: str = ""):
