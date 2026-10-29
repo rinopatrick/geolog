@@ -96,8 +96,18 @@ function buildVolume() {
       document.getElementById('segySurfaceHorizon').value = 'E2E Surface';
       await app.buildSeismicSurface();
       const surfaceOk = app._segySurface?.grid?.length > 0 && (app._segySurfaces || []).length > 0;
+      const velocity = await app._api(`/projects/${line.project_id}/velocity-models`, {
+        method: 'POST',
+        body: JSON.stringify({ name: 'E2E 2500', kind: 'constant', velocity_m_s: 2500 }),
+      });
+      await app._api(`/seismic/${line.id}/surfaces/${app._segySurface.id}/depth`, {
+        method: 'POST',
+        body: JSON.stringify({ velocity_model_id: velocity.id }),
+      });
+      await app.loadSeismicSurface(app._segySurface.id);
+      const depthOk = (app._segySurface?.depth_grid || []).length > 0;
       return {
-        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && surfaceOk && (app._segyFaultLinks || []).length > 0,
+        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && surfaceOk && depthOk && (app._segyFaultLinks || []).length > 0,
         lineId: line.id,
         volumeOk,
         inlineOk,
@@ -106,6 +116,7 @@ function buildVolume() {
         autoTrackOk,
         geometryOk,
         surfaceOk,
+        depthOk,
         surfaceName: app._segySurface?.name || '',
         throwMs: geometry.throw_ms,
         dipAngle: geometry.dip_angle_deg,

@@ -70,6 +70,7 @@ try:
     from routers.wells_source_rock import router as wells_source_rock_router
     from routers.seismic import router as seismic_router
     from routers.report_templates import router as report_templates_router
+    from routers.velocity import router as velocity_router
     from routers.zonation import router as zonation_router
 except ImportError:
     from backend.audit import append_audit_entry
@@ -112,6 +113,7 @@ except ImportError:
     from backend.routers.wells_source_rock import router as wells_source_rock_router
     from backend.routers.seismic import router as seismic_router
     from backend.routers.report_templates import router as report_templates_router
+    from backend.routers.velocity import router as velocity_router
     from backend.routers.zonation import router as zonation_router
 
 
@@ -250,6 +252,7 @@ app.include_router(wells_analytics_router)
 app.include_router(wells_source_rock_router)
 app.include_router(seismic_router)
 app.include_router(report_templates_router)
+app.include_router(velocity_router)
 
 
 
