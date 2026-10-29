@@ -1445,6 +1445,9 @@
                         <input id="prospectName" placeholder="Prospect name" value="Prospect A" style="min-width:140px">
                         <select id="prospectSurface" style="min-width:160px"></select>
                         <input id="prospectContact" type="number" placeholder="contact m" style="width:100px">
+                        <select id="prospectFluid"><option value="oil">Oil</option><option value="gas">Gas</option><option value="condensate">Condensate</option></select>
+                        <input id="prospectBg" type="number" min="0.0001" max="0.1" step="0.0001" value="0.005" title="Gas FVF (res m3 / surface m3)" style="width:90px">
+                        <input id="prospectYield" type="number" min="0" max="500" step="1" value="30" title="Condensate yield (bbl/MMSCF)" style="width:90px">
                         <input id="prospectPorosity" type="number" min="0.001" max="0.6" step="0.01" value="0.2" title="Porosity" style="width:80px">
                         <input id="prospectSw" type="number" min="0" max="1" step="0.01" value="0.3" title="Water saturation" style="width:80px">
                         <input id="prospectRf" type="number" min="0" max="1" step="0.01" value="0.35" title="Recovery factor" style="width:80px">

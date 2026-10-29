@@ -8,6 +8,11 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+### Added
+
+- **Gas/condensate volumetrics.** Fluid type, Bg, condensate yield, GIIP,
+  recoverable gas, condensate and BOE percentiles, plus a gas/condensate UI.
+
 ## [0.15.0] - 2026-10-31
 
 ### Added

@@ -178,3 +178,40 @@ def test_prospect_requires_depth_and_spacing():
         headers=ADMIN,
     )
     assert above.status_code == 400
+
+
+def test_gas_condensate_volumetrics():
+    pid = _project_id()
+    _, surface = _depth_surface(pid)
+    expected_grv = _expected_grv(surface, 1000.0)
+    giip = expected_grv * 0.2 * 0.7 / 0.005
+    condensate = giip * 35.3147 / 1e6 * 30.0
+    gas_boe = giip * 35.3147 / 5800.0
+
+    created = client.post(
+        f"/api/projects/{pid}/prospects",
+        json={
+            "name": "Gas prospect",
+            "surface_id": surface["id"],
+            "contact_depth_m": 1000,
+            "fluid_type": "gas",
+            "bg": 0.005,
+            "condensate_yield": 30,
+            "porosity": 0.2,
+            "water_saturation": 0.3,
+            "recovery_factor": 0.6,
+            "iterations": 100,
+            "seed": 3,
+        },
+        headers=ADMIN,
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["fluid_type"] == "condensate"
+    result = body["result"]
+    assert result["fluid_type"] == "condensate"
+    assert result["giip"]["p50_m3"] == round(giip, 3)
+    assert result["condensate"]["p50_m3"] == round(condensate, 3)
+    assert result["boe"]["p50_m3"] == round(gas_boe + condensate, 3)
+    assert result["recoverable_gas"]["p50_m3"] == round(giip * 0.6, 3)
+    assert result["risked_giip"]["p50_m3"] == result["giip"]["p50_m3"]

@@ -97,6 +97,9 @@ def calculate_prospect(
     risks: dict[str, float] | None = None,
     iterations: int = 1000,
     seed: int | None = None,
+    fluid_type: str = "oil",
+    bg: float = 0.005,
+    condensate_yield: float = 30.0,
 ) -> dict[str, Any]:
     grv = grv_from_depth_grid(
         depth_grid,
@@ -119,6 +122,12 @@ def calculate_prospect(
         components = {}
         risk_probability = min(1.0, max(0.0, _number(risk, 1.0)))
 
+    fluid = str(fluid_type or "oil").lower()
+    if fluid not in {"oil", "gas", "condensate"}:
+        raise ValueError("fluid_type must be oil, gas or condensate")
+    bg_value = min(0.1, max(0.0001, _number(bg, 0.005)))
+    yield_value = min(500.0, max(0.0, _number(condensate_yield, 30.0)))
+
     rng = np.random.default_rng(seed)
 
     def sample(values: tuple[float, float, float]) -> np.ndarray:
@@ -131,27 +140,59 @@ def calculate_prospect(
     sw_samples = sample(sw_range)
     rf_samples = sample(rf_range)
     ntg_samples = sample(ntg_range)
-    stoiip = grv["grv_m3"] * ntg_samples * porosity_samples * (1.0 - sw_samples) / bo_value
-    recoverable = stoiip * rf_samples
-    stoiip_stats = percentiles(stoiip)
-    recovery_stats = percentiles(recoverable)
-    risked = {key: round(value * risk_probability, 3) for key, value in stoiip_stats.items()}
+    pore_volume = grv["grv_m3"] * ntg_samples * porosity_samples * (1.0 - sw_samples)
+    risk_summary = {
+        "probability": round(risk_probability, 4),
+        "components": components,
+    }
+    ranges = {
+        "porosity": list(porosity_range),
+        "water_saturation": list(sw_range),
+        "recovery_factor": list(rf_range),
+        "net_to_gross": list(ntg_range),
+    }
+    if fluid == "oil":
+        stoiip = pore_volume / bo_value
+        recoverable = stoiip * rf_samples
+        stoiip_stats = percentiles(stoiip)
+        recovery_stats = percentiles(recoverable)
+        risked = {key: round(value * risk_probability, 3) for key, value in stoiip_stats.items()}
+        return {
+            "fluid_type": "oil",
+            "grv": grv,
+            "ranges": ranges,
+            "bo": bo_value,
+            "risk": risk_summary,
+            "iterations": iterations,
+            "seed": seed,
+            "stoiip": stoiip_stats,
+            "recoverable": recovery_stats,
+            "risked_stoiip": risked,
+        }
+
+    giip = pore_volume / bg_value
+    recoverable_gas = giip * rf_samples
+    condensate = giip * 35.3147 / 1e6 * yield_value
+    gas_boe = giip * 35.3147 / 5800.0
+    boe = gas_boe + condensate
+    giip_stats = percentiles(giip)
+    gas_recovery_stats = percentiles(recoverable_gas)
+    condensate_stats = percentiles(condensate)
+    boe_stats = percentiles(boe)
     return {
+        "fluid_type": "condensate" if fluid == "condensate" or yield_value > 0 else "gas",
         "grv": grv,
-        "ranges": {
-            "porosity": list(porosity_range),
-            "water_saturation": list(sw_range),
-            "recovery_factor": list(rf_range),
-            "net_to_gross": list(ntg_range),
-        },
-        "bo": bo_value,
-        "risk": {
-            "probability": round(risk_probability, 4),
-            "components": components,
-        },
+        "ranges": ranges,
+        "bg": bg_value,
+        "condensate_yield_bbl_per_mmscf": yield_value,
+        "risk": risk_summary,
         "iterations": iterations,
         "seed": seed,
-        "stoiip": stoiip_stats,
-        "recoverable": recovery_stats,
-        "risked_stoiip": risked,
+        "giip": giip_stats,
+        "recoverable_gas": gas_recovery_stats,
+        "condensate": condensate_stats,
+        "boe": boe_stats,
+        "recoverable_boe": percentiles(recoverable_gas * 35.3147 / 5800.0 + recoverable_gas * 35.3147 / 1e6 * yield_value),
+        "risked_giip": {key: round(value * risk_probability, 3) for key, value in giip_stats.items()},
+        "risked_boe": {key: round(value * risk_probability, 3) for key, value in boe_stats.items()},
     }
