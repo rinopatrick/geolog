@@ -16,6 +16,14 @@ and the 80th percentile of the porosity curve (shale-side baseline).
 Kerogen volume: `VKER = (TOC/100) * RHOB / 1.2`, clamped to 0–1 v/v. If RHOB is
 missing, the API assumes 2.5 g/cc and returns a warning.
 
+## Analysis metadata
+
+Every calculation stores a `source_rock_analyses` row with method, porosity mode,
+LOM, TOC base, Rt/porosity baselines, curve names, stats and warnings.
+`GET /api/wells/{wid}/source-rock/analyses` returns the history newest first.
+The combined rock/source PDF uses the latest row to print the method and
+baselines.
+
 ## Limits
 
 - Passey is a screening method; pick a real shale baseline for quantitative work.

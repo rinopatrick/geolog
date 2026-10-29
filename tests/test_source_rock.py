@@ -39,6 +39,15 @@ def test_passey_toc_and_kerogen_curves(make_well):
     assert body["stats"]["toc"]["count"] > 0
     assert body["stats"]["toc"]["max"] >= 0
     assert body["curves"] == {"toc": "TOC", "vker": "VKER"}
+    assert body["analysis_id"] > 0
+
+    analyses = client.get(f"/api/wells/{wid}/source-rock/analyses", headers=INTERPRETER)
+    assert analyses.status_code == 200, analyses.text
+    latest = analyses.json()[0]
+    assert latest["method"] == "passey"
+    assert latest["porosity_mode"] == "sonic"
+    assert latest["lom"] == 10.0
+    assert latest["toc_curve"] == "TOC"
 
     db = SessionLocal()
     try:

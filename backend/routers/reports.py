@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 try:
     from acl import require_well_access
     from database import get_db
-    from models import CorePlug, Well, FormationTop, LogRun, CurveData, PetroParams, RockType, Zone
+    from models import CorePlug, Well, FormationTop, LogRun, CurveData, PetroParams, RockType, SourceRockAnalysis, Zone
     from rock_typing import classify_plug
     # Private name on purpose: reports reuses the QC engine rather than
     # reimplementing it, and that engine currently lives inside routers/qc.py.
@@ -12,7 +12,7 @@ try:
 except ImportError:
     from backend.acl import require_well_access
     from backend.database import get_db
-    from backend.models import CorePlug, Well, FormationTop, LogRun, CurveData, PetroParams, RockType, Zone
+    from backend.models import CorePlug, Well, FormationTop, LogRun, CurveData, PetroParams, RockType, SourceRockAnalysis, Zone
     from backend.rock_typing import classify_plug
     from backend.routers.qc import _run_advanced_qc
 
@@ -649,6 +649,19 @@ def rock_source_report(wid: int, request: Request, db: Session = Depends(get_db)
         elements.append(Paragraph("No core plugs with positive porosity and air permeability.", body_style))
 
     elements.append(Paragraph("2. Source-rock screening", section_style))
+    analysis = (
+        db.query(SourceRockAnalysis)
+        .filter(SourceRockAnalysis.well_id == wid)
+        .order_by(SourceRockAnalysis.id.desc())
+        .first()
+    )
+    if analysis is not None:
+        elements.append(Paragraph(
+            f"Method: {analysis.method} | porosity: {analysis.porosity_mode or '—'} | "
+            f"LOM: {_fmt(analysis.lom, 2)} | TOC base: {_fmt(analysis.toc_base, 2)} | "
+            f"Rt base: {_fmt(analysis.rt_base, 4)} | porosity base: {_fmt(analysis.porosity_base, 4)}",
+            body_style,
+        ))
     source_rows = [
         ["Curve", "Samples", "Mean", "Max"],
         ["TOC (wt%)", toc_stats["count"], _fmt(toc_stats["mean"], 3), _fmt(toc_stats["max"], 3)],
