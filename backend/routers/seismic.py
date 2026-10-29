@@ -145,12 +145,22 @@ def _fault_link(row: SeismicFaultLink) -> dict:
         points = json.loads(row.points_json or "[]")
     except json.JSONDecodeError:
         points = []
+    try:
+        geometry = json.loads(row.geometry_json or "{}")
+    except json.JSONDecodeError:
+        geometry = {}
+    try:
+        polygon = json.loads(row.polygon_json or "[]")
+    except json.JSONDecodeError:
+        polygon = []
     return {
         "id": row.id,
         "line_id": row.line_id,
         "name": row.name,
         "color": row.color,
         "points": points,
+        "geometry": geometry,
+        "polygon": polygon,
         "score": row.score,
         "inline_start": row.inline_start,
         "inline_end": row.inline_end,
@@ -345,6 +355,10 @@ def link_seismic_faults_3d(line_id: int, data: dict, request: Request, db: Sessi
     max_sections = max(2, min(int(data.get("max_sections", 12) or 12), 64))
     crossline_tolerance = max(0.5, min(float(data.get("crossline_tolerance", 3.0) or 3.0), 500.0))
     sample_tolerance = max(1.0, min(float(data.get("sample_tolerance", 16.0) or 16.0), 2000.0))
+    inline_spacing = data.get("inline_spacing_m")
+    crossline_spacing = data.get("crossline_spacing_m")
+    inline_spacing = max(1.0, float(inline_spacing)) if inline_spacing else None
+    crossline_spacing = max(1.0, float(crossline_spacing)) if crossline_spacing else None
     try:
         with open(row.file_path, "rb") as handle:
             content = handle.read()
@@ -358,6 +372,8 @@ def link_seismic_faults_3d(line_id: int, data: dict, request: Request, db: Sessi
             max_sections=max_sections,
             crossline_tolerance=crossline_tolerance,
             sample_tolerance=sample_tolerance,
+            inline_spacing_m=inline_spacing,
+            crossline_spacing_m=crossline_spacing,
         )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(400, f"could not link faults: {exc}")
@@ -369,6 +385,8 @@ def link_seismic_faults_3d(line_id: int, data: dict, request: Request, db: Sessi
             name=link["name"],
             color=link["color"],
             points_json=json.dumps(link["points"]),
+            geometry_json=json.dumps(link.get("geometry") or {}),
+            polygon_json=json.dumps(link.get("polygon") or []),
             score=link["score"],
             inline_start=link["inline_start"],
             inline_end=link["inline_end"],

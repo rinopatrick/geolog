@@ -221,7 +221,14 @@ def test_seismic_volume_sections_and_fault_links():
 
     linked = client.post(
         f"/api/seismic/{line_id}/faults/link-3d",
-        json={"threshold": 0.5, "min_points": 4, "max_sections": 6, "sample_tolerance": 8},
+        json={
+            "threshold": 0.5,
+            "min_points": 4,
+            "max_sections": 6,
+            "sample_tolerance": 8,
+            "inline_spacing_m": 25,
+            "crossline_spacing_m": 25,
+        },
         headers=ADMIN,
     )
     assert linked.status_code == 201, linked.text
@@ -230,6 +237,13 @@ def test_seismic_volume_sections_and_fault_links():
     assert linked.json()["scanned_inlines"] == 6
     assert links[0]["inline_start"] == 100 and links[0]["inline_end"] == 105
     assert len(links[0]["points"]) >= 6
+    geometry = links[0]["geometry"]
+    assert geometry["point_count"] >= 6
+    assert geometry["vertical_extent_ms"] > 0
+    assert geometry["throw_ms"] is not None and geometry["throw_ms"] > 0
+    assert geometry["throw_sections"] >= 2
+    assert geometry["dip_angle_deg"] is not None
+    assert len(links[0]["polygon"]) >= 3
 
     listed = client.get(f"/api/seismic/{line_id}/fault-links", headers=ADMIN)
     assert listed.status_code == 200

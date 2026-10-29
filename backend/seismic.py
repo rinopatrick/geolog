@@ -272,6 +272,147 @@ def volume_section(
     payload["label_name"] = "crossline" if mode == "inline" else "inline"
     return payload
 
+def _convex_hull(points: list[dict[str, Any]]) -> list[dict[str, float]]:
+    values = sorted({(float(point["inline"]), float(point["crossline"])) for point in points})
+    if len(values) == 1:
+        inline, crossline = values[0]
+        return [
+            {"inline": inline - 0.5, "crossline": crossline - 0.5},
+            {"inline": inline + 0.5, "crossline": crossline - 0.5},
+            {"inline": inline + 0.5, "crossline": crossline + 0.5},
+            {"inline": inline - 0.5, "crossline": crossline + 0.5},
+        ]
+    if len(values) == 2:
+        (inline_a, crossline_a), (inline_b, crossline_b) = values
+        length = math.hypot(inline_b - inline_a, crossline_b - crossline_a) or 1.0
+        offset_inline = -(crossline_b - crossline_a) / length * 0.5
+        offset_crossline = (inline_b - inline_a) / length * 0.5
+        return [
+            {"inline": inline_a - offset_inline, "crossline": crossline_a - offset_crossline},
+            {"inline": inline_b - offset_inline, "crossline": crossline_b - offset_crossline},
+            {"inline": inline_b + offset_inline, "crossline": crossline_b + offset_crossline},
+            {"inline": inline_a + offset_inline, "crossline": crossline_a + offset_crossline},
+        ]
+
+    def cross(origin, a, b):
+        return (a[0] - origin[0]) * (b[1] - origin[1]) - (a[1] - origin[1]) * (b[0] - origin[0])
+
+    lower: list[tuple[int, int]] = []
+    for value in values:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], value) <= 0:
+            lower.pop()
+        lower.append(value)
+    upper: list[tuple[int, int]] = []
+    for value in reversed(values):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], value) <= 0:
+            upper.pop()
+        upper.append(value)
+    hull = lower[:-1] + upper[:-1]
+    if len(hull) < 3:
+        inline_a, crossline_a = hull[0]
+        inline_b, crossline_b = hull[-1]
+        length = math.hypot(inline_b - inline_a, crossline_b - crossline_a) or 1.0
+        offset_inline = -(crossline_b - crossline_a) / length * 0.5
+        offset_crossline = (inline_b - inline_a) / length * 0.5
+        return [
+            {"inline": inline_a - offset_inline, "crossline": crossline_a - offset_crossline},
+            {"inline": inline_b - offset_inline, "crossline": crossline_b - offset_crossline},
+            {"inline": inline_b + offset_inline, "crossline": crossline_b + offset_crossline},
+            {"inline": inline_a + offset_inline, "crossline": crossline_a + offset_crossline},
+        ]
+    return [{"inline": float(inline), "crossline": float(crossline)} for inline, crossline in hull]
+
+def _throw_estimate(
+    matrix: np.ndarray,
+    labels: list[int],
+    crossline: float,
+    sample: float,
+    sample_step: int,
+    sample_interval_ms: float,
+) -> dict[str, float] | None:
+    """Estimate vertical offset from cross-correlation across the fault plane."""
+    if matrix.shape[0] < 5 or matrix.shape[1] < 9 or not labels:
+        return None
+    position = min(range(len(labels)), key=lambda index: abs(labels[index] - float(crossline)))
+    offset = 2
+    left, right = position - offset, position + offset
+    if left < 0 or right >= matrix.shape[0]:
+        offset = 1
+        left, right = position - offset, position + offset
+    if left < 0 or right >= matrix.shape[0]:
+        return None
+    ns = matrix.shape[1]
+    center = int(round(float(sample) / max(1, int(sample_step))))
+    radius = 6
+    start = max(0, center - radius)
+    end = min(ns, center + radius + 1)
+    if end - start < radius + 2:
+        return None
+    max_lag = min(12, max(1, ns // 4))
+    best_score = -2.0
+    best_lag = 0
+    for lag in range(-max_lag, max_lag + 1):
+        other_start = start + lag
+        other_end = end + lag
+        if other_start < 0 or other_end > ns:
+            continue
+        score = _correlation(matrix[left, start:end], matrix[right, other_start:other_end])
+        if score > best_score:
+            best_score = score
+            best_lag = lag
+    if best_score < 0.35:
+        return None
+    step_ms = float(sample_step) * float(sample_interval_ms)
+    return {
+        "throw_ms": round(abs(best_lag) * step_ms, 3),
+        "lag_ms": round(best_lag * step_ms, 3),
+        "score": round(float(best_score), 4),
+    }
+
+def _link_geometry(
+    points: list[dict[str, int]],
+    segments: list[dict[str, Any]],
+    sample_interval_ms: float,
+    inline_spacing_m: float | None,
+    crossline_spacing_m: float | None,
+) -> tuple[dict[str, Any], list[dict[str, int]]]:
+    inline_values = np.asarray([point["inline"] for point in points], dtype=float)
+    crossline_values = np.asarray([point["crossline"] for point in points], dtype=float)
+    sample_values = np.asarray([point["sample"] for point in points], dtype=float)
+    design = np.column_stack([inline_values, crossline_values, np.ones(len(points))])
+    coefficients, *_ = np.linalg.lstsq(design, sample_values, rcond=None)
+    prediction = design @ coefficients
+    rms_ms = float(np.sqrt(np.mean((prediction - sample_values) ** 2)) * sample_interval_ms)
+    throws = [
+        float(segment["throw"]["throw_ms"])
+        for segment in segments
+        if segment.get("throw") is not None
+    ]
+    geometry: dict[str, Any] = {
+        "point_count": len(points),
+        "inline_span": int(inline_values.max() - inline_values.min()),
+        "crossline_span": int(crossline_values.max() - crossline_values.min()),
+        "vertical_extent_ms": round(float(sample_values.max() - sample_values.min()) * sample_interval_ms, 3),
+        "throw_ms": round(float(np.median(throws)), 3) if throws else None,
+        "throw_range_ms": [round(min(throws), 3), round(max(throws), 3)] if throws else [],
+        "throw_sections": len(throws),
+        "dip_inline_ms_per_line": round(float(coefficients[0]) * sample_interval_ms, 4),
+        "dip_crossline_ms_per_line": round(float(coefficients[1]) * sample_interval_ms, 4),
+        "plane_rms_ms": round(rms_ms, 3),
+        "dip_basis": "time",
+        "dip_angle_deg": None,
+        "inline_spacing_m": inline_spacing_m,
+        "crossline_spacing_m": crossline_spacing_m,
+    }
+    if inline_spacing_m and crossline_spacing_m:
+        gradient_inline = float(coefficients[0]) * sample_interval_ms / float(inline_spacing_m)
+        gradient_crossline = float(coefficients[1]) * sample_interval_ms / float(crossline_spacing_m)
+        geometry["dip_angle_deg"] = round(
+            float(np.degrees(np.arctan(np.hypot(gradient_inline, gradient_crossline)))),
+            3,
+        )
+    return geometry, _convex_hull(points)
+
 def link_faults_3d(
     content: bytes,
     index: dict[str, Any],
@@ -281,6 +422,8 @@ def link_faults_3d(
     max_sections: int = 12,
     crossline_tolerance: float = 3.0,
     sample_tolerance: float = 16.0,
+    inline_spacing_m: float | None = None,
+    crossline_spacing_m: float | None = None,
 ) -> list[dict[str, Any]]:
     """Detect faults on sampled inline sections and link them across inlines."""
     inlines = index.get("trace_inlines", [])
@@ -334,6 +477,14 @@ def link_faults_3d(
                 "sample": float(np.mean([point["sample"] for point in points])),
                 "score": float(fault.get("score") or 0.0),
                 "size": int(fault.get("size") or len(points)),
+                "throw": _throw_estimate(
+                    sampled_matrix,
+                    view["labels"],
+                    float(np.mean([point["crossline"] for point in points])),
+                    float(np.mean([point["sample"] for point in points])),
+                    int(view["sample_step"]),
+                    float(index["sample_interval_ms"]),
+                ),
             })
 
     links: list[dict[str, Any]] = []
@@ -364,10 +515,19 @@ def link_faults_3d(
         if len(link["segments"]) < 2 or not points:
             continue
         inline_values = [segment["inline"] for segment in link["segments"]]
+        geometry, polygon = _link_geometry(
+            points,
+            link["segments"],
+            float(index["sample_interval_ms"]),
+            inline_spacing_m,
+            crossline_spacing_m,
+        )
         results.append({
             "name": "3D Fault",
             "color": "#f85149",
             "points": points,
+            "polygon": polygon,
+            "geometry": geometry,
             "score": float(np.mean([segment["score"] for segment in link["segments"]])),
             "inline_start": int(min(inline_values)),
             "inline_end": int(max(inline_values)),

@@ -776,6 +776,8 @@ class SeismicFaultLink(Base):
     name = Column(String(120), nullable=False)
     color = Column(String(20), default="#f85149")
     points_json = Column(Text, default="[]")
+    geometry_json = Column(Text, default="{}")
+    polygon_json = Column(Text, default="[]")
     score = Column(Float, nullable=True)
     inline_start = Column(Integer, nullable=True)
     inline_end = Column(Integer, nullable=True)
