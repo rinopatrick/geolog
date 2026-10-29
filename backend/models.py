@@ -24,6 +24,7 @@ class Project(Base):
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     wells = relationship("Well", back_populates="project", cascade="all, delete-orphan")
+    members = relationship("ProjectMember", back_populates="project", cascade="all, delete-orphan")
 
 
 class Well(Base):
@@ -704,5 +705,26 @@ class User(Base):
     username = Column(String(100), unique=True, nullable=False)
     display_name = Column(String(200), default="")
     role = Column(String(50), default="interpreter")  # admin, interpreter, viewer
+    # Legacy plaintext column. New secrets are written to token_hash; a row is
+    # upgraded and this column cleared on its first successful login.
     token = Column(String(200), default="")
+    token_hash = Column(String(255), default="")
     created_at = Column(DateTime, default=utcnow)
+
+
+class ProjectMember(Base):
+    """Per-project ACL. A project with no members stays open for legacy data."""
+
+    __tablename__ = "project_members"
+    __table_args__ = (
+        UniqueConstraint("project_id", "subject", name="uq_project_member_subject"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    subject = Column(String(160), nullable=False, index=True)
+    role = Column(String(20), nullable=False, default="viewer")
+    created_at = Column(DateTime, default=utcnow)
+
+    project = relationship("Project", back_populates="members")
+

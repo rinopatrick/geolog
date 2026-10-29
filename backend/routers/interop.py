@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 try:
+    from acl import require_project_access, require_well_access
     from database import get_db
     import interop
     from models import Well
 except ImportError:
+    from backend.acl import require_project_access, require_well_access
     from backend.database import get_db
     from backend import interop
     from backend.models import Well
@@ -102,8 +104,9 @@ def osdu_test():
         raise HTTPException(502, f"OSDU connection failed: {exc}")
 
 @router.post("/osdu/pull")
-def osdu_pull(project_id: int = Query(...), limit: int = Query(100),
+def osdu_pull(request: Request, project_id: int = Query(...), limit: int = Query(100),
               db: Session = Depends(get_db)):
+    require_project_access(db, request, project_id, write=True)
     try:
         return interop.osdu_pull_wells(db, project_id, limit)
     except RuntimeError as exc:
@@ -116,8 +119,9 @@ def osdu_pull(project_id: int = Query(...), limit: int = Query(100),
 
 
 @router.post("/osdu/pull-logs")
-def osdu_pull_logs(well_id: int = Query(...), wellbore_id: str | None = Query(None),
+def osdu_pull_logs(request: Request, well_id: int = Query(...), wellbore_id: str | None = Query(None),
                    limit: int = Query(100), db: Session = Depends(get_db)):
+    require_well_access(db, request, well_id, write=True)
     well = db.query(Well).filter(Well.id == well_id).first()
     if not well:
         raise HTTPException(404, "Well not found")

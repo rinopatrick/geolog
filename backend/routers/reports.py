@@ -1,13 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 try:
+    from acl import require_well_access
     from database import get_db
     from models import Well, FormationTop, LogRun, CurveData, PetroParams, Zone
     # Private name on purpose: reports reuses the QC engine rather than
     # reimplementing it, and that engine currently lives inside routers/qc.py.
     from routers.qc import _run_advanced_qc
 except ImportError:
+    from backend.acl import require_well_access
     from backend.database import get_db
     from backend.models import Well, FormationTop, LogRun, CurveData, PetroParams, Zone
     from backend.routers.qc import _run_advanced_qc
@@ -30,8 +32,9 @@ router = APIRouter(prefix="/api/wells/{wid}", tags=["reports"])
 
 
 @router.get("/zone-stats")
-def zone_stats(wid: int, db: Session = Depends(get_db)):
+def zone_stats(wid: int, request: Request, db: Session = Depends(get_db)):
     """Compute petrophysics statistics per persisted zone for the latest log run."""
+    require_well_access(db, request, wid)
     well = db.query(Well).filter(Well.id == wid).first()
     if not well:
         raise HTTPException(404, "Well not found")
@@ -159,14 +162,15 @@ def zone_stats(wid: int, db: Session = Depends(get_db)):
 
 
 @router.get("/zonation-report")
-def zonation_report(wid: int, db: Session = Depends(get_db)):
+def zonation_report(wid: int, request: Request, db: Session = Depends(get_db)):
     """Generate full zonation report as downloadable CSV."""
+    require_well_access(db, request, wid)
     well = db.query(Well).filter(Well.id == wid).first()
     if not well:
         raise HTTPException(404, "Well not found")
 
     # Reuse zone-stats logic
-    zones_resp = zone_stats(wid, db)
+    zones_resp = zone_stats(wid, request, db)
     zones = zones_resp.get("zones", [])
     cutoffs = zones_resp.get("cutoffs", {})
 
@@ -250,12 +254,14 @@ def zonation_report(wid: int, db: Session = Depends(get_db)):
 @router.get("/report-pdf")
 def generate_petrophysical_report_pdf(
     wid: int,
+    request: Request,
     db: Session = Depends(get_db),
     template: str = Query(default="professional"),
     include_curve_summary: bool = Query(default=True),
     include_qc: bool = Query(default=True),
 ):
     """Generate professional petrophysical report as PDF."""
+    require_well_access(db, request, wid)
     well = db.query(Well).filter(Well.id == wid).first()
     if not well:
         raise HTTPException(404, "Well not found")
@@ -266,7 +272,7 @@ def generate_petrophysical_report_pdf(
         .order_by(FormationTop.depth.asc(), FormationTop.id.asc())
         .all()
     )
-    zones_resp = zone_stats(wid, db)
+    zones_resp = zone_stats(wid, request, db)
     zones = zones_resp.get("zones", [])
     cutoffs = zones_resp.get("cutoffs", {})
 

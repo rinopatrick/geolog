@@ -3,13 +3,18 @@
 import hmac
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 try:
     from database import get_db
     from deps import require_admin, require_viewer
+    from http_utils import client_ip
     from models import User
+    from passwords import hash_secret, needs_rehash, verify_secret
+    from ratelimit import (
+        check_login_allowed, clear_login_failures, record_login_failure,
+    )
     from security import (
         AuthConfig, create_access_token, create_refresh_token, decode_token,
         is_token_revoked, revoke_token,
@@ -17,11 +22,35 @@ try:
 except ImportError:
     from backend.database import get_db
     from backend.deps import require_admin, require_viewer
+    from backend.http_utils import client_ip
     from backend.models import User
+    from backend.passwords import hash_secret, needs_rehash, verify_secret
+    from backend.ratelimit import (
+        check_login_allowed, clear_login_failures, record_login_failure,
+    )
     from backend.security import (
         AuthConfig, create_access_token, create_refresh_token, decode_token,
         is_token_revoked, revoke_token,
     )
+
+VALID_ROLES = {"viewer", "interpreter", "admin"}
+
+# Spend the same PBKDF2 work for an unknown username so response timing does not
+# reveal whether an account exists.
+DUMMY_HASH = hash_secret(secrets.token_urlsafe(32))
+
+
+def _set_secret(user: User, secret: str) -> None:
+    """Store only the hash. The plaintext column is cleared on purpose."""
+    user.token_hash = hash_secret(secret)
+    user.token = ""
+
+
+def _valid_role(value: str) -> str:
+    role = (value or "interpreter").strip().lower()
+    if role not in VALID_ROLES:
+        raise HTTPException(400, "role must be viewer, interpreter or admin")
+    return role
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -75,7 +104,7 @@ def revoke_user_token(data: dict, _role: str = Depends(require_viewer)):
     return {"status": "revoked", **result}
 
 @router.get("")
-def list_users(db: Session = Depends(get_db), _role: str = Depends(require_viewer)):
+def list_users(db: Session = Depends(get_db), _role: str = Depends(require_admin)):
     users = db.query(User).all()
     return [
         {
@@ -103,12 +132,13 @@ def create_user(data: dict, db: Session = Depends(get_db), _role: str = Depends(
     u = User(
         username=username,
         display_name=data.get("display_name", username),
-        role=data.get("role", "interpreter"),
-        token=token,
+        role=_valid_role(data.get("role", "interpreter")),
     )
+    _set_secret(u, token)
     db.add(u)
     db.commit()
     db.refresh(u)
+    # The plaintext is returned exactly once; only its hash is persisted.
     return {"id": u.id, "username": u.username, "role": u.role, "token": token}
 
 
@@ -117,11 +147,24 @@ def update_user(uid: int, data: dict, db: Session = Depends(get_db), _role: str 
     u = db.query(User).filter(User.id == uid).first()
     if not u:
         raise HTTPException(404, "User not found")
-    for field in ("display_name", "role"):
-        if field in data:
-            setattr(u, field, data[field])
+    if "display_name" in data:
+        u.display_name = data["display_name"]
+    if "role" in data:
+        u.role = _valid_role(data["role"])
     db.commit()
     return {"id": u.id, "username": u.username, "role": u.role}
+
+
+@router.post("/{uid}/rotate-token")
+def rotate_user_token(uid: int, db: Session = Depends(get_db), _role: str = Depends(require_admin)):
+    """Issue a new one-time plaintext secret and persist only its hash."""
+    user = db.query(User).filter(User.id == uid).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+    token = secrets.token_urlsafe(32)
+    _set_secret(user, token)
+    db.commit()
+    return {"id": user.id, "username": user.username, "token": token}
 
 
 @router.delete("/{uid}", status_code=204)
@@ -134,22 +177,47 @@ def delete_user(uid: int, db: Session = Depends(get_db), _role: str = Depends(re
 
 
 @router.post("/token")
-def issue_user_token(data: dict, db: Session = Depends(get_db)):
+def issue_user_token(data: dict, request: Request, db: Session = Depends(get_db)):
     """Authenticate user by username and user token/secret, returning signed JWT bearer token."""
     username = (data.get("username") or "").strip()
     token = (data.get("token") or "").strip()
     if not username:
         raise HTTPException(400, "username required")
 
+    retry_after = check_login_allowed(client_ip(request), username)
+    if retry_after:
+        raise HTTPException(
+            429,
+            "too many login attempts",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     user = db.query(User).filter(User.username == username).first()
-    if not user:
+    valid = False
+    if user is not None:
+        if user.token_hash:
+            valid = verify_secret(token, user.token_hash)
+        elif user.token:
+            # One-way upgrade path for rows created before hashing existed.
+            valid = hmac.compare_digest(str(user.token), token)
+
+    if not valid:
+        if user is None or (not user.token_hash and not user.token):
+            verify_secret(token, DUMMY_HASH)
+        lockout = record_login_failure(client_ip(request), username)
+        if lockout:
+            raise HTTPException(
+                429,
+                "too many failed login attempts",
+                headers={"Retry-After": str(lockout)},
+            )
         raise HTTPException(401, "Invalid credentials")
 
-    # A user with no registered secret cannot authenticate. The old form
-    # skipped this check when the column was empty, so any legacy row with no
-    # token could be logged in as without a credential.
-    if not user.token or not hmac.compare_digest(str(user.token), token):
-        raise HTTPException(401, "Invalid credentials")
+    clear_login_failures(username)
+    if user.token or needs_rehash(user.token_hash):
+        # Upgrade legacy plaintext and raise the cost of old hashes.
+        _set_secret(user, token)
+        db.commit()
 
     cfg = AuthConfig.from_env()
     if not cfg.jwt_secret:
