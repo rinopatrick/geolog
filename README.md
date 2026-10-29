@@ -537,13 +537,14 @@ Completed hardening:
 - Durable background-job registry with crash recovery.
 
 Remaining before a multi-tenant/SLA deployment:
-1. Raise coverage further on the large `wells.py` router (currently the
-   lowest-covered high-risk module) and add committed real DLIS/LIS fixtures.
-2. Split `backend/routers/wells.py` (5k lines) and `frontend/js/app.js` (9.7k
-   lines) into modules; add an explicit `/api/v1` surface when a breaking change
-   is required.
-3. Add external error tracking/APM and move file-backed state to a shared store
-   if more than one host is used. See [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md).
+1. Split `frontend/js/app.js` (9.7k lines) into modules and remove inline event
+   handlers so the CSP can drop `'unsafe-inline'`.
+2. Raise coverage on the petrophysics compute modules and add more real-world
+   LAS/DLIS fixtures.
+3. For more than one host, use PostgreSQL with
+   `GEOLOG_STATE_BACKEND=database` and a shared volume/object store for binary
+   assets and security evidence. See
+   [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md).
 
 Module layout:
 ```
@@ -553,15 +554,24 @@ backend/
 ├── security.py        header/JWT auth, token issuance, JWKS/public-key verification
 ├── schema.py          Alembic runner + drift verification
 ├── audit.py           audit chain + evidence signing
-├── observability.py   request counters (middleware writes, /api/ops reads)
-├── jobs.py            in-process background job registry
-├── filelock.py        cross-process lock for JSON state files
+├── observability.py   per-worker request counters + DB-backed aggregation
+├── jobs.py            durable file/DB job registry + handler dispatch
+├── state_backend.py   database backend for rate limits, metrics, jobs and well state
+├── tracing.py         optional OTLP/HTTP tracing
+├── error_reporting.py optional redacted error webhook
+├── acl.py             project/well membership enforcement
+├── passwords.py       PBKDF2 secret hashing
+├── ratelimit.py       file/DB login throttling
+├── uploads.py         bounded upload reader + body-size middleware
+├── filelock.py        cross-process lock for the file state backend
 ├── curve_corrections.py  density-porosity + bad-hole QC
 ├── curve_plausibility.py stored-curve sanity checks
 ├── migrations/        Alembic revisions
 └── routers/           users, log_runs, projects, audit, ops, qc,
                        correlation, zonation, units, templates, reports,
-                       wells (ingest, tops, zones, petrophysics, snapshots)
+                       wells (core CRUD/snapshots), wells_uploads,
+                       wells_data, wells_exports, wells_compute,
+                       wells_analytics
 ```
 
 DLIS/LIS parsing uses `dlisio` on Python 3.10+. On Python 3.9 the package is
