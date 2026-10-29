@@ -114,6 +114,16 @@ def seeded_database():
 
 
 @pytest.fixture(autouse=True)
+def reset_auth_rate_limits():
+    """Login throttling is file state; a previous test must not lock the next one."""
+    from backend.ratelimit import reset_rate_limits
+
+    reset_rate_limits()
+    yield
+    reset_rate_limits()
+
+
+@pytest.fixture(autouse=True)
 def reset_well_locks():
     """Clear interpretation locks before each test.
 
