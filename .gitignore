@@ -20,6 +20,9 @@ htmlcov/
 
 # Database
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
 *.sqlite3
 
 # IDE
