@@ -9,8 +9,13 @@ export GEOLOG_DB_MAX_OVERFLOW=10
 ```
 
 `GEOLOG_DATABASE_URL` wins over `GEOLOG_DB_PATH`. Use the `+psycopg` driver.
-Snapshots, metrics, jobs, audit locks and other file-backed state remain under
-`GEOLOG_ARTIFACT_DIR`; this migration is database-only.
+
+For more than one app host, also set `GEOLOG_STATE_BACKEND=database`. Rate-limit
+counters, metrics, job records, well locks, template locks and snapshots then
+live in PostgreSQL, and the audit chain uses a transaction-scoped advisory lock.
+Image/core assets and security-evidence files still live under
+`GEOLOG_ARTIFACT_DIR`, so a multi-host deployment needs a shared volume or object
+store for those files.
 
 ## Schema
 
@@ -45,6 +50,8 @@ GeoLog table in the target; it requires `--confirm`.
 
 ## Limits
 
+- Multi-host app state requires `GEOLOG_STATE_BACKEND=database` and a shared
+  artifact volume for binary assets.
 - No online replication or dual-write mode.
 - No automatic hash-chain audit triggers (deliberate; see above).
 - File-backed state is not copied.
