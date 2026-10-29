@@ -8,7 +8,7 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
-## [0.11.0] - 2026-10-30 - 2026-10-29
+## [0.12.0] - 2026-10-30 - 2026-10-30 - 2026-10-29
 
 ### Fixed
 
