@@ -819,7 +819,7 @@ class GeoLogApp {
             else GeoToast.error(`Smoke regression: FAIL (${failed.join(', ')})`);
             const host = document.getElementById('regressionResult');
             if (host) {
-                host.innerHTML = `<pre>${JSON.stringify(res, null, 2)}</pre>`;
+                host.innerHTML = `<pre>${escapeHtml(JSON.stringify(res, null, 2))}</pre>`;
             }
         } catch (e) {
             GeoToast.error('Smoke regression error: ' + e.message);
@@ -838,7 +838,7 @@ class GeoLogApp {
             }
         } catch (e) {
             const host = document.getElementById('jobMonitorBody');
-            if (host) host.innerHTML = `<p style="color:var(--danger)">Error: ${e.message}</p>`;
+            if (host) host.innerHTML = `<p style="color:var(--danger)">Error: ${escapeHtml(String(e.message || e))}</p>`;
         }
     }
 
@@ -2328,7 +2328,7 @@ class GeoLogApp {
             const versionLabel = this._formatLASVersion(this.currentLogRun.version || this.currentLogRun.las_version);
             const versionClass = versionLabel.includes('3.0') ? 'las-badge las-badge-v3' : 'las-badge las-badge-v2';
             const versionBadge = versionLabel ? ` <span class="${versionClass}">${versionLabel}</span>` : '';
-            statsEl.innerHTML = `Run ${runNo} • ${file} • ${this.currentLogRun.num_points} pts • ${depthText} ${well.depth_unit} • step ${stepAbs}${versionBadge}`;
+            statsEl.innerHTML = `Run ${runNo} • ${escapeHtml(file)} • ${this.currentLogRun.num_points} pts • ${depthText} ${escapeHtml(well.depth_unit)} • step ${stepAbs}${versionBadge}`;
         }
     }
 
@@ -4020,7 +4020,7 @@ class GeoLogApp {
             this.templateLockStatus = st || null;
             if (st?.locked) {
                 const ok = st.signature_matches === true ? 'match' : (st.signature_matches === false ? 'MISMATCH' : 'n/a');
-                el.innerHTML = `Template lock: <strong style="color:#f85149">LOCKED</strong> by ${st.locked_by || 'n/a'} | template=${st.signed_template || 'custom'} | sig=${String(st.signature || '').slice(0,12)} | state=${ok}`;
+                el.innerHTML = `Template lock: <strong style="color:#f85149">LOCKED</strong> by ${escapeHtml(st.locked_by || 'n/a')} | template=${escapeHtml(st.signed_template || 'custom')} | sig=${escapeHtml(String(st.signature || '').slice(0,12))} | state=${ok}`;
             } else {
                 el.innerHTML = `Template lock: <strong style="color:#3fb950">UNLOCKED</strong> | current sig=${String(st?.current_signature || '').slice(0,12)}`;
             }
@@ -4585,7 +4585,7 @@ class GeoLogApp {
             tooltip.style.display = 'block';
             tooltip.style.left = `${mx + 12}px`;
             tooltip.style.top = `${my + 12}px`;
-            tooltip.innerHTML = `<strong>${nearest.wellName}</strong><br>Depth: ${Number(nearest.depth).toFixed(1)}<br>${nearest.curve}: ${Number(nearest.value).toFixed(3)}`;
+            tooltip.innerHTML = `<strong>${escapeHtml(nearest.wellName)}</strong><br>Depth: ${Number(nearest.depth).toFixed(1)}<br>${escapeHtml(nearest.curve)}: ${Number(nearest.value).toFixed(3)}`;
         };
         canvas.onmouseleave = () => { tooltip.style.display = 'none'; };
         canvas.onclick = async (e) => {
@@ -7345,7 +7345,7 @@ class GeoLogApp {
             document.getElementById('batchResults').innerHTML = `
                 <div style="background:#161b22;border:1px solid #3fb95033;border-radius:8px;padding:12px;margin-top:8px">
                     <strong style="color:#3fb950">✓ Applied to ${result.updated} wells</strong><br>
-                    <span style="color:#c9d1d9">${result.wells.join(', ')}</span>
+                    <span style="color:#c9d1d9">${escapeHtml(result.wells.join(', '))}</span>
                 </div>`;
             GeoToast.success(`Parameters applied to ${result.updated} wells`);
         } catch (e) { GeoToast.error(e.message); }
