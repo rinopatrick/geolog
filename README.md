@@ -495,7 +495,8 @@ Notes:
 ## License
 
 MIT License — see [LICENSE](LICENSE). Contribution and security guidance:
-[CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+[CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Release steps
+are in [docs/RELEASE.md](docs/RELEASE.md).
 
 ---
 
