@@ -81,19 +81,32 @@ def run_migrations() -> None:
     the old ``_ensure_*`` helpers kept it current on every start — but has no
     ``alembic_version`` row. Stamping it at head records that fact instead of
     replaying the baseline and failing on the first CREATE TABLE.
-    """
-    cfg = _alembic_config()
-    inspector = inspect(engine)
-    existing = set(inspector.get_table_names())
 
-    if existing and "alembic_version" not in existing:
-        logger.info(
-            "Existing pre-Alembic database detected; stamping baseline %s",
-            _head_revision(cfg),
-        )
-        command.stamp(cfg, "head")
-    else:
-        command.upgrade(cfg, "head")
+    Dev/test can start several workers at once, so the DDL run is serialized
+    with the same advisory file lock used by the other file-backed state.
+    Production does not call this at startup.
+    """
+    try:
+        from filelock import interprocess_lock
+    except ImportError:
+        from backend.filelock import interprocess_lock
+
+    lock_root = os.getenv("GEOLOG_ARTIFACT_DIR") or str(REPO_ROOT / "backend" / "artifacts")
+    lock_path = os.path.join(lock_root, "schema-migrations.json")
+
+    with interprocess_lock(lock_path, timeout=120.0):
+        cfg = _alembic_config()
+        inspector = inspect(engine)
+        existing = set(inspector.get_table_names())
+
+        if existing and "alembic_version" not in existing:
+            logger.info(
+                "Existing pre-Alembic database detected; stamping baseline %s",
+                _head_revision(cfg),
+            )
+            command.stamp(cfg, "head")
+        else:
+            command.upgrade(cfg, "head")
 
 
 def _head_revision(cfg: Config) -> Optional[str]:
