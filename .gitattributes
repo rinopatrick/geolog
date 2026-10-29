@@ -1,0 +1,2 @@
+# Keep vendored browser assets byte-identical across platforms.
+frontend/js/vendor/lucide.min.js -text
