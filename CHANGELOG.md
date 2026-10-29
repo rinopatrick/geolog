@@ -8,6 +8,8 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-30
+
 ### Added
 
 - **3D SEG-Y volume support.** Full trace-header index sidecars, inline and
