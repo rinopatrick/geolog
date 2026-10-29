@@ -9,6 +9,14 @@ const { chromium } = require('playwright');
   const base = process.env.GEOLOG_BASE_URL || 'http://localhost:8000';
   await page.goto(base, { waitUntil: 'domcontentloaded' });
 
+  const dedupeOk = await page.evaluate(async () => {
+    try {
+      const path = '/correlation-profile?well_a_id=1&well_b_id=2';
+      const [a, b] = await Promise.all([app._api(path), app._api(path)]);
+      return JSON.stringify(a) === JSON.stringify(b);
+    } catch (_) { return false; }
+  });
+
   const views = ['viewer','crossplot','pickett','mnplot','petrophysics','qc','correlation','statistics','sensitivity','comparison','tools','production','facies','striplog','probability','moveable','dipplot','buckles','hingle','calculator','datatable','topsmgmt','formation','batch','map','dashboard','matrix','audit','tornado','vclmodels','corecal','corescal','geomechanics','qcautofix','seismic','imagelog','analogs','users','jobmonitor'];
 
   const appAvailable = await page.evaluate(() => typeof app !== 'undefined' && typeof app.switchView === 'function');
@@ -26,7 +34,7 @@ const { chromium } = require('playwright');
     if (ok) switched += 1;
     await page.waitForTimeout(80);
   }
-  const out = { ok: switched === views.length && errors.length === 0, views: views.length, switched, js_errors: errors.length, errors };
+  const out = { ok: switched === views.length && errors.length === 0 && dedupeOk, views: views.length, switched, dedupe_ok: dedupeOk, js_errors: errors.length, errors };
   console.log(JSON.stringify(out,null,2));
   await browser.close();
   process.exit(out.ok ? 0 : 1);
