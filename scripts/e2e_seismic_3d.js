@@ -106,8 +106,19 @@ function buildVolume() {
       });
       await app.loadSeismicSurface(app._segySurface.id);
       const depthOk = (app._segySurface?.depth_grid || []).length > 0;
+      let tieOk = true;
+      if (!app.currentWell && app.projects?.[0]) {
+        await app.loadWells(app.projects[0].id);
+        if (app.wells?.length) await app.selectWell(app.wells[0].id);
+      }
+      if (app.currentWell?.id) {
+        document.getElementById('segyTieInline').value = '101';
+        document.getElementById('segyTieCrossline').value = '201';
+        await app.createSeismicTie();
+        tieOk = app._segyTie?.correlation != null;
+      }
       return {
-        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && surfaceOk && depthOk && (app._segyFaultLinks || []).length > 0,
+        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && surfaceOk && depthOk && tieOk && (app._segyFaultLinks || []).length > 0,
         lineId: line.id,
         volumeOk,
         inlineOk,
@@ -117,6 +128,9 @@ function buildVolume() {
         geometryOk,
         surfaceOk,
         depthOk,
+        tieOk,
+        tieCorrelation: app._segyTie?.correlation ?? null,
+        tieShiftMs: app._segyTie?.shift_ms ?? null,
         surfaceName: app._segySurface?.name || '',
         throwMs: geometry.throw_ms,
         dipAngle: geometry.dip_angle_deg,
