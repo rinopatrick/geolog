@@ -67,6 +67,7 @@ try:
     from routers.wells_exports import router as wells_exports_router
     from routers.wells_compute import router as wells_compute_router
     from routers.wells_analytics import router as wells_analytics_router
+    from routers.wells_source_rock import router as wells_source_rock_router
     from routers.zonation import router as zonation_router
 except ImportError:
     from backend.audit import append_audit_entry
@@ -106,6 +107,7 @@ except ImportError:
     from backend.routers.wells_exports import router as wells_exports_router
     from backend.routers.wells_compute import router as wells_compute_router
     from backend.routers.wells_analytics import router as wells_analytics_router
+    from backend.routers.wells_source_rock import router as wells_source_rock_router
     from backend.routers.zonation import router as zonation_router
 
 
@@ -241,6 +243,7 @@ app.include_router(wells_data_router)
 app.include_router(wells_exports_router)
 app.include_router(wells_compute_router)
 app.include_router(wells_analytics_router)
+app.include_router(wells_source_rock_router)
 
 
 
