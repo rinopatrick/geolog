@@ -437,6 +437,8 @@ Configuration reference:
 | `GEOLOG_ENFORCE_SECRETS_SOURCE` | `true` | Require `GEOLOG_SECRETS_SOURCE` in non-dev |
 | `GEOLOG_SECRETS_SOURCE` | — | Required when `GEOLOG_ENV` is non-dev |
 | `GEOLOG_ENABLE_DOCS` | `true` in dev/test, `false` elsewhere | Expose `/docs`, `/redoc` and `/openapi.json`; leave off in production unless the docs host is protected |
+| `GEOLOG_ERROR_WEBHOOK_URL` | unset | POST redacted 5xx exception payloads to an operator endpoint |
+| `GEOLOG_ERROR_WEBHOOK_INCLUDE_TRACE` | `false` | Include a truncated traceback in webhook payloads |
 | `AUDIT_EXPORT_HMAC_KEYS_JSON` / `AUDIT_EXPORT_HMAC_ACTIVE_KID` | — | Audit/evidence signing key rotation |
 | `AUDIT_EXPORT_HMAC_KEY` | — | Legacy single signing key (`kid='legacy'`) |
 

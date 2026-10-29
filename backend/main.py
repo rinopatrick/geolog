@@ -125,6 +125,7 @@ try:
         role_from_request,
     )
     from api_version import APIVersionAliasMiddleware
+    from error_reporting import report_exception
     from uploads import BodySizeLimitMiddleware
     from acl import ProjectAccessMiddleware, can_access_project, can_access_well, require_project_access, require_well_access, request_role, request_subject, visible_project_ids
 except ImportError:
@@ -151,6 +152,7 @@ except ImportError:
         role_from_request,
     )
     from backend.api_version import APIVersionAliasMiddleware
+    from backend.error_reporting import report_exception
     from backend.uploads import BodySizeLimitMiddleware
     from backend.acl import ProjectAccessMiddleware, can_access_project, can_access_well, require_project_access, require_well_access, request_role, request_subject, visible_project_ids
 
@@ -481,6 +483,10 @@ class ErrorLoggingMiddleware(BaseHTTPMiddleware):
         except Exception as e:
             logger.error(f"Unhandled error on {request.method} {request.url.path}: {e}")
             logger.debug(traceback.format_exc())
+            try:
+                report_exception(request, e)
+            except Exception:
+                logger.debug("error webhook dispatch failed", exc_info=True)
             return SafeJSONResponse(
                 status_code=500,
                 content={"detail": "internal error"},
