@@ -511,3 +511,50 @@ def test_structural_fault_surface_and_compartments():
     detail = client.get(f"/api/seismic/{line_id}/surfaces/{surface_id}", headers=ADMIN)
     assert detail.status_code == 200
     assert detail.json()["compartments"]["total_grv_m3"] == body["total_grv_m3"]
+
+def test_arbitrary_lines_and_fences():
+    pid = _project_id()
+    upload = client.post(
+        f"/api/projects/{pid}/seismic",
+        files={"file": ("fence.sgy", _segy_volume(), "application/octet-stream")},
+        data={"name": "Fence Volume"},
+        headers=ADMIN,
+    )
+    assert upload.status_code == 201, upload.text
+    line_id = upload.json()["id"]
+
+    line = client.get(
+        f"/api/seismic/{line_id}/arbitrary-line",
+        params={
+            "inline1": 100,
+            "crossline1": 200,
+            "inline2": 105,
+            "crossline2": 247,
+            "max_traces": 100,
+            "max_samples": 40,
+            "inline_spacing_m": 25,
+            "crossline_spacing_m": 25,
+        },
+        headers=ADMIN,
+    )
+    assert line.status_code == 200, line.text
+    body = line.json()
+    assert body["trace_count"] > 10
+    assert body["labels"][0] == 0
+    assert body["labels"][-1] > 0
+    assert body["label_name"] == "distance_m"
+    assert body["start"]["inline"] == 100
+
+    fences = client.post(
+        f"/api/seismic/{line_id}/fences",
+        json={
+            "segments": [
+                {"inline1": 100, "crossline1": 200, "inline2": 100, "crossline2": 247},
+                {"inline1": 105, "crossline1": 200, "inline2": 105, "crossline2": 247},
+            ]
+        },
+        headers=ADMIN,
+    )
+    assert fences.status_code == 200, fences.text
+    assert len(fences.json()["fences"]) == 2
+    assert all(fence["trace_count"] > 0 for fence in fences.json()["fences"])
