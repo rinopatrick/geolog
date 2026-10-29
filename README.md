@@ -439,6 +439,12 @@ Configuration reference:
 | `GEOLOG_ENABLE_DOCS` | `true` in dev/test, `false` elsewhere | Expose `/docs`, `/redoc` and `/openapi.json`; leave off in production unless the docs host is protected |
 | `GEOLOG_ERROR_WEBHOOK_URL` | unset | POST redacted 5xx exception payloads to an operator endpoint |
 | `GEOLOG_ERROR_WEBHOOK_INCLUDE_TRACE` | `false` | Include a truncated traceback in webhook payloads |
+| `GEOLOG_OTEL_ENABLED` | `false` | Enable OTLP/HTTP tracing when the optional observability packages are installed |
+| `GEOLOG_OTEL_ENDPOINT` | `http://localhost:4318/v1/traces` | OTLP/HTTP trace endpoint |
+| `GEOLOG_OTEL_SERVICE_NAME` | `geolog` | `service.name` resource attribute |
+| `GEOLOG_OTEL_SAMPLE_RATIO` | `1.0` | Trace sampler ratio, 0.0–1.0 |
+| `GEOLOG_OTEL_HEADERS` | unset | JSON object of exporter headers, for example auth |
+| `GEOLOG_OTEL_EXCLUDED_URLS` | health/metrics | Comma-separated paths excluded from instrumentation |
 | `AUDIT_EXPORT_HMAC_KEYS_JSON` / `AUDIT_EXPORT_HMAC_ACTIVE_KID` | — | Audit/evidence signing key rotation |
 | `AUDIT_EXPORT_HMAC_KEY` | — | Legacy single signing key (`kid='legacy'`) |
 
