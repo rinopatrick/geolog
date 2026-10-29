@@ -37,6 +37,8 @@ While the major version is `0`, the API is not yet stable.
 - **Backup drill covers artifacts.** SQLite backup, artifact copy, manifest,
   scratch restore, integrity/hash checks and signed report.
 - **Content-Security-Policy** and `X-API-Version` response headers.
+- **Optional error webhook.** Redacted 5xx exception payloads with request/trace
+  IDs and local duplicate suppression; disabled unless configured.
 - **`/api/v1` prefix alias** for clients that want to pin a stable path, plus
   `GET /api/version` for prefix/version discovery.
 - **Self-hosted Lucide** pinned at v0.468.0 with SRI; no `unpkg@latest` at runtime.

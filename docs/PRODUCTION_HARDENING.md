@@ -160,6 +160,12 @@ Create alerts for 5xx rate, average/p95 latency, audit-chain verification
 failures, and stale security evidence. The runbook endpoint returns the
 machine-readable alert descriptions.
 
+For an external error stream, set `GEOLOG_ERROR_WEBHOOK_URL`. Unhandled 5xx
+errors are sent as JSON with request ID, trace ID, role, path and exception
+type/message; query strings, bodies, tokens and subjects are excluded.
+`GEOLOG_ERROR_WEBHOOK_INCLUDE_TRACE=true` adds a truncated traceback. A local
+rate limit suppresses duplicate reports.
+
 ## 7. Project membership
 
 Project and per-well ACL are enabled by default. A project or well with no
