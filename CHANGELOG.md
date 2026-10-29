@@ -8,13 +8,10 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
-## [0.13.0] - 2026-10-30
+## [0.14.0] - 2026-10-31
 
 ### Added
 
-- **3D SEG-Y volume support.** Full trace-header index sidecars, inline and
-  crossline sections, and fault linkage across sampled inline sections. The
-  Seismic panel can switch sections and link 3D fault candidates.
 - **Full-line sequential preview.** The line section decimates across every
   indexed trace instead of stopping at the first 2,500.
 - **3D horizon picks.** Horizons store `mode` and `section_value`; inline and
@@ -22,6 +19,14 @@ While the major version is `0`, the API is not yet stable.
 - **3D fault geometry.** Linked faults store a throw estimate, fault-plane dip,
   vertical extent and a map polygon; the Seismic panel draws an inline/crossline
   fault map and shows throw/dip summaries.
+
+## [0.13.0] - 2026-10-30
+
+### Added
+
+- **3D SEG-Y volume support.** Full trace-header index sidecars, inline and
+  crossline sections, and fault linkage across sampled inline sections. The
+  Seismic panel can switch sections and link 3D fault candidates.
 
 ## [0.12.0] - 2026-10-30
 
