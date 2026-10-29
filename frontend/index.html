@@ -1417,6 +1417,14 @@
                     </div>
                     <canvas id="segyCanvas" width="1000" height="380" style="width:100%;margin-top:10px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
                     <canvas id="segyFaultMap" width="1000" height="280" style="width:100%;margin-top:10px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
+                        <input id="segySurfaceName" placeholder="Surface name" value="Surface A" style="min-width:140px">
+                        <input id="segySurfaceHorizon" placeholder="Horizon name (blank = all 3D)" style="min-width:200px">
+                        <button class="btn-sm" data-action="app.buildSeismicSurface"><i data-lucide="grid-3x3"></i> Build Surface</button>
+                        <select id="segySurfaceSelect" data-action="app.loadSeismicSurface" data-on="change" data-args-value="true" style="min-width:180px"></select>
+                        <span id="segySurfaceStatus" class="toolbar-hint"></span>
+                    </div>
+                    <canvas id="segySurfaceMap" width="1000" height="320" style="width:100%;margin-top:10px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
                     <div id="segyHorizonList" style="font-size:12px;color:#8b949e;margin-top:8px"></div>
                 </div>
             </div>

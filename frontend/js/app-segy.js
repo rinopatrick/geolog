@@ -60,12 +60,13 @@ Object.assign(GeoLogApp.prototype, {
         if (!id) return;
         GeoLoading.show('Loading seismic section...');
         try {
-            const [payload, horizons, faults, volume, links] = await Promise.all([
+            const [payload, horizons, faults, volume, links, surfaces] = await Promise.all([
                 this._api(`/seismic/${id}/section?max_traces=600&max_samples=600`),
                 this._api(`/seismic/${id}/horizons`),
                 this._api(`/seismic/${id}/faults`),
                 this._api(`/seismic/${id}/volume`),
                 this._api(`/seismic/${id}/fault-links`),
+                this._api(`/seismic/${id}/surfaces`),
             ]);
             this._segySection = payload.section;
             this._segyLine = payload.line;
@@ -77,6 +78,7 @@ Object.assign(GeoLogApp.prototype, {
             this._populateSeismicVolume(volume);
             this._drawSeismic();
             this._renderSeismicHorizonList();
+            await this._populateSeismicSurfaces(surfaces);
             const status = document.getElementById('segyStatus');
             if (status) {
                 const dimensions = volume?.is_3d ? ` · 3D ${volume.inline_count}×${volume.crossline_count}` : '';
@@ -108,6 +110,175 @@ Object.assign(GeoLogApp.prototype, {
             info.textContent = is3d
                 ? `${volume.inline_count} inlines × ${volume.crossline_count} crosslines`
                 : '2D line (no inline/crossline grid)';
+        }
+    },
+
+    async _populateSeismicSurfaces(surfaces) {
+        this._segySurfaces = surfaces || [];
+        const select = document.getElementById('segySurfaceSelect');
+        if (select) {
+            select.innerHTML = this._segySurfaces.map(surface =>
+                `<option value="${surface.id}">${escapeHtml(surface.name)} · ${surface.stats?.point_count || 0} pts</option>`
+            ).join('');
+        }
+        if (this._segySurfaces.length) {
+            const current = select?.value || this._segySurfaces[0].id;
+            await this.loadSeismicSurface(current);
+        } else {
+            this._segySurface = null;
+            this._drawSeismicSurfaceMap();
+            const status = document.getElementById('segySurfaceStatus');
+            if (status) status.textContent = 'No surfaces built yet.';
+        }
+    },
+
+    async buildSeismicSurface() {
+        const line = this._segyLine;
+        if (!line) return GeoToast.warn('Load a 3D SEG-Y volume first.');
+        const name = document.getElementById('segySurfaceName')?.value?.trim() || 'Surface';
+        const horizonName = document.getElementById('segySurfaceHorizon')?.value?.trim() || null;
+        const inlineSpacing = Number(document.getElementById('segyInlineSpacing')?.value);
+        const crosslineSpacing = Number(document.getElementById('segyCrosslineSpacing')?.value);
+        GeoLoading.show('Building 3D surface...');
+        try {
+            const surface = await this._api(`/seismic/${line.id}/surfaces`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    name,
+                    horizon_name: horizonName,
+                    max_grid: 96,
+                    inline_spacing_m: inlineSpacing > 0 ? inlineSpacing : null,
+                    crossline_spacing_m: crosslineSpacing > 0 ? crosslineSpacing : null,
+                }),
+            });
+            this._segySurface = surface;
+            await this._reloadSeismicSurfaces(surface.id);
+            GeoToast.success(`Surface ${surface.name} built · ${surface.stats?.point_count || 0} picks`);
+        } catch (e) {
+            GeoToast.error('Surface build failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    },
+
+    async _reloadSeismicSurfaces(selectId) {
+        const line = this._segyLine;
+        if (!line) return;
+        try {
+            const surfaces = await this._api(`/seismic/${line.id}/surfaces`);
+            this._segySurfaces = surfaces || [];
+            const select = document.getElementById('segySurfaceSelect');
+            if (select) {
+                select.innerHTML = this._segySurfaces.map(surface =>
+                    `<option value="${surface.id}">${escapeHtml(surface.name)} · ${surface.stats?.point_count || 0} pts</option>`
+                ).join('');
+                if (selectId) select.value = String(selectId);
+            }
+            if (selectId) await this.loadSeismicSurface(selectId);
+            else this._drawSeismicSurfaceMap();
+        } catch (e) {
+            GeoToast.error('Surface list failed: ' + e.message);
+        }
+    },
+
+    async loadSeismicSurface(surfaceId) {
+        const line = this._segyLine;
+        const id = Number(surfaceId || document.getElementById('segySurfaceSelect')?.value);
+        if (!line || !id) return;
+        try {
+            this._segySurface = await this._api(`/seismic/${line.id}/surfaces/${id}`);
+            this._drawSeismicSurfaceMap();
+            const status = document.getElementById('segySurfaceStatus');
+            if (status) {
+                const stats = this._segySurface.stats || {};
+                status.textContent = `${this._segySurface.name} · ${stats.inline_count}×${stats.crossline_count} · coverage ${Math.round((stats.coverage || 0) * 100)}%`;
+            }
+        } catch (e) {
+            GeoToast.error('Surface load failed: ' + e.message);
+        }
+    },
+
+    _drawSeismicSurfaceMap() {
+        const canvas = document.getElementById('segySurfaceMap');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, w, h);
+        const surface = this._segySurface;
+        if (!surface?.grid?.length) {
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '13px sans-serif';
+            ctx.fillText('Build a surface from inline/crossline picks', 18, 28);
+            return;
+        }
+        const grid = surface.grid;
+        const rows = grid.length;
+        const cols = grid[0]?.length || 0;
+        if (!rows || !cols) return;
+        const left = 52;
+        const right = w - 18;
+        const top = 18;
+        const bottom = h - 30;
+        const plotW = right - left;
+        const plotH = bottom - top;
+        const values = grid.flat().filter(value => Number.isFinite(Number(value)));
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const span = Math.max(1e-9, max - min);
+        for (let row = 0; row < rows; row += 1) {
+            for (let col = 0; col < cols; col += 1) {
+                const value = Number(grid[row][col]);
+                const t = Math.max(0, Math.min(1, (value - min) / span));
+                const r = Math.round(32 + t * 208);
+                const g = Math.round(96 + t * 48);
+                const b = Math.round(196 - t * 150);
+                ctx.fillStyle = `rgb(${r},${g},${b})`;
+                ctx.fillRect(
+                    left + (col / cols) * plotW,
+                    top + (row / rows) * plotH,
+                    Math.ceil(plotW / cols) + 1,
+                    Math.ceil(plotH / rows) + 1
+                );
+            }
+        }
+        ctx.strokeStyle = '#30363d';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(left, top, plotW, plotH);
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '11px sans-serif';
+        const inlines = surface.inlines || [];
+        const crosslines = surface.crosslines || [];
+        for (let index = 0; index <= 4; index += 1) {
+            const gx = left + (index / 4) * plotW;
+            const gy = bottom - (index / 4) * plotH;
+            ctx.fillText(String(crosslines[Math.round((index / 4) * Math.max(0, crosslines.length - 1))] ?? ''), gx - 10, h - 10);
+            ctx.fillText(String(inlines[Math.round((index / 4) * Math.max(0, inlines.length - 1))] ?? ''), 6, gy + 4);
+        }
+        ctx.fillText('crossline', right - 54, h - 10);
+        ctx.save();
+        ctx.translate(12, top + 34);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('inline', 0, 0);
+        ctx.restore();
+        ctx.fillStyle = '#c9d1d9';
+        ctx.fillText(`${surface.name} · ${min.toFixed(1)}–${max.toFixed(1)} ms`, left + 6, top + 14);
+        for (const link of this._segyFaultLinks || []) {
+            const ordered = (link.points || []).slice().sort((a, b) => Number(a.inline) - Number(b.inline));
+            if (ordered.length < 2) continue;
+            ctx.strokeStyle = link.color || '#f85149';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ordered.forEach((point, index) => {
+                const inlineIndex = inlines.indexOf(Number(point.inline));
+                const crosslineIndex = crosslines.indexOf(Number(point.crossline));
+                if (inlineIndex < 0 || crosslineIndex < 0) return;
+                const px = left + (crosslineIndex / Math.max(1, crosslines.length - 1)) * plotW;
+                const py = top + (inlineIndex / Math.max(1, inlines.length - 1)) * plotH;
+                if (index === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            });
+            ctx.stroke();
         }
     },
 

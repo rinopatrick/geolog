@@ -730,6 +730,7 @@ class SeismicLine(Base):
     horizons = relationship("SeismicHorizon", back_populates="line", cascade="all, delete-orphan")
     faults = relationship("SeismicFault", back_populates="line", cascade="all, delete-orphan")
     fault_links = relationship("SeismicFaultLink", back_populates="line", cascade="all, delete-orphan")
+    surfaces = relationship("SeismicSurface", back_populates="line", cascade="all, delete-orphan")
 
 
 
@@ -764,6 +765,26 @@ class SeismicFault(Base):
 
     line = relationship("SeismicLine", back_populates="faults")
 
+
+
+class SeismicSurface(Base):
+    """A gridded time surface built from inline/crossline horizon picks."""
+
+    __tablename__ = "seismic_surfaces"
+
+    id = Column(Integer, primary_key=True, index=True)
+    line_id = Column(Integer, ForeignKey("seismic_lines.id"), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    grid_json = Column(Text, default="[]")
+    inlines_json = Column(Text, default="[]")
+    crosslines_json = Column(Text, default="[]")
+    sample_interval_ms = Column(Float, default=0.0)
+    inline_spacing_m = Column(Float, nullable=True)
+    crossline_spacing_m = Column(Float, nullable=True)
+    stats_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=utcnow)
+
+    line = relationship("SeismicLine", back_populates="surfaces")
 
 
 class SeismicFaultLink(Base):
