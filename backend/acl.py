@@ -20,11 +20,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 try:
     from database import SessionLocal
     from deps import SafeJSONResponse
-    from models import LogRun, ProjectMember, Well
+    from models import LogRun, ProjectMember, Well, WellMember
 except ImportError:
     from backend.database import SessionLocal
     from backend.deps import SafeJSONResponse
-    from backend.models import LogRun, ProjectMember, Well
+    from backend.models import LogRun, ProjectMember, Well, WellMember
 
 ROLE_RANK = {"viewer": 1, "interpreter": 2, "admin": 3}
 MEMBER_ROLES = {"viewer", "interpreter", "admin"}
@@ -48,6 +48,26 @@ def project_is_restricted(db, project_id: int) -> bool:
         .first()
         is not None
     )
+
+
+def well_is_restricted(db, well_id: int) -> bool:
+    return (
+        db.query(WellMember.id)
+        .filter(WellMember.well_id == well_id)
+        .first()
+        is not None
+    )
+
+
+def well_membership_role(db, well_id: int, subject: str) -> str | None:
+    if not subject:
+        return None
+    row = (
+        db.query(WellMember.role)
+        .filter(WellMember.well_id == well_id, WellMember.subject == subject)
+        .first()
+    )
+    return str(row[0]) if row else None
 
 
 def membership_role(db, project_id: int, subject: str) -> str | None:
@@ -80,6 +100,30 @@ def can_access_project(
         return False
     required = "interpreter" if write else "viewer"
     return ROLE_RANK.get(member, 0) >= ROLE_RANK.get(required, 99)
+
+
+def can_access_well(
+    db,
+    well_id: int,
+    subject: str,
+    role: str,
+    *,
+    write: bool = False,
+) -> bool:
+    if not enforcement_enabled():
+        return True
+    if (role or "").strip().lower() == "admin":
+        return True
+    if well_is_restricted(db, well_id):
+        member = well_membership_role(db, well_id, subject)
+        if not member:
+            return False
+        required = "interpreter" if write else "viewer"
+        return ROLE_RANK.get(member, 0) >= ROLE_RANK.get(required, 99)
+    row = db.query(Well.project_id).filter(Well.id == well_id).first()
+    if row is None:
+        return True  # the route owns the 404
+    return can_access_project(db, int(row[0]), subject, role, write=write)
 
 
 def visible_project_ids(db, subject: str, role: str, all_ids) -> set[int] | None:
@@ -164,10 +208,10 @@ def require_project_access(db, request: Request, project_id: int, *, write: bool
 
 
 def require_well_access(db, request: Request, well_id: int, *, write: bool = False) -> None:
-    row = db.query(Well.project_id).filter(Well.id == well_id).first()
-    if row is None:
-        return  # the route owns the 404
-    require_project_access(db, request, int(row[0]), write=write)
+    if not can_access_well(
+        db, well_id, request_subject(request), request_role(request), write=write
+    ):
+        raise HTTPException(403, "well membership required")
 
 
 def check_request_access(request: Request) -> tuple[bool, int | None]:
@@ -179,17 +223,41 @@ def check_request_access(request: Request) -> tuple[bool, int | None]:
         return True, None
     db = SessionLocal()
     try:
+        parts = [p for p in path.split("/") if p]
+        write = request.method.upper() not in {"GET", "HEAD", "OPTIONS"}
+        subject = request_subject(request)
+        role = request_role(request)
+        if len(parts) >= 3 and parts[0] == "api" and parts[1] == "wells" and parts[2].isdigit():
+            well_id = int(parts[2])
+            row = db.query(Well.project_id).filter(Well.id == well_id).first()
+            project_id = int(row[0]) if row else None
+            # A project admin must be able to manage a restricted well's
+            # membership even when they are not a well member themselves.
+            if (
+                project_id is not None
+                and len(parts) >= 4
+                and parts[3] == "members"
+                and (role or "").strip().lower() != "admin"
+                and membership_role(db, project_id, subject) == "admin"
+            ):
+                return True, project_id
+            allowed = can_access_well(db, well_id, subject, role, write=write)
+            return allowed, project_id
+        if len(parts) >= 3 and parts[0] == "api" and parts[1] == "log-runs" and parts[2].isdigit():
+            row = (
+                db.query(LogRun.well_id, Well.project_id)
+                .join(Well, LogRun.well_id == Well.id)
+                .filter(LogRun.id == int(parts[2]))
+                .first()
+            )
+            if row is None:
+                return True, None
+            allowed = can_access_well(db, int(row[0]), subject, role, write=write)
+            return allowed, int(row[1])
         project_id = resolve_project_id(db, path)
         if project_id is None:
             return True, None
-        write = request.method.upper() not in {"GET", "HEAD", "OPTIONS"}
-        allowed = can_access_project(
-            db,
-            project_id,
-            request_subject(request),
-            request_role(request),
-            write=write,
-        )
+        allowed = can_access_project(db, project_id, subject, role, write=write)
         return allowed, project_id
     finally:
         db.close()

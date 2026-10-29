@@ -36,7 +36,7 @@ try:
         density_porosity,
         qc_summary,
     )
-    from acl import request_role, request_subject, visible_project_ids
+    from acl import MEMBER_ROLES, can_access_well, membership_role, request_role, request_subject, well_membership_role
     from audit import log_audit as _log_audit
     from database import SessionLocal, get_db
     from deps import SafeJSONResponse, require_admin, require_interpreter
@@ -93,7 +93,7 @@ except ImportError:
         density_porosity,
         qc_summary,
     )
-    from backend.acl import request_role, request_subject, visible_project_ids
+    from backend.acl import MEMBER_ROLES, can_access_well, membership_role, request_role, request_subject, well_membership_role
     from backend.audit import log_audit as _log_audit
     from backend.database import SessionLocal, get_db
     from backend.deps import SafeJSONResponse, require_admin, require_interpreter
@@ -107,6 +107,7 @@ except ImportError:
     from backend.semantics import apply_run_semantics
     from backend.uploads import read_upload
     from backend.models import (
+        WellMember,
         Annotation,
         CompletionData,
         CurveAlias,
@@ -525,11 +526,9 @@ def list_wells(request: Request, project_id: int = None, db: Session = Depends(g
     if project_id:
         q = q.filter(Well.project_id == project_id)
     wells = q.all()
-    visible = visible_project_ids(
-        db, request_subject(request), request_role(request), [w.project_id for w in wells]
-    )
-    if visible is not None:
-        wells = [w for w in wells if w.project_id in visible]
+    subject = request_subject(request)
+    role = request_role(request)
+    wells = [w for w in wells if can_access_well(db, w.id, subject, role)]
     result = []
     for w in wells:
         d = {c.name: getattr(w, c.name) for c in Well.__table__.columns}
@@ -840,6 +839,104 @@ def replace_zones(wid: int, data: dict, db: Session = Depends(get_db)):
         ))
     db.commit()
     return {"status": "ok"}
+
+
+def _require_well_admin(db: Session, wid: int, request: Request) -> None:
+    if request_role(request) == "admin":
+        return
+    subject = request_subject(request)
+    row = db.query(Well.project_id).filter(Well.id == wid).first()
+    if row is not None and membership_role(db, int(row[0]), subject) == "admin":
+        return
+    if well_membership_role(db, wid, subject) == "admin":
+        return
+    raise HTTPException(403, "well or project admin role required")
+
+
+@router.get("/{wid}/members")
+def list_well_members(wid: int, db: Session = Depends(get_db)):
+    if not db.query(Well.id).filter(Well.id == wid).first():
+        raise HTTPException(404, "Well not found")
+    rows = (
+        db.query(WellMember)
+        .filter(WellMember.well_id == wid)
+        .order_by(WellMember.id.asc())
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "well_id": row.well_id,
+            "subject": row.subject,
+            "role": row.role,
+            "created_at": row.created_at.isoformat() if row.created_at else "",
+        }
+        for row in rows
+    ]
+
+
+@router.post("/{wid}/members", status_code=201)
+def add_well_member(
+    wid: int,
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    _role: str = Depends(require_interpreter),
+):
+    if not db.query(Well.id).filter(Well.id == wid).first():
+        raise HTTPException(404, "Well not found")
+    _require_well_admin(db, wid, request)
+    subject = str(data.get("subject") or "").strip()
+    if not subject:
+        raise HTTPException(400, "subject is required")
+    role = str(data.get("role") or "viewer").strip().lower()
+    if role not in MEMBER_ROLES:
+        raise HTTPException(400, "role must be viewer, interpreter or admin")
+    existing = (
+        db.query(WellMember)
+        .filter(WellMember.well_id == wid, WellMember.subject == subject)
+        .first()
+    )
+    if existing:
+        existing.role = role
+        db.commit()
+        return {"id": existing.id, "well_id": wid, "subject": subject, "role": role}
+    row = WellMember(well_id=wid, subject=subject, role=role)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id, "well_id": wid, "subject": subject, "role": row.role}
+
+
+@router.delete("/{wid}/members/{subject}", status_code=204)
+def remove_well_member(
+    wid: int,
+    subject: str,
+    request: Request,
+    force: bool = False,
+    db: Session = Depends(get_db),
+    _role: str = Depends(require_interpreter),
+):
+    _require_well_admin(db, wid, request)
+    row = (
+        db.query(WellMember)
+        .filter(WellMember.well_id == wid, WellMember.subject == subject)
+        .first()
+    )
+    if not row:
+        raise HTTPException(404, "Member not found")
+    remaining = (
+        db.query(WellMember)
+        .filter(WellMember.well_id == wid, WellMember.id != row.id)
+        .count()
+    )
+    if remaining == 0 and not force:
+        raise HTTPException(
+            400,
+            "cannot remove the last well member; pass force=true to inherit the project again",
+        )
+    db.delete(row)
+    db.commit()
 
 
 @router.get("/{wid}/export-package")
