@@ -274,6 +274,14 @@
       catch (e) { GeoToast.error(e.message); }
     },
 
+    async classify() {
+      try {
+        const r = await app._api(`/wells/${this.state.wid}/core/rock-types/classify`, { method: 'POST', body: JSON.stringify({ assign: true }) });
+        GeoToast.success(`Rock types assigned: ${r.classes.length} classes`);
+        await this.load();
+      } catch (e) { GeoToast.error(e.message); }
+    },
+
     async fitSh() {
       try { const r = await app._api(`/wells/${this.state.wid}/core/saturation-height/fit`, { method: 'POST', body: JSON.stringify({ model_type: $('csShFitType').value || 'j_function' }) }); GeoToast.success(`J-function fit R² ${num(r.r2, 3)}`); await this.load(); }
       catch (e) { GeoToast.error(e.message); }
@@ -378,6 +386,7 @@
     $('csSource')?.addEventListener('change', (e) => { View.state.source = e.target.value; View.render(); });
     $('csApproveBtn')?.addEventListener('click', () => View.approve());
     $('csClusterBtn')?.addEventListener('click', () => View.cluster());
+    $('csRockTypeBtn')?.addEventListener('click', () => View.classify());
     $('csFitShBtn')?.addEventListener('click', () => View.fitSh());
     $('csImportBtn')?.addEventListener('click', () => $('csCsvFile').click());
     $('csCsvFile')?.addEventListener('change', (e) => View.previewImport(e.target.files?.[0]));

@@ -86,3 +86,22 @@ model type, fit and apply controls.
 
 Photo and thin-section binaries can be uploaded to the artifact store:
 `photos/upload` and `thin-sections/upload` (50 MB, image extensions).
+
+## Rock typing
+
+`POST /api/wells/{wid}/core/rock-types/classify` computes Winland R35, RQI and
+FZI for every plug with positive porosity and air permeability. R35 classes:
+
+| R35 (µm) | Class |
+|---|---|
+| >= 10 | macroport |
+| 2–10 | mesoport |
+| 0.5–2 | microport |
+| < 0.5 | nanoport |
+
+With `assign: true` (the default) the API creates/reuses `RockType` rows and
+updates each plug's `rock_type_id`. `assign: false` returns the classification
+preview without writing assignments.
+
+RQI = `0.0314 * sqrt(k/phi)` and FZI = `RQI / (phi/(1-phi))` with `k` in mD and
+`phi` as a fraction. Winland R35 uses `phi` in percent.
