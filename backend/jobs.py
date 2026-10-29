@@ -247,10 +247,27 @@ def _requeue(job_id: str) -> None:
             from state_backend import requeue_job
         except ImportError:
             from backend.state_backend import requeue_job
-        requeue_job(job_id)
-    else:
-        update_job(job_id, status="queued")
-    JOB_EXECUTOR.submit(_execute, job_id)
+        if requeue_job(job_id, STALE_SECONDS):
+            JOB_EXECUTOR.submit(_execute, job_id)
+        return
+
+    def _apply(jobs):
+        job = jobs.get(job_id)
+        if not job:
+            return False
+        status = job.get("status")
+        if status == "queued":
+            return True
+        if status == "running" and _is_stale(job):
+            job["status"] = "queued"
+            job["worker_id"] = None
+            job["started_at"] = None
+            job["finished_at"] = None
+            return True
+        return False
+
+    if _mutate_jobs(_apply):
+        JOB_EXECUTOR.submit(_execute, job_id)
 
 
 def recover_jobs() -> int:

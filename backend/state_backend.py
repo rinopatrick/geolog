@@ -387,19 +387,23 @@ def claim_job(job_id: str, worker_id: str, stale_seconds: int) -> dict[str, Any]
     return _job_row(row) if row else None
 
 
-def requeue_job(job_id: str) -> None:
+def requeue_job(job_id: str, stale_seconds: int) -> bool:
+    cutoff = time.time() - stale_seconds
     with engine.begin() as conn:
-        conn.execute(
+        updated = conn.execute(
             text(
                 """
                 UPDATE shared_jobs
                 SET status = 'queued', worker_id = NULL, started_at = NULL,
                     started_epoch = NULL, finished_at = NULL, finished_epoch = NULL
                 WHERE id = :id
+                  AND (status = 'queued'
+                       OR (status = 'running' AND (started_epoch IS NULL OR started_epoch < :cutoff)))
                 """
             ),
-            {"id": job_id},
+            {"id": job_id, "cutoff": cutoff},
         )
+    return updated.rowcount == 1
 
 
 def recoverable_job_ids(stale_seconds: int) -> list[str]:
