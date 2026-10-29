@@ -740,6 +740,8 @@ class SeismicHorizon(Base):
     line_id = Column(Integer, ForeignKey("seismic_lines.id"), nullable=False, index=True)
     name = Column(String(120), nullable=False)
     color = Column(String(20), default="#f0883e")
+    mode = Column(String(20), default="line")
+    section_value = Column(Integer, nullable=True)
     picks_json = Column(Text, default="[]")
     created_at = Column(DateTime, default=utcnow)
 

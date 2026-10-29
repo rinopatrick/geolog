@@ -281,3 +281,63 @@ def test_sequential_section_decimates_the_whole_line():
     assert body["sampled"] is True
     assert body["labels"][0] == 0
     assert body["labels"][-1] == 2999
+
+def test_seismic_3d_horizon_picks_and_auto_track():
+    pid = _project_id()
+    upload = client.post(
+        f"/api/projects/{pid}/seismic",
+        files={"file": ("volume-horizon.sgy", _segy_volume(), "application/octet-stream")},
+        data={"name": "3D Horizon Volume"},
+        headers=ADMIN,
+    )
+    assert upload.status_code == 201, upload.text
+    line_id = upload.json()["id"]
+
+    created = client.post(
+        f"/api/seismic/{line_id}/horizons",
+        json={
+            "name": "Inline 100 pick",
+            "mode": "inline",
+            "section_value": 100,
+            "picks": [{"trace": 2, "sample": 10}, {"trace": 3, "sample": 10}],
+        },
+        headers=ADMIN,
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["mode"] == "inline"
+    assert created.json()["section_value"] == 100
+
+    tracked = client.post(
+        f"/api/seismic/{line_id}/horizons/auto-track",
+        json={
+            "name": "Inline auto",
+            "mode": "inline",
+            "section_value": 100,
+            "seed_trace": 10,
+            "seed_sample": 10,
+            "window": 3,
+            "search_radius": 4,
+        },
+        headers=ADMIN,
+    )
+    assert tracked.status_code == 201, tracked.text
+    assert tracked.json()["horizon"]["mode"] == "inline"
+    assert tracked.json()["horizon"]["section_value"] == 100
+    assert tracked.json()["picks_count"] >= 20
+
+    invalid = client.post(
+        f"/api/seismic/{line_id}/horizons",
+        json={"name": "Bad", "mode": "inline", "picks": []},
+        headers=ADMIN,
+    )
+    assert invalid.status_code == 400
+
+    bad_mode = client.post(
+        f"/api/seismic/{line_id}/horizons",
+        json={"name": "Bad mode", "mode": "depth", "picks": []},
+        headers=ADMIN,
+    )
+    assert bad_mode.status_code == 400
+
+    rows = client.get(f"/api/seismic/{line_id}/horizons", headers=ADMIN).json()
+    assert {row["mode"] for row in rows} == {"inline"}
