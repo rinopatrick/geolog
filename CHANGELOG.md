@@ -12,6 +12,8 @@ While the major version is `0`, the API is not yet stable.
 
 - **Gas/condensate volumetrics.** Fluid type, Bg, condensate yield, GIIP,
   recoverable gas, condensate and BOE percentiles, plus a gas/condensate UI.
+- **Prospect portfolios.** Correlated volume sampling, EMV, ranking, saved
+  portfolios and CSV export.
 
 ## [0.15.0] - 2026-10-31
 

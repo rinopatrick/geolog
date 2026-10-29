@@ -67,6 +67,16 @@ def grv_from_depth_grid(
     }
 
 
+def barrel_percentiles(values: np.ndarray) -> dict[str, float]:
+    p90, p50, p10 = np.percentile(values, [10, 50, 90])
+    return {
+        "p90_bbl": round(float(p90), 3),
+        "p50_bbl": round(float(p50), 3),
+        "p10_bbl": round(float(p10), 3),
+        "mean_bbl": round(float(np.mean(values)), 3),
+    }
+
+
 def percentiles(values: np.ndarray) -> dict[str, float]:
     p90, p50, p10 = np.percentile(values, [10, 50, 90])
     return {
@@ -167,6 +177,7 @@ def calculate_prospect(
             "seed": seed,
             "stoiip": stoiip_stats,
             "recoverable": recovery_stats,
+            "recoverable_boe": barrel_percentiles(recoverable),
             "risked_stoiip": risked,
         }
 
@@ -178,7 +189,10 @@ def calculate_prospect(
     giip_stats = percentiles(giip)
     gas_recovery_stats = percentiles(recoverable_gas)
     condensate_stats = percentiles(condensate)
-    boe_stats = percentiles(boe)
+    boe_stats = barrel_percentiles(boe)
+    recoverable_boe = barrel_percentiles(
+        recoverable_gas * 35.3147 / 5800.0 + recoverable_gas * 35.3147 / 1e6 * yield_value
+    )
     return {
         "fluid_type": "condensate" if fluid == "condensate" or yield_value > 0 else "gas",
         "grv": grv,
@@ -192,7 +206,10 @@ def calculate_prospect(
         "recoverable_gas": gas_recovery_stats,
         "condensate": condensate_stats,
         "boe": boe_stats,
-        "recoverable_boe": percentiles(recoverable_gas * 35.3147 / 5800.0 + recoverable_gas * 35.3147 / 1e6 * yield_value),
+        "recoverable_boe": recoverable_boe,
         "risked_giip": {key: round(value * risk_probability, 3) for key, value in giip_stats.items()},
-        "risked_boe": {key: round(value * risk_probability, 3) for key, value in boe_stats.items()},
+        "risked_boe": {
+            key: round(value * risk_probability, 3)
+            for key, value in boe_stats.items()
+        },
     }

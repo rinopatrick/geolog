@@ -785,6 +785,19 @@ class Prospect(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
+class ProspectPortfolio(Base):
+    """A saved portfolio calculation over multiple prospects."""
+
+    __tablename__ = "prospect_portfolios"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    name = Column(String(160), nullable=False)
+    inputs_json = Column(Text, default="{}")
+    result_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=utcnow)
+
+
 class WellSeismicTie(Base):
     """A synthetic-seismogram tie at one inline/crossline location."""
 

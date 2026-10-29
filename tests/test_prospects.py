@@ -212,6 +212,79 @@ def test_gas_condensate_volumetrics():
     assert result["fluid_type"] == "condensate"
     assert result["giip"]["p50_m3"] == round(giip, 3)
     assert result["condensate"]["p50_m3"] == round(condensate, 3)
-    assert result["boe"]["p50_m3"] == round(gas_boe + condensate, 3)
+    assert result["boe"]["p50_bbl"] == round(gas_boe + condensate, 3)
     assert result["recoverable_gas"]["p50_m3"] == round(giip * 0.6, 3)
     assert result["risked_giip"]["p50_m3"] == result["giip"]["p50_m3"]
+
+
+def test_prospect_portfolio_emv_and_ranking():
+    pid = _project_id()
+    _, surface = _depth_surface(pid)
+    prospects = []
+    for name, porosity in (("Portfolio A", 0.16), ("Portfolio B", 0.24)):
+        created = client.post(
+            f"/api/projects/{pid}/prospects",
+            json={
+                "name": name,
+                "surface_id": surface["id"],
+                "contact_depth_m": 1000,
+                "porosity": porosity,
+                "water_saturation": 0.3,
+                "recovery_factor": 0.4,
+                "iterations": 100,
+                "seed": 5,
+            },
+            headers=ADMIN,
+        )
+        assert created.status_code == 201, created.text
+        prospects.append(created.json())
+
+    expected = []
+    for prospect in prospects:
+        boe = prospect["result"]["recoverable_boe"]["p50_bbl"]
+        expected.append((60 - 10) * boe - 1_000_000)
+
+    portfolio = client.post(
+        f"/api/projects/{pid}/prospect-portfolios",
+        json={
+            "name": "Portfolio 1",
+            "prospect_ids": [item["id"] for item in prospects],
+            "price_per_boe": 60,
+            "opex_per_boe": 10,
+            "capex": 1_000_000,
+            "correlation": 1,
+            "iterations": 200,
+            "seed": 9,
+        },
+        headers=ADMIN,
+    )
+    assert portfolio.status_code == 201, portfolio.text
+    body = portfolio.json()
+    result = body["result"]
+    assert result["portfolio"]["prospect_count"] == len(prospects)
+    assert result["portfolio"]["total_emv"] == round(sum(expected), 3)
+    assert result["portfolio"]["total_boe_p50"] == round(
+        sum(item["result"]["recoverable_boe"]["p50_bbl"] for item in prospects), 3
+    )
+    ranks = [item["rank"] for item in result["prospects"]]
+    assert ranks == sorted(ranks)
+    assert result["prospects"][0]["emv"] >= result["prospects"][1]["emv"]
+
+    listed = client.get(f"/api/projects/{pid}/prospect-portfolios", headers=ADMIN)
+    assert listed.status_code == 200
+    assert body["id"] in {item["id"] for item in listed.json()}
+
+    detail = client.get(f"/api/projects/{pid}/prospect-portfolios/{body['id']}", headers=ADMIN)
+    assert detail.status_code == 200
+    assert detail.json()["result"]["portfolio"]["total_emv"] == result["portfolio"]["total_emv"]
+
+    exported = client.get(
+        f"/api/projects/{pid}/prospect-portfolios/{body['id']}/export.csv",
+        headers=ADMIN,
+    )
+    assert exported.status_code == 200
+    assert exported.text.splitlines()[0] == "rank,name,fluid_type,chance,boe_p90,boe_p50,boe_p10,net_revenue,emv"
+    assert len(exported.text.splitlines()) == 1 + len(prospects)
+
+    deleted = client.delete(f"/api/projects/{pid}/prospect-portfolios/{body['id']}", headers=ADMIN)
+    assert deleted.status_code == 204

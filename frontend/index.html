@@ -1456,6 +1456,16 @@
                         <span id="prospectStatus" class="toolbar-hint"></span>
                     </div>
                     <div id="prospectList" style="font-size:12px;color:#8b949e;margin-top:6px"></div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+                        <input id="portfolioName" placeholder="Portfolio" value="Portfolio A" style="min-width:130px">
+                        <input id="portfolioPrice" type="number" value="60" title="Price per BOE" style="width:90px">
+                        <input id="portfolioOpex" type="number" value="10" title="Opex per BOE" style="width:90px">
+                        <input id="portfolioCapex" type="number" value="0" title="Capex" style="width:110px">
+                        <input id="portfolioCorrelation" type="number" min="0" max="1" step="0.05" value="0.5" title="Volume correlation" style="width:80px">
+                        <button class="btn-sm" data-action="app.buildProspectPortfolio"><i data-lucide="briefcase"></i> Build portfolio</button>
+                        <span id="portfolioStatus" class="toolbar-hint"></span>
+                    </div>
+                    <div id="portfolioList" style="font-size:12px;color:#8b949e;margin-top:6px"></div>
                     <canvas id="segySurfaceMap" width="1000" height="320" style="width:100%;margin-top:10px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
                     <div id="segyHorizonList" style="font-size:12px;color:#8b949e;margin-top:8px"></div>
                 </div>

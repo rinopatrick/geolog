@@ -47,3 +47,24 @@ Results store `stoiip` and `recoverable` for oil, or `giip`,
 bbl.
 `GET/DELETE /api/projects/{pid}/prospects[/{id}]` list and manage prospects.
 The Seismic panel has a compact prospect form and result list.
+
+## Portfolio and EMV
+
+`POST /api/projects/{pid}/prospect-portfolios` combines selected prospects
+(or all project prospects) with:
+
+- `price_per_boe`, `opex_per_boe`, `capex`, `dry_hole_cost`
+- `correlation` between prospect volumes (0–1)
+- `iterations` and `seed`
+
+Each prospect gets a net revenue from its P50 recoverable BOE and an EMV:
+
+```
+net = (price_per_boe - opex_per_boe) * BOE_p50 - capex
+EMV = chance * net - (1 - chance) * dry_hole_cost
+```
+
+Portfolio volumes are sampled with a Gaussian copula: a shared normal factor
+weighted by `correlation` plus an independent factor. P90/P50/P10 totals are
+reported. Prospects are ranked by EMV. Saved portfolios can be listed, read,
+exported as CSV and deleted.
