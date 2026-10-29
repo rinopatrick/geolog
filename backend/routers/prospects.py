@@ -28,6 +28,7 @@ def _serialized(row: Prospect, include_result: bool = True) -> dict:
         "line_id": row.line_id,
         "surface_id": row.surface_id,
         "name": row.name,
+        "fluid_type": row.fluid_type or "oil",
         "contact_depth_m": row.contact_depth_m,
         "grv_m3": row.grv_m3,
         "area_m2": row.area_m2,
@@ -100,6 +101,9 @@ def create_prospect(pid: int, data: dict, request: Request, db: Session = Depend
             risks=data.get("risks"),
             iterations=data.get("iterations", 1000),
             seed=data.get("seed"),
+            fluid_type=data.get("fluid_type", "oil"),
+            bg=data.get("bg", 0.005),
+            condensate_yield=data.get("condensate_yield", 30.0),
         )
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(400, str(exc))
@@ -108,6 +112,7 @@ def create_prospect(pid: int, data: dict, request: Request, db: Session = Depend
         line_id=surface.line_id,
         surface_id=surface.id,
         name=name,
+        fluid_type=result["fluid_type"],
         contact_depth_m=contact,
         grv_m3=result["grv"]["grv_m3"],
         area_m2=result["grv"]["area_m2"],

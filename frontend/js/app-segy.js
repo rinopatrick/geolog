@@ -149,6 +149,9 @@ Object.assign(GeoLogApp.prototype, {
         const sw = Number(document.getElementById('prospectSw')?.value) || 0.3;
         const rf = Number(document.getElementById('prospectRf')?.value) || 0.35;
         const risk = Number(document.getElementById('prospectRisk')?.value) || 1;
+        const fluidType = document.getElementById('prospectFluid')?.value || 'oil';
+        const bg = Number(document.getElementById('prospectBg')?.value) || 0.005;
+        const condensateYield = Number(document.getElementById('prospectYield')?.value) || 0;
         GeoLoading.show('Evaluating prospect...');
         try {
             const prospect = await this._api(`/projects/${projectId}/prospects`, {
@@ -161,6 +164,9 @@ Object.assign(GeoLogApp.prototype, {
                     water_saturation: sw,
                     recovery_factor: rf,
                     risk,
+                    fluid_type: fluidType,
+                    bg,
+                    condensate_yield: condensateYield,
                     iterations: 2000,
                     seed: 42,
                 }),
@@ -170,7 +176,10 @@ Object.assign(GeoLogApp.prototype, {
             const result = prospect.result || {};
             const status = document.getElementById('prospectStatus');
             if (status) {
-                status.textContent = `GRV ${Math.round(prospect.grv_m3).toLocaleString()} m³ · P50 ${Math.round(result.stoiip?.p50_m3 || 0).toLocaleString()} m³`;
+                const volume = result.stoiip?.p50_m3 != null
+                    ? `STOIIP ${Math.round(result.stoiip.p50_m3).toLocaleString()} m³`
+                    : `GIIP ${Math.round(result.giip?.p50_m3 || 0).toLocaleString()} m³ · BOE ${Math.round(result.boe?.p50_m3 || 0).toLocaleString()}`;
+                status.textContent = `GRV ${Math.round(prospect.grv_m3).toLocaleString()} m³ · ${volume}`;
             }
             GeoToast.success('Prospect evaluated');
         } catch (e) {
@@ -187,9 +196,11 @@ Object.assign(GeoLogApp.prototype, {
         host.innerHTML = rows.length
             ? rows.map(item => {
                 const result = item.result || {};
-                const stoiip = result.stoiip || {};
+                const volume = result.stoiip || result.giip || {};
+                const label = result.fluid_type === 'oil' ? 'STOIIP' : 'GIIP';
+                const extra = result.boe?.p50_m3 != null ? ` · BOE ${Math.round(result.boe.p50_m3).toLocaleString()} m³` : '';
                 const risk = result.risk || {};
-                return `<div style="padding:2px 0"><strong>${escapeHtml(item.name)}</strong> · GRV ${Math.round(item.grv_m3 || 0).toLocaleString()} m³ · STOIIP P90/P50/P10 ${Math.round(stoiip.p90_m3 || 0).toLocaleString()} / ${Math.round(stoiip.p50_m3 || 0).toLocaleString()} / ${Math.round(stoiip.p10_m3 || 0).toLocaleString()} m³ · risk ${Math.round((risk.probability ?? 1) * 100)}%</div>`;
+                return `<div style="padding:2px 0"><strong>${escapeHtml(item.name)}</strong> · ${escapeHtml(item.fluid_type || 'oil')} · GRV ${Math.round(item.grv_m3 || 0).toLocaleString()} m³ · ${label} P90/P50/P10 ${Math.round(volume.p90_m3 || 0).toLocaleString()} / ${Math.round(volume.p50_m3 || 0).toLocaleString()} / ${Math.round(volume.p10_m3 || 0).toLocaleString()} m³${extra} · risk ${Math.round((risk.probability ?? 1) * 100)}%</div>`;
             }).join('')
             : 'No prospects evaluated yet.';
     },

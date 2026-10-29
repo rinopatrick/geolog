@@ -36,6 +36,14 @@ Use `risks: {trap, reservoir, charge, seal}` for a component risk tree; the
 probability is their product. Scalar values become zero-width triangular
 distributions, so deterministic runs are exact.
 
-Results store `stoiip` and `recoverable` as P90/P50/P10/mean in m³ and bbl.
+For gas and gas-condensate set `fluid_type` to `gas` or `condensate`, `bg`
+(reservoir m³ per surface m³, default 0.005) and `condensate_yield` (bbl per
+MMSCF, default 30). GIIP is `GRV * NTG * porosity * (1 - Sw) / Bg`. Condensate
+volume uses the gas volume in MMSCF; BOE adds gas BOE (5.8 Mcf per BOE) and
+condensate barrels. `bo` applies only to oil.
+
+Results store `stoiip` and `recoverable` for oil, or `giip`,
+`recoverable_gas`, `condensate` and `boe` for gas, as P90/P50/P10/mean in m³ and
+bbl.
 `GET/DELETE /api/projects/{pid}/prospects[/{id}]` list and manage prospects.
 The Seismic panel has a compact prospect form and result list.
