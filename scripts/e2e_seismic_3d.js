@@ -117,8 +117,12 @@ function buildVolume() {
         await app.createSeismicTie();
         tieOk = app._segyTie?.correlation != null;
       }
+      document.getElementById('prospectName').value = 'E2E Prospect';
+      document.getElementById('prospectContact').value = '1000';
+      await app.createProspect();
+      const prospectOk = (app._segyProspects || []).length > 0 && app._segyProspects[0].result?.stoiip?.p50_m3 > 0;
       return {
-        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && surfaceOk && depthOk && tieOk && (app._segyFaultLinks || []).length > 0,
+        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && surfaceOk && depthOk && tieOk && prospectOk && (app._segyFaultLinks || []).length > 0,
         lineId: line.id,
         volumeOk,
         inlineOk,
@@ -131,6 +135,8 @@ function buildVolume() {
         tieOk,
         tieCorrelation: app._segyTie?.correlation ?? null,
         tieShiftMs: app._segyTie?.shift_ms ?? null,
+        prospectOk,
+        prospectP50: app._segyProspects?.[0]?.result?.stoiip?.p50_m3 ?? null,
         surfaceName: app._segySurface?.name || '',
         throwMs: geometry.throw_ms,
         dipAngle: geometry.dip_angle_deg,

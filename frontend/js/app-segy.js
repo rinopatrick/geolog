@@ -86,6 +86,7 @@ Object.assign(GeoLogApp.prototype, {
                 this._populateVelocityModels([]);
             }
             await this.loadSeismicTies();
+            await this.loadSeismicProspects();
             const status = document.getElementById('segyStatus');
             if (status) {
                 const dimensions = volume?.is_3d ? ` · 3D ${volume.inline_count}×${volume.crossline_count}` : '';
@@ -118,6 +119,79 @@ Object.assign(GeoLogApp.prototype, {
                 ? `${volume.inline_count} inlines × ${volume.crossline_count} crosslines`
                 : '2D line (no inline/crossline grid)';
         }
+    },
+
+    async loadSeismicProspects() {
+        const projectId = this._segyLine?.project_id;
+        if (!projectId) {
+            this._segyProspects = [];
+            this._renderProspectList();
+            return;
+        }
+        try {
+            this._segyProspects = await this._api(`/projects/${projectId}/prospects`);
+            this._renderProspectList();
+        } catch (e) {
+            this._segyProspects = [];
+            this._renderProspectList();
+        }
+    },
+
+    async createProspect() {
+        const projectId = this._segyLine?.project_id;
+        if (!projectId) return GeoToast.warn('Load a seismic line first.');
+        const name = document.getElementById('prospectName')?.value?.trim() || 'Prospect';
+        const surfaceId = Number(document.getElementById('prospectSurface')?.value);
+        const contact = Number(document.getElementById('prospectContact')?.value);
+        if (!surfaceId) return GeoToast.warn('Build a surface first.');
+        if (!(contact > 0)) return GeoToast.warn('Enter a contact depth in metres.');
+        const porosity = Number(document.getElementById('prospectPorosity')?.value) || 0.2;
+        const sw = Number(document.getElementById('prospectSw')?.value) || 0.3;
+        const rf = Number(document.getElementById('prospectRf')?.value) || 0.35;
+        const risk = Number(document.getElementById('prospectRisk')?.value) || 1;
+        GeoLoading.show('Evaluating prospect...');
+        try {
+            const prospect = await this._api(`/projects/${projectId}/prospects`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    name,
+                    surface_id: surfaceId,
+                    contact_depth_m: contact,
+                    porosity,
+                    water_saturation: sw,
+                    recovery_factor: rf,
+                    risk,
+                    iterations: 2000,
+                    seed: 42,
+                }),
+            });
+            this._segyProspects = [prospect, ...(this._segyProspects || [])];
+            this._renderProspectList();
+            const result = prospect.result || {};
+            const status = document.getElementById('prospectStatus');
+            if (status) {
+                status.textContent = `GRV ${Math.round(prospect.grv_m3).toLocaleString()} m³ · P50 ${Math.round(result.stoiip?.p50_m3 || 0).toLocaleString()} m³`;
+            }
+            GeoToast.success('Prospect evaluated');
+        } catch (e) {
+            GeoToast.error('Prospect failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    },
+
+    _renderProspectList() {
+        const host = document.getElementById('prospectList');
+        if (!host) return;
+        const rows = this._segyProspects || [];
+        host.innerHTML = rows.length
+            ? rows.map(item => {
+                const result = item.result || {};
+                const stoiip = result.stoiip || {};
+                const risk = result.risk || {};
+                return `<div style="padding:2px 0"><strong>${escapeHtml(item.name)}</strong> · GRV ${Math.round(item.grv_m3 || 0).toLocaleString()} m³ · STOIIP P90/P50/P10 ${Math.round(stoiip.p90_m3 || 0).toLocaleString()} / ${Math.round(stoiip.p50_m3 || 0).toLocaleString()} / ${Math.round(stoiip.p10_m3 || 0).toLocaleString()} m³ · risk ${Math.round((risk.probability ?? 1) * 100)}%</div>`;
+            }).join('')
+            : 'No prospects evaluated yet.';
     },
 
     async loadSeismicTies() {
@@ -304,11 +378,12 @@ Object.assign(GeoLogApp.prototype, {
     async _populateSeismicSurfaces(surfaces) {
         this._segySurfaces = surfaces || [];
         const select = document.getElementById('segySurfaceSelect');
-        if (select) {
-            select.innerHTML = this._segySurfaces.map(surface =>
-                `<option value="${surface.id}">${escapeHtml(surface.name)} · ${surface.stats?.point_count || 0} pts</option>`
-            ).join('');
-        }
+        const prospectSelect = document.getElementById('prospectSurface');
+        const options = this._segySurfaces.map(surface =>
+            `<option value="${surface.id}">${escapeHtml(surface.name)} · ${surface.stats?.point_count || 0} pts</option>`
+        ).join('');
+        if (select) select.innerHTML = options;
+        if (prospectSelect) prospectSelect.innerHTML = options;
         if (this._segySurfaces.length) {
             const current = select?.value || this._segySurfaces[0].id;
             await this.loadSeismicSurface(current);
@@ -356,11 +431,17 @@ Object.assign(GeoLogApp.prototype, {
             const surfaces = await this._api(`/seismic/${line.id}/surfaces`);
             this._segySurfaces = surfaces || [];
             const select = document.getElementById('segySurfaceSelect');
+            const prospectSelect = document.getElementById('prospectSurface');
+            const options = this._segySurfaces.map(surface =>
+                `<option value="${surface.id}">${escapeHtml(surface.name)} · ${surface.stats?.point_count || 0} pts</option>`
+            ).join('');
             if (select) {
-                select.innerHTML = this._segySurfaces.map(surface =>
-                    `<option value="${surface.id}">${escapeHtml(surface.name)} · ${surface.stats?.point_count || 0} pts</option>`
-                ).join('');
+                select.innerHTML = options;
                 if (selectId) select.value = String(selectId);
+            }
+            if (prospectSelect) {
+                prospectSelect.innerHTML = options;
+                if (selectId) prospectSelect.value = String(selectId);
             }
             if (selectId) await this.loadSeismicSurface(selectId);
             else this._drawSeismicSurfaceMap();

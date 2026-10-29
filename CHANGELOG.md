@@ -16,6 +16,9 @@ While the major version is `0`, the API is not yet stable.
   time-to-depth conversion for surfaces, depth grids/stats and depth CSV export.
 - **Well-to-seismic ties.** Synthetic DT/RHOB trace, inline/crossline seismic
   extraction, optional checkshot, cross-correlation shift and persisted ties.
+- **Prospect volumetrics.** GRV from depth surfaces and contacts, Monte Carlo
+  STOIIP/recoverable percentiles, component risking, CRUD and a Seismic-panel
+  prospect form.
 
 ## [0.14.0] - 2026-10-31
 
