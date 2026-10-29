@@ -8,6 +8,8 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-29
+
 ### Added
 
 - **Two-instance PostgreSQL probe** in CI: shared ACL, login lockout,
