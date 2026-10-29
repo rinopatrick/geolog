@@ -1,0 +1,180 @@
+"""Prospect GRV and Monte Carlo STOIIP endpoints."""
+
+from __future__ import annotations
+
+import numpy as np
+from fastapi.testclient import TestClient
+
+from backend.main import SessionLocal, app
+from backend.models import Project
+
+client = TestClient(app)
+ADMIN = {"X-User-Role": "admin"}
+
+
+def _project_id() -> int:
+    db = SessionLocal()
+    try:
+        return int(db.query(Project.id).order_by(Project.id.asc()).first()[0])
+    finally:
+        db.close()
+
+
+def _volume() -> bytes:
+    textual = b" " * 3200
+    binary = bytearray(400)
+    ns = 12
+    binary[16:18] = (2000).to_bytes(2, "big")
+    binary[20:22] = (ns).to_bytes(2, "big")
+    binary[24:26] = (5).to_bytes(2, "big")
+    rng = np.random.default_rng(41)
+    traces = []
+    for inline in range(3):
+        for crossline in range(3):
+            header = bytearray(240)
+            header[114:116] = (ns).to_bytes(2, "big")
+            header[188:192] = (100 + inline).to_bytes(4, "big")
+            header[192:196] = (200 + crossline).to_bytes(4, "big")
+            data = rng.normal(0, 0.01, ns).astype(">f4")
+            traces.append(bytes(header) + data.tobytes())
+    return textual + bytes(binary) + b"".join(traces)
+
+
+def _depth_surface(pid: int, with_spacing: bool = True) -> tuple[int, dict]:
+    upload = client.post(
+        f"/api/projects/{pid}/seismic",
+        files={"file": ("prospect.sgy", _volume(), "application/octet-stream")},
+        data={"name": "Prospect Volume"},
+        headers=ADMIN,
+    )
+    assert upload.status_code == 201, upload.text
+    line_id = upload.json()["id"]
+    for index, inline in enumerate([100, 101, 102]):
+        created = client.post(
+            f"/api/seismic/{line_id}/horizons",
+            json={
+                "name": "Prospect Top",
+                "mode": "inline",
+                "section_value": inline,
+                "picks": [
+                    {"trace": 0, "sample": 2 + index},
+                    {"trace": 1, "sample": 3 + index},
+                    {"trace": 2, "sample": 4 + index},
+                ],
+            },
+            headers=ADMIN,
+        )
+        assert created.status_code == 201, created.text
+    body = {"name": "Prospect Surface", "horizon_name": "Prospect Top", "max_grid": 12}
+    if with_spacing:
+        body.update({"inline_spacing_m": 25, "crossline_spacing_m": 25})
+    surface = client.post(
+        f"/api/seismic/{line_id}/surfaces",
+        json=body,
+        headers=ADMIN,
+    )
+    assert surface.status_code == 201, surface.text
+    surface_body = surface.json()
+    if with_spacing:
+        model = client.post(
+            f"/api/projects/{pid}/velocity-models",
+            json={"name": "Prospect 2000", "kind": "constant", "velocity_m_s": 2000},
+            headers=ADMIN,
+        )
+        assert model.status_code == 201, model.text
+        converted = client.post(
+            f"/api/seismic/{line_id}/surfaces/{surface_body['id']}/depth",
+            json={"velocity_model_id": model.json()["id"]},
+            headers=ADMIN,
+        )
+        assert converted.status_code == 200, converted.text
+        surface_body = converted.json()
+    return line_id, surface_body
+
+
+def _expected_grv(surface: dict, contact: float) -> float:
+    grid = np.asarray(surface["depth_grid"], dtype=float)
+    return float(np.sum(np.clip(contact - grid, 0, None)) * 25 * 25)
+
+
+def test_prospect_monte_carlo_and_risking():
+    pid = _project_id()
+    line_id, surface = _depth_surface(pid)
+    expected_grv = _expected_grv(surface, 1000.0)
+
+    created = client.post(
+        f"/api/projects/{pid}/prospects",
+        json={
+            "name": "Prospect A",
+            "surface_id": surface["id"],
+            "contact_depth_m": 1000,
+            "porosity": 0.2,
+            "water_saturation": 0.3,
+            "recovery_factor": 0.4,
+            "bo": 1.2,
+            "iterations": 100,
+            "seed": 7,
+        },
+        headers=ADMIN,
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    result = body["result"]
+    assert body["line_id"] == line_id
+    assert body["grv_m3"] == round(expected_grv, 3)
+    assert result["stoiip"]["p50_m3"] == round(expected_grv * 0.2 * 0.7 / 1.2, 3)
+    assert result["recoverable"]["p50_m3"] == round(expected_grv * 0.2 * 0.7 / 1.2 * 0.4, 3)
+    assert result["risked_stoiip"]["p50_m3"] == result["stoiip"]["p50_m3"]
+    assert result["risk"]["probability"] == 1.0
+
+    ranged = client.post(
+        f"/api/projects/{pid}/prospects",
+        json={
+            "name": "Prospect range",
+            "surface_id": surface["id"],
+            "contact_depth_m": 1000,
+            "porosity": {"low": 0.1, "mode": 0.2, "high": 0.3},
+            "water_saturation": {"low": 0.2, "mode": 0.3, "high": 0.5},
+            "recovery_factor": {"low": 0.2, "mode": 0.35, "high": 0.5},
+            "risks": {"trap": 0.8, "reservoir": 0.7, "charge": 0.9, "seal": 0.6},
+            "iterations": 500,
+            "seed": 11,
+        },
+        headers=ADMIN,
+    )
+    assert ranged.status_code == 201, ranged.text
+    ranged_result = ranged.json()["result"]
+    assert ranged_result["stoiip"]["p90_m3"] <= ranged_result["stoiip"]["p50_m3"] <= ranged_result["stoiip"]["p10_m3"]
+    assert ranged_result["risk"]["probability"] == round(0.8 * 0.7 * 0.9 * 0.6, 4)
+    assert ranged_result["risked_stoiip"]["p50_m3"] < ranged_result["stoiip"]["p50_m3"]
+
+    listed = client.get(f"/api/projects/{pid}/prospects", headers=ADMIN)
+    assert listed.status_code == 200
+    assert {item["id"] for item in listed.json()} >= {body["id"], ranged.json()["id"]}
+    assert "result" not in listed.json()[0]
+
+    detail = client.get(f"/api/projects/{pid}/prospects/{body['id']}", headers=ADMIN)
+    assert detail.status_code == 200
+    assert detail.json()["result"]["iterations"] == 100
+
+    deleted = client.delete(f"/api/projects/{pid}/prospects/{body['id']}", headers=ADMIN)
+    assert deleted.status_code == 204
+
+
+def test_prospect_requires_depth_and_spacing():
+    pid = _project_id()
+    _, time_surface = _depth_surface(pid, with_spacing=False)
+    no_depth = client.post(
+        f"/api/projects/{pid}/prospects",
+        json={"name": "No depth", "surface_id": time_surface["id"], "contact_depth_m": 1000},
+        headers=ADMIN,
+    )
+    assert no_depth.status_code == 400
+
+    _, spaced_surface = _depth_surface(pid)
+    above = client.post(
+        f"/api/projects/{pid}/prospects",
+        json={"name": "Above", "surface_id": spaced_surface["id"], "contact_depth_m": 1},
+        headers=ADMIN,
+    )
+    assert above.status_code == 400

@@ -767,6 +767,23 @@ class SeismicFault(Base):
 
 
 
+class Prospect(Base):
+    """A volumetrics/risking calculation anchored to a depth surface."""
+
+    __tablename__ = "prospects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    line_id = Column(Integer, ForeignKey("seismic_lines.id"), nullable=True)
+    surface_id = Column(Integer, ForeignKey("seismic_surfaces.id"), nullable=True)
+    name = Column(String(160), nullable=False)
+    contact_depth_m = Column(Float, nullable=True)
+    grv_m3 = Column(Float, nullable=True)
+    area_m2 = Column(Float, nullable=True)
+    result_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=utcnow)
+
+
 class WellSeismicTie(Base):
     """A synthetic-seismogram tie at one inline/crossline location."""
 
