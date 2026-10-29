@@ -423,9 +423,20 @@ Configuration reference:
 | `AUTH_JWT_ALGORITHMS` | `HS256` | Comma-separated allowed algorithms |
 | `GEOLOG_CORS_ORIGINS` | unset | Comma-separated allowed origins. Unset disables CORS entirely; the bundled frontend is same-origin and needs none |
 | `GEOLOG_DB_PATH` | `backend/geolog.db` | SQLite file location |
-| `GEOLOG_ARTIFACT_DIR` | `backend/artifacts` | Interpretation snapshots and well locks || `GEOLOG_ENABLE_DEMO_SEED` | `false` | Seed demo wells on first startup |
+| `GEOLOG_ARTIFACT_DIR` | `backend/artifacts` | Interpretation snapshots, well locks, jobs, metrics and rate-limit state |
+| `GEOLOG_RUN_MIGRATIONS_ON_STARTUP` | `true` in dev/test, `false` elsewhere | Production must run `alembic upgrade head` as a deploy step |
+| `GEOLOG_FAIL_ON_SCHEMA_MISMATCH` | `true` outside dev | Refuse to start when the live schema differs from the models |
+| `GEOLOG_ENFORCE_PROJECT_ACL` | `true` | Project membership enforcement; see `docs/PROJECT_ACL.md` |
+| `GEOLOG_AUTH_IP_LIMIT` / `GEOLOG_AUTH_IP_WINDOW_SECONDS` | `30` / `300` | Login attempts per source IP |
+| `GEOLOG_AUTH_FAILURE_LIMIT` / `GEOLOG_AUTH_LOCKOUT_SECONDS` | `5` / `900` | Per-account failures before lockout and lockout duration |
+| `GEOLOG_MAX_UPLOAD_BYTES` | `268435456` (256 MiB) | Per-file upload cap; streamed, never read unbounded |
+| `GEOLOG_MAX_BODY_BYTES` | `67108864` (64 MiB) | Non-multipart request body cap |
+| `GEOLOG_PBKDF2_ITERATIONS` | `240000` | Local user-secret hash cost |
+| `GEOLOG_TRUST_PROXY` | `false` | Honour `X-Forwarded-For` for rate limiting; enable only behind a trusted proxy |
+| `GEOLOG_ENABLE_DEMO_SEED` | `false` | Seed demo wells on first startup |
 | `GEOLOG_ENFORCE_SECRETS_SOURCE` | `true` | Require `GEOLOG_SECRETS_SOURCE` in non-dev |
 | `GEOLOG_SECRETS_SOURCE` | — | Required when `GEOLOG_ENV` is non-dev |
+| `GEOLOG_ENABLE_DOCS` | `true` in dev/test, `false` elsewhere | Expose `/docs`, `/redoc` and `/openapi.json`; leave off in production unless the docs host is protected |
 | `AUDIT_EXPORT_HMAC_KEYS_JSON` / `AUDIT_EXPORT_HMAC_ACTIVE_KID` | — | Audit/evidence signing key rotation |
 | `AUDIT_EXPORT_HMAC_KEY` | — | Legacy single signing key (`kid='legacy'`) |
 
@@ -434,9 +445,15 @@ the port can be an admin. It is a development convenience only.
 
 ### Schema migrations
 
-The schema is owned by Alembic. The app runs `upgrade head` at startup and then
-verifies the result, so a database that is missing a table or column is reported
-at boot instead of failing at first query.
+The schema is owned by Alembic. In dev/test the app runs `upgrade head` at
+startup. In production it **does not migrate**: run the migration once as a
+deploy step, then start every worker with the same revision. The app verifies
+the live schema and refuses to start if a table or column is missing.
+
+```bash
+GEOLOG_ENV=prod python -m alembic upgrade head
+GEOLOG_ENV=prod python -m uvicorn backend.main:app --workers 2
+```
 
 ```bash
 python -m alembic upgrade head          # apply migrations
@@ -486,17 +503,35 @@ control-point rules, API endpoints and response shape.
 
 ## Production-readiness status
 
-Current state: **engineering sample / pre-production**.
+Current state: **release candidate for a single-team, single-host deployment**.
+It is not yet a multi-tenant SaaS: the API is still `0.x`, file-backed state is
+single-host, and project membership is project-level rather than well-level.
 
 Version: see [`backend/version.py`](backend/version.py) (single source of truth)
 and [CHANGELOG.md](CHANGELOG.md). While the major version is `0`, the API is not
-stable and the schema may change between releases.
+stable and the schema may change between releases. Responses carry
+`X-API-Version: v0` so clients can pin behavior; see
+[`docs/API_VERSIONING.md`](docs/API_VERSIONING.md).
 
-Recommended next steps:
-1. Add a token revocation/refresh lifecycle and map IdP-specific role claims. JWKS/RS256 verification, issuer/audience/expiry checks and local HS256 issuance are implemented; see `docs/PRODUCTION_HARDENING.md`.
-2. Raise coverage on the petrophysics compute paths; they are the least-covered high-risk modules.
-3. Complete deployment hardening: TLS termination, secret manager, backup/restore drill and monitoring. See [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md).
-4. Add committed real DLIS/LIS regression fixtures. The real-file checks are opt-in because the sample files are third-party test data; see the testing section.
+Completed hardening:
+- JWT refresh/rotation, jti revocation, JWKS/RS256 and issuer/audience checks.
+- PBKDF2 hashing for locally managed user secrets; plaintext rows upgrade on
+  first login.
+- Login IP rate limit + per-account lockout, upload/body size caps, and a real
+  backup/restore drill covering the database and artifact directory.
+- Project-level membership ACL, enabled by default; see
+  [`docs/PROJECT_ACL.md`](docs/PROJECT_ACL.md).
+- Pinned, self-hosted Lucide; CSP and escaping fixes for generated HTML.
+- Durable background-job registry with crash recovery.
+
+Remaining before a multi-tenant/SLA deployment:
+1. Raise coverage further on the large `wells.py` router (currently the
+   lowest-covered high-risk module) and add committed real DLIS/LIS fixtures.
+2. Split `backend/routers/wells.py` (5k lines) and `frontend/js/app.js` (9.7k
+   lines) into modules; add an explicit `/api/v1` surface when a breaking change
+   is required.
+3. Add external error tracking/APM and move file-backed state to a shared store
+   if more than one host is used. See [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md).
 
 Module layout:
 ```

@@ -16,6 +16,42 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+### Added
+
+- **Login throttling.** Per-IP attempt limits and per-account failure lockout,
+  shared across workers via file-backed state. Configurable with `GEOLOG_AUTH_*`.
+- **Upload and body caps.** All upload routes stream through a bounded reader;
+  a middleware rejects declared oversized bodies before authentication work.
+- **Hashed user secrets.** PBKDF2-HMAC-SHA256 hashes, legacy plaintext upgrade on
+  first login, and `POST /api/users/{uid}/rotate-token`.
+- **Project membership ACL.** `project_members`, membership endpoints and
+  path-level enforcement for projects, wells and log runs. See
+  `docs/PROJECT_ACL.md`.
+- **Durable background jobs.** Persisted job payloads, registered handlers,
+  startup/reaper recovery and duplicate-claim protection.
+- **Deploy-step migrations.** Production verifies the schema and fails fast;
+  dev/test still migrate at startup.
+- **Backup drill covers artifacts.** SQLite backup, artifact copy, manifest,
+  scratch restore, integrity/hash checks and signed report.
+- **Content-Security-Policy** and `X-API-Version` response headers.
+- **Self-hosted Lucide** pinned at v0.468.0 with SRI; no `unpkg@latest` at runtime.
+- **Coverage gate** in CI (`scripts/coverage_gate.sh`).
+
+### Changed
+
+- Request metrics are buffered per worker and flushed periodically instead of
+  rewriting one locked `metrics.json` on every request.
+- User listing is admin-only; user secrets are no longer stored in plaintext.
+- Audit middleware no longer buffers multipart or large write bodies.
+- Docker image no longer ships tests and defaults to `GEOLOG_ENV=prod` with two
+  uvicorn workers; Compose still opts into dev/demo settings.
+
+### Security
+
+- Escape server-controlled values in remaining `innerHTML` sinks.
+- Validate role values on user create/update.
+
+
 ## [0.8.1] - 2026-10-21
 
 ### Fixed
