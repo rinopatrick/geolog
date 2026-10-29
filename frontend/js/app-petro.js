@@ -239,7 +239,8 @@ Object.assign(GeoLogApp.prototype, {
         ctx.textAlign = 'right';
         const conf = points.length < 30 ? 'LOW CONFIDENCE' : 'OK';
         ctx.fillText(`${points.length} points • ${conf}`, canvas.width - margin.right, margin.top - 10);
-    },
+    }
+,
 
     _renderPickettPlot() {
         const canvas = document.getElementById('pickettCanvas');
@@ -343,7 +344,8 @@ Object.assign(GeoLogApp.prototype, {
             const y = margin.top + h - ly(t)*h;
             ctx.fillText(String(t), margin.left-6, y+3);
         });
-    },
+    }
+,
 
     _renderMNPlot() {
         const canvas = document.getElementById('mnplotCanvas');
@@ -411,7 +413,8 @@ Object.assign(GeoLogApp.prototype, {
         ctx.fillStyle='#c9d1d9'; ctx.font='12px DM Sans'; ctx.textAlign='center';
         ctx.fillText('N parameter', margin.left+w/2, canvas.height-14);
         ctx.save(); ctx.translate(18, margin.top+h/2); ctx.rotate(-Math.PI/2); ctx.fillText('M parameter',0,0); ctx.restore();
-    },
+    }
+,
 
     _renderPetrophysics() {
         if (!this.renderer) return;
@@ -534,32 +537,34 @@ Object.assign(GeoLogApp.prototype, {
         this._petroCache = { intervals, gross, netPay, ntg, vshCut, phieCut, swCut, mdStep };
         const rows = intervals.map((z,idx)=>`<tr><td>Z${idx+1}</td><td>${z.top.toFixed(1)}</td><td>${z.base.toFixed(1)}</td><td>${z.gross.toFixed(1)}</td><td>${z.phie.toFixed(3)}</td><td>${z.sw.toFixed(3)}</td><td>${z.vsh.toFixed(3)}</td></tr>`).join('') || '<tr><td colspan="7">No pay intervals under current cutoffs</td></tr>';
 
+        const safeSatModel = escapeHtml(String(satModel || ''));
         result.innerHTML = `
             <div class="petro-summary">
                 <h4>Computed Curves</h4>
-                <div class="petro-stat"><span>Sw (avg):</span> <strong>${avg(swValid)}</strong></div>
-                <div class="petro-stat"><span>Vsh (avg):</span> <strong>${avg(vshValid)}</strong></div>
-                <div class="petro-stat"><span>PHIE (avg):</span> <strong>${avg(phieValid)}</strong></div>
+                <div class="petro-stat"><span>Sw (avg):</span> <strong>${Number(avg(swValid)).toFixed(3)}</strong></div>
+                <div class="petro-stat"><span>Vsh (avg):</span> <strong>${Number(avg(vshValid)).toFixed(3)}</strong></div>
+                <div class="petro-stat"><span>PHIE (avg):</span> <strong>${Number(avg(phieValid)).toFixed(3)}</strong></div>
                 <hr>
                 <h4>Net Pay Quicklook</h4>
-                <div class="petro-stat"><span>Cutoffs:</span> <strong>Vsh&lt;${vshCut}, PHIE&gt;${phieCut}, Sw&lt;${swCut}</strong></div>
-                <div class="petro-stat"><span>Gross interval:</span> <strong>${gross.toFixed(1)} ft</strong></div>
-                <div class="petro-stat"><span>Net pay:</span> <strong>${netPay.toFixed(1)} ft</strong></div>
-                <div class="petro-stat"><span>N/G:</span> <strong>${(ntg*100).toFixed(1)}%</strong></div>
+                <div class="petro-stat"><span>Cutoffs:</span> <strong>Vsh&lt;${Number(vshCut).toFixed(2)}, PHIE&gt;${Number(phieCut).toFixed(2)}, Sw&lt;${Number(swCut).toFixed(2)}</strong></div>
+                <div class="petro-stat"><span>Gross interval:</span> <strong>${Number(gross).toFixed(1)} ft</strong></div>
+                <div class="petro-stat"><span>Net pay:</span> <strong>${Number(netPay).toFixed(1)} ft</strong></div>
+                <div class="petro-stat"><span>N/G:</span> <strong>${Number(ntg * 100).toFixed(1)}%</strong></div>
                 <h4 style="margin-top:10px">Reservoir Interval Table</h4>
                 <div style="overflow:auto"><table class="petro-table"><thead><tr><th>Zone</th><th>Top</th><th>Base</th><th>Gross</th><th>PHIE</th><th>Sw</th><th>Vsh</th></tr></thead><tbody>${rows}</tbody></table></div>
                 <hr>
-                <h4>Saturation Model: ${satModel.charAt(0).toUpperCase() + satModel.slice(1)}</h4>
-                <div class="petro-stat"><span>a:</span> <strong>${a}</strong></div>
-                <div class="petro-stat"><span>m:</span> <strong>${m}</strong></div>
-                ${satModel === 'archie' ? '<div class="petro-stat"><span>n:</span> <strong>'+n+'</strong></div>' : ''}
-                <div class="petro-stat"><span>Rw:</span> <strong>${rw}</strong></div>
+                <h4>Saturation Model: ${safeSatModel.charAt(0).toUpperCase() + safeSatModel.slice(1)}</h4>
+                <div class="petro-stat"><span>a:</span> <strong>${Number(a)}</strong></div>
+                <div class="petro-stat"><span>m:</span> <strong>${Number(m)}</strong></div>
+                ${satModel === 'archie' ? '<div class="petro-stat"><span>n:</span> <strong>'+Number(n)+'</strong></div>' : ''}
+                <div class="petro-stat"><span>Rw:</span> <strong>${Number(rw)}</strong></div>
             </div>
         `;
 
         // Refresh viewer
         this.renderer.render();
-    },
+    }
+,
 
     async _renderZoneStats() {
         if (!this.currentWell) return;
@@ -595,7 +600,8 @@ Object.assign(GeoLogApp.prototype, {
             const el = document.getElementById('petroResults');
             if (el) el.innerHTML = html + el.innerHTML;
         } catch (e) { GeoToast.error(e.message); }
-    },
+    }
+,
 
     _renderQC() {
         if (!this.renderer) return;
@@ -732,7 +738,8 @@ Object.assign(GeoLogApp.prototype, {
               </table>
             </div>
         `;
-    },
+    }
+,
 
     _renderStatistics() {
         if (!this.renderer) return;
@@ -791,7 +798,8 @@ Object.assign(GeoLogApp.prototype, {
         for (const h of histograms.slice(0, 8)) {
             this._drawHistogram(`hist_${h.mn}`, h.data, h.color);
         }
-    },
+    }
+,
 
     _computeSaturation(model, rt, phi, vsh, a, m, n, rw) {
         if (rt <= 0 || phi < 0.01) return 1.0;
@@ -809,7 +817,8 @@ Object.assign(GeoLogApp.prototype, {
             swVal = Math.pow(a / (Math.pow(phi, m) * rt / rw), 1 / n);
         }
         return Math.max(0, Math.min(1, swVal));
-    },
+    }
+,
 
     _drawHistogram(canvasId, data, color) {
         const canvas = document.getElementById(canvasId);
@@ -860,7 +869,8 @@ Object.assign(GeoLogApp.prototype, {
         ctx.textAlign = 'right';
         ctx.fillText(maxBin.toString(), margin.left - 4, margin.top + 10);
         ctx.fillText('0', margin.left - 4, margin.top + ph);
-    },
+    }
+,
 
     async runSensitivity() {
         if (!this.currentWell) return GeoToast.warn('No well selected');
@@ -897,7 +907,7 @@ Object.assign(GeoLogApp.prototype, {
             const profile = result.variation_profile || {};
             const driverRows = (result.drivers || []).map((d) => {
                 const sign = d.correlation >= 0 ? '+' : '−';
-                return `<div class="petro-stat"><span>${d.parameter}</span><strong>${sign}${Math.abs(d.correlation).toFixed(3)} corr</strong></div>`;
+                return `<div class="petro-stat"><span>${escapeHtml(String(d.parameter || ''))}</span><strong>${sign}${Math.abs(d.correlation).toFixed(3)} corr</strong></div>`;
             }).join('') || '<div class="petro-stat"><span>Drivers</span><strong>N/A</strong></div>';
 
             const panel = document.getElementById('sensResults');
@@ -906,18 +916,18 @@ Object.assign(GeoLogApp.prototype, {
             panel.innerHTML = `
                 <div class="petro-summary">
                     <h4>Monte Carlo Uncertainty</h4>
-                    <div class="petro-stat"><span>Iterations:</span> <strong>${result.iterations}</strong></div>
-                    <div class="petro-stat"><span>Saturation model:</span> <strong>${model}</strong></div>
-                    <div class="petro-stat"><span>Mean ± Std:</span> <strong>${result.mean_net_pay} ± ${result.std_net_pay} ft</strong></div>
+                    <div class="petro-stat"><span>Iterations:</span> <strong>${Number(result.iterations) || 0}</strong></div>
+                    <div class="petro-stat"><span>Saturation model:</span> <strong>${escapeHtml(String(model || ''))}</strong></div>
+                    <div class="petro-stat"><span>Mean ± Std:</span> <strong>${escapeHtml(String(result.mean_net_pay ?? 0))} ± ${escapeHtml(String(result.std_net_pay ?? 0))} ft</strong></div>
                     <hr>
                     <h4>Net Pay Percentiles</h4>
-                    <div class="petro-stat"><span>P90 (conservative low):</span> <strong style="color:#f85149">${result.p90_net_pay} ft</strong></div>
-                    <div class="petro-stat"><span>P50 (median):</span> <strong style="color:#d29922">${result.p50_net_pay} ft</strong></div>
-                    <div class="petro-stat"><span>P10 (optimistic high):</span> <strong style="color:#3fb950">${result.p10_net_pay} ft</strong></div>
+                    <div class="petro-stat"><span>P90 (conservative low):</span> <strong style="color:#f85149">${escapeHtml(String(result.p90_net_pay ?? 0))} ft</strong></div>
+                    <div class="petro-stat"><span>P50 (median):</span> <strong style="color:#d29922">${escapeHtml(String(result.p50_net_pay ?? 0))} ft</strong></div>
+                    <div class="petro-stat"><span>P10 (optimistic high):</span> <strong style="color:#3fb950">${escapeHtml(String(result.p10_net_pay ?? 0))} ft</strong></div>
                     <hr>
                     <h4>Uncertainty Profile (±%)</h4>
-                    <div class="petro-stat"><span>Rw/m/n:</span> <strong>${profile.rw ?? 0}/${profile.m ?? 0}/${profile.n ?? 0}</strong></div>
-                    <div class="petro-stat"><span>Vsh/PHIE/Sw cut:</span> <strong>${profile.vsh_cutoff ?? 0}/${profile.phie_cutoff ?? 0}/${profile.sw_cutoff ?? 0}</strong></div>
+                    <div class="petro-stat"><span>Rw/m/n:</span> <strong>${escapeHtml(String(profile.rw ?? 0))}/${escapeHtml(String(profile.m ?? 0))}/${escapeHtml(String(profile.n ?? 0))}</strong></div>
+                    <div class="petro-stat"><span>Vsh/PHIE/Sw cut:</span> <strong>${escapeHtml(String(profile.vsh_cutoff ?? 0))}/${escapeHtml(String(profile.phie_cutoff ?? 0))}/${escapeHtml(String(profile.sw_cutoff ?? 0))}</strong></div>
                     <hr>
                     <h4>Top Drivers (Correlation)</h4>
                     ${driverRows}
@@ -935,7 +945,8 @@ Object.assign(GeoLogApp.prototype, {
         } finally {
             GeoLoading.hide();
         }
-    },
+    }
+,
 
     _drawTornado(result) {
         const canvas = document.getElementById('tornadoCanvas');
@@ -990,7 +1001,8 @@ Object.assign(GeoLogApp.prototype, {
         ctx.font = '10px IBM Plex Mono';
         ctx.textAlign = 'center';
         ctx.fillText('Net Pay (ft)', w / 2, ht - 6);
-    },
+    }
+,
 
     _drawSensHistogram(result) {
         const canvas = document.getElementById('sensHistogram');
@@ -1023,7 +1035,8 @@ Object.assign(GeoLogApp.prototype, {
         ctx.fillText(bins[0].toFixed(0), margin.left, ht - 4);
         ctx.fillText(bins[bins.length - 1].toFixed(0), w - margin.right, ht - 4);
         ctx.fillText('Net Pay Distribution (ft)', w / 2, ht - 4);
-    },
+    }
+,
 
     async runRwEstimation() {
         if (!this.currentWell) return GeoToast.warn('Select a well first');
@@ -1080,7 +1093,8 @@ Object.assign(GeoLogApp.prototype, {
         } finally {
             GeoLoading.hide();
         }
-    },
+    }
+,
 
     _drawRwHingleCanvas(crossplot, hingle) {
         const canvas = document.getElementById('rwHingleCanvas');
@@ -1142,7 +1156,8 @@ Object.assign(GeoLogApp.prototype, {
         ctx.rotate(-Math.PI / 2);
         ctx.fillText('1/Rt', 0, 0);
         ctx.restore();
-    },
+    }
+,
 
     async applyRecommendedRw() {
         const rw = this._lastRwEstimation?.recommended_rw;
@@ -1151,7 +1166,8 @@ Object.assign(GeoLogApp.prototype, {
         if (!archRw) return GeoToast.warn('Petrophysics Rw input not found');
         archRw.value = Number(rw).toFixed(4);
         GeoToast.success(`Rw updated to ${Number(rw).toFixed(4)} Ω·m`);
-    },
+    }
+,
 
     async runLQCShoulderBedCorrection() {
         if (!this.currentLogRun) return GeoToast.warn('Select a log run');
@@ -1184,7 +1200,8 @@ Object.assign(GeoLogApp.prototype, {
         } finally {
             GeoLoading.hide();
         }
-    },
+    }
+,
 
     toggleLQCCorrected(enabled) {
         this.lqcState.showCorrected = !!enabled;
@@ -1196,7 +1213,8 @@ Object.assign(GeoLogApp.prototype, {
             this.renderer.curveData[m] = [...this.lqcState.originalCurve];
         }
         this.renderer.render();
-    },
+    }
+,
 
     _renderLQCResults() {
         const sumEl = document.getElementById('lqcSummary');
@@ -1219,7 +1237,8 @@ Object.assign(GeoLogApp.prototype, {
         ).join('');
 
         intEl.innerHTML = `<div style="margin-bottom:6px;color:#8b949e">Flagged intervals</div>${thinRows || '<div style="color:#8b949e">No thin beds flagged.</div>'}${badRows || '<div style="color:#8b949e;margin-top:8px">No bad-hole intervals flagged.</div>'}`;
-    },
+    }
+,
 
     async runPermeabilityModels() {
         if (!this.currentWell) return GeoToast.warn('Select a well first');
@@ -1251,7 +1270,8 @@ Object.assign(GeoLogApp.prototype, {
         } finally {
             GeoLoading.hide();
         }
-    },
+    }
+,
 
     applyPermeabilityToViewer(model = null) {
         if (!this.permResults || !this.renderer) return GeoToast.warn('Run permeability first');
@@ -1266,7 +1286,8 @@ Object.assign(GeoLogApp.prototype, {
         this.renderer.curveConfig = this.curveConfig;
         this.renderer.render();
         GeoToast.success(`PERM (${chosen.toUpperCase()}) overlay added`);
-    },
+    }
+,
 
     _renderPermeabilityResults(data) {
         const container = document.getElementById('permResults');
@@ -1292,7 +1313,8 @@ Object.assign(GeoLogApp.prototype, {
         this._plotPermCurve(curveCanvas, data.depth || [], data.k_values || {}, models, colors);
         this._plotPermCrossplot(xplotCanvas, data.crossplot || {}, models, colors);
         this._plotFziHistogram(fziCanvas, data.fzi || {}, models[0], colors);
-    },
+    }
+,
 
     _plotPermCurve(canvas, depth, kv, models, colors) {
         const ctx = canvas.getContext('2d');
@@ -1319,7 +1341,8 @@ Object.assign(GeoLogApp.prototype, {
             }
             ctx.stroke();
         }
-    },
+    }
+,
 
     _plotPermCrossplot(canvas, crossplot, models, colors) {
         const model = models[0];
@@ -1344,7 +1367,8 @@ Object.assign(GeoLogApp.prototype, {
         }
         ctx.fillStyle = '#c9d1d9'; ctx.font = '12px Geologica';
         ctx.fillText(`${model.toUpperCase()}  R²=${cp.r2 ?? 'n/a'}`, pad.left + 8, pad.top + 14);
-    },
+    }
+,
 
     _plotFziHistogram(canvas, fzi, model, colors) {
         const hist = fzi?.[model]?.histogram || [];
@@ -1361,7 +1385,8 @@ Object.assign(GeoLogApp.prototype, {
             const bh = (h.count / maxC) * ph;
             ctx.fillRect(pad.left + i * bw + 1, pad.top + ph - bh, Math.max(2, bw - 2), bh);
         });
-    },
+    }
+,
 
     async runElectrofacies() {
         if (!this.currentWell || !this.currentLogRun) return GeoToast.warn('Load a well first');
@@ -1402,7 +1427,8 @@ Object.assign(GeoLogApp.prototype, {
             GeoToast.success('Electrofacies: ' + result.n_clusters + ' types');
         } catch (e) { GeoToast.error('Clustering failed: ' + e.message); }
         finally { GeoLoading.hide(); }
-    },
+    }
+,
 
     async runElectrofaciesAsync() {
         if (!this.currentWell || !this.currentLogRun) return GeoToast.warn('Load a well first');
@@ -1419,7 +1445,8 @@ Object.assign(GeoLogApp.prototype, {
             GeoToast.success('Electrofacies job queued: ' + res.job_id);
         } catch (e) { GeoToast.error('Queue failed: ' + e.message); }
         finally { GeoLoading.hide(); }
-    },
+    }
+,
 
     async toggleLithTrack(forceOn = false) {
         if (!this.renderer) return;
@@ -1467,7 +1494,8 @@ Object.assign(GeoLogApp.prototype, {
         } finally {
             GeoLoading.hide();
         }
-    },
+    }
+,
 
     _renderLithologyLegend() {
         const el = document.getElementById('lithologyLegend');
@@ -1501,7 +1529,8 @@ Object.assign(GeoLogApp.prototype, {
         html += '</div>';
         el.innerHTML = html;
         el.style.display = 'block';
-    },
+    }
+,
 
     async runProbabilityPlot() {
         if (!this.currentWell) return;
@@ -1522,7 +1551,8 @@ Object.assign(GeoLogApp.prototype, {
                     <div class="stat-item"><span class="stat-label">Skewness</span><span class="stat-value">${data.skewness.toFixed(3)}</span></div>
                 </div>`;
         } catch (e) { GeoToast.error(e.message); }
-    },
+    }
+,
 
     _drawProbabilityPlot(data) {
         const canvas = document.getElementById('probabilityCanvas');
@@ -1598,7 +1628,8 @@ Object.assign(GeoLogApp.prototype, {
         ctx.fillText(curve + ' Value', m.left + plotW/2, H - 5);
         ctx.save(); ctx.translate(15, m.top + plotH/2); ctx.rotate(-Math.PI/2);
         ctx.fillText('Cumulative Probability', 0, 0); ctx.restore();
-    },
+    }
+,
 
     async runMoveableOil() {
         if (!this.currentWell) return;
@@ -1618,7 +1649,8 @@ Object.assign(GeoLogApp.prototype, {
                     <div class="stat-item"><span class="stat-label">Avg MOI</span><span class="stat-value">${moiAvg.toFixed(2)}</span></div>
                 </div>`;
         } catch (e) { GeoToast.error(e.message); }
-    },
+    }
+,
 
     _drawMoveableOilPlot(data) {
         const canvas = document.getElementById('moveableCanvas');
@@ -1683,7 +1715,8 @@ Object.assign(GeoLogApp.prototype, {
         // Title
         ctx.fillStyle = '#c9d1d9'; ctx.textAlign = 'center'; ctx.font = '12px DM Sans';
         ctx.fillText('Rwa vs Rxo_wa (Moveable Oil Indicator)', m.left + plotW/2, H - 5);
-    },
+    }
+,
 
     async runDipPlot() {
         if (!this.currentWell) return;
@@ -1699,7 +1732,8 @@ Object.assign(GeoLogApp.prototype, {
                     <div class="stat-item"><span class="stat-label">Max Azimuth</span><span class="stat-value">${Math.max(...data.azi).toFixed(1)}°</span></div>
                 </div>`;
         } catch (e) { GeoToast.error(e.message); }
-    },
+    }
+,
 
     _drawDipPlot(data) {
         const canvas = document.getElementById('dipCanvas');
@@ -1759,7 +1793,8 @@ Object.assign(GeoLogApp.prototype, {
 
         // Title
         ctx.fillText('Tadpole / Dip Plot', m.left + plotW/2, H - 5);
-    },
+    }
+,
 
     async runBuckles() {
         if (!this.currentWell) return;
@@ -1776,7 +1811,8 @@ Object.assign(GeoLogApp.prototype, {
                     <div class="stat-item"><span class="stat-label">Pay Fraction</span><span class="stat-value">${(data.stats.pay_fraction * 100).toFixed(1)}%</span></div>
                 </div>`;
         } catch (e) { GeoToast.error(e.message); }
-    },
+    }
+,
 
     _drawBucklesPlot(data) {
         const canvas = document.getElementById('bucklesCanvas');
@@ -1821,7 +1857,8 @@ Object.assign(GeoLogApp.prototype, {
         }
         ctx.fillStyle = '#c9d1d9'; ctx.font = '12px DM Sans'; ctx.textAlign = 'center';
         ctx.fillText('Bulk Volume Water (BVW)', m.left + plotW/2, H - 5);
-    },
+    }
+,
 
     async runHingle() {
         if (!this.currentWell) return;
@@ -1838,7 +1875,8 @@ Object.assign(GeoLogApp.prototype, {
                     <div class="stat-item"><span class="stat-label">Rw Estimate</span><span class="stat-value">${data.rw_line?.slope ? (1/data.rw_line.slope).toFixed(4) : 'N/A'}</span></div>
                 </div>`;
         } catch (e) { GeoToast.error(e.message); }
-    },
+    }
+,
 
     _drawHinglePlot(data) {
         const canvas = document.getElementById('hingleCanvas');
@@ -1893,7 +1931,8 @@ Object.assign(GeoLogApp.prototype, {
         ctx.fillText('Porosity (v/v)', m.left + plotW/2, H - 5);
         ctx.save(); ctx.translate(15, m.top + plotH/2); ctx.rotate(-Math.PI/2);
         ctx.fillText('1/Rt (1/ohm.m)', 0, 0); ctx.restore();
-    },
+    }
+,
 
     async runCurveCalc() {
         if (!this.currentWell) return;
@@ -1913,7 +1952,8 @@ Object.assign(GeoLogApp.prototype, {
             GeoToast.success(`Curve ${data.curve_name} created (${data.points} points)`);
             await this.selectLogRun(this.currentLogRun.id);
         } catch (e) { GeoToast.error(e.message); }
-    },
+    }
+,
 
     async runTornado() {
         if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
@@ -1931,7 +1971,8 @@ Object.assign(GeoLogApp.prototype, {
             GeoLoading.hide();
             GeoToast.error('Tornado analysis failed: ' + e.message);
         }
-    },
+    }
+,
 
     _renderTornado(data) {
         const container = document.getElementById('tornadoResults');
@@ -1968,7 +2009,8 @@ Object.assign(GeoLogApp.prototype, {
         container.innerHTML = html;
         container.className = '';
         container.style.padding = '0';
-    },
+    }
+,
 
     async runVclModels() {
         if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
@@ -1987,7 +2029,8 @@ Object.assign(GeoLogApp.prototype, {
             GeoLoading.hide();
             GeoToast.error('Vcl computation failed');
         }
-    },
+    }
+,
 
     _renderVclModels(data) {
         const container = document.getElementById('vclResults');
@@ -2017,7 +2060,8 @@ Object.assign(GeoLogApp.prototype, {
 
         // Render the depth plot
         setTimeout(() => this._renderVclPlot(data, colors), 100);
-    },
+    }
+,
 
     _renderVclPlot(data, colors) {
         const canvas = document.getElementById('vclCanvas');
@@ -2090,7 +2134,8 @@ Object.assign(GeoLogApp.prototype, {
             ctx.fillRect(lx, ly - 8, 12, 3);
             ctx.fillText(labels[idx], lx + 16, ly);
         });
-    },
+    }
+,
 
     showCoreCalModal() {
         if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
@@ -2108,7 +2153,8 @@ Object.assign(GeoLogApp.prototype, {
                 this._runCoreCal(depths, phi, perm);
             }
         });
-    },
+    }
+,
 
     async _runCoreCal(depths, phi, perm) {
         const curve = document.getElementById('coreCalCurve')?.value || 'NPHI';
@@ -2125,7 +2171,8 @@ Object.assign(GeoLogApp.prototype, {
             GeoLoading.hide();
             GeoToast.error('Calibration failed: ' + (e.message || 'Unknown error'));
         }
-    },
+    }
+,
 
     _renderCoreCal(data, curve) {
         const container = document.getElementById('coreCalResults');
@@ -2229,7 +2276,8 @@ Object.assign(GeoLogApp.prototype, {
             ctx.textAlign = 'left';
             ctx.fillText(`R² = ${data.r_squared}`, pad.left + 10, pad.top + 20);
         }, 100);
-    },
+    }
+,
 
     async runQcAutofix() {
         if (!this.currentWell) { GeoToast.warn('Select a well first'); return; }
@@ -2246,7 +2294,8 @@ Object.assign(GeoLogApp.prototype, {
             GeoLoading.hide();
             GeoToast.error('QC failed');
         }
-    },
+    }
+,
 
     _renderQcAutofix(data) {
         const container = document.getElementById('qcAutofixResults');
@@ -2286,7 +2335,8 @@ Object.assign(GeoLogApp.prototype, {
         container.innerHTML = html;
         container.className = '';
         container.style.padding = '0';
-    },
+    }
+,
 
     async computeSwMultiEquation() {
         if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
@@ -2323,7 +2373,8 @@ Object.assign(GeoLogApp.prototype, {
             }
             GeoToast.success('Multi-equation Sw computed');
         } catch(e) { if (result) result.innerHTML = '<p style="color:#f85149">Error: ' + e.message + '</p>'; GeoToast.error('Sw failed: ' + e.message); }
-    },
+    }
+,
 
     async runMultimineral() {
         if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
@@ -2353,7 +2404,8 @@ Object.assign(GeoLogApp.prototype, {
             }
             GeoToast.success('Multimineral complete');
         } catch(e) { if (result) result.innerHTML = '<p style="color:#f85149">Error: ' + e.message + '</p>'; GeoToast.error('Multimineral failed: ' + e.message); }
-    },
+    }
+,
 
     async runPermeabilityMulti() {
         if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
@@ -2382,7 +2434,8 @@ Object.assign(GeoLogApp.prototype, {
             }
             GeoToast.success('Multi-permeability computed');
         } catch(e) { if (result) result.innerHTML = '<p style="color:#f85149">Error: ' + e.message + '</p>'; GeoToast.error('Multi-perm failed: ' + e.message); }
-    },
+    }
+,
 
     async runVclEnhanced() {
         if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
@@ -2411,7 +2464,8 @@ Object.assign(GeoLogApp.prototype, {
             }
             GeoToast.success('VClay QC complete');
         } catch(e) { if (result) result.innerHTML = '<p style="color:#f85149">Error: ' + e.message + '</p>'; GeoToast.error('VClay QC failed: ' + e.message); }
-    },
+    }
+,
 
     async runDualWater() {
         if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
@@ -2434,7 +2488,8 @@ Object.assign(GeoLogApp.prototype, {
             }
             GeoToast.success('Dual-Water complete');
         } catch(e) { if (result) result.innerHTML = '<p style="color:#f85149">Error: ' + e.message + '</p>'; GeoToast.error('Dual-Water failed: ' + e.message); }
-    },
+    }
+,
 
     async runStratNormalize() {
         if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
@@ -2448,5 +2503,6 @@ Object.assign(GeoLogApp.prototype, {
             });
             GeoToast.success('Strat normalization complete (ref: ' + refFormation + ')');
         } catch(e) { GeoToast.error('Strat normalize failed: ' + e.message); }
-    },
+    }
+,
 });
