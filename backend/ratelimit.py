@@ -57,6 +57,14 @@ def auth_lockout_seconds() -> int:
     return _env_int("GEOLOG_AUTH_LOCKOUT_SECONDS", 900)
 
 
+def _db_enabled() -> bool:
+    try:
+        from state_backend import enabled
+    except ImportError:
+        from backend.state_backend import enabled
+    return enabled()
+
+
 def _now() -> float:
     return time.time()
 
@@ -114,6 +122,13 @@ def _mutate(fn):
 
 def hit(key: str, limit: int, window_seconds: int) -> int:
     """Count one attempt. Return 0 when allowed, else seconds until retry."""
+    if _db_enabled():
+        try:
+            from state_backend import hit as db_hit
+        except ImportError:
+            from backend.state_backend import hit as db_hit
+        return db_hit(key, limit, window_seconds)
+
     def _apply(data: dict[str, Any], now: float) -> int:
         bucket = data["buckets"].get(key)
         if not bucket or float(bucket.get("reset_at", 0)) <= now:
@@ -128,6 +143,13 @@ def hit(key: str, limit: int, window_seconds: int) -> int:
 
 
 def locked_for(key: str) -> int:
+    if _db_enabled():
+        try:
+            from state_backend import locked_for as db_locked_for
+        except ImportError:
+            from backend.state_backend import locked_for as db_locked_for
+        return db_locked_for(key)
+
     def _apply(data: dict[str, Any], now: float) -> int:
         lock = data["locks"].get(key)
         if not lock:
@@ -139,6 +161,13 @@ def locked_for(key: str) -> int:
 
 def record_failure(key: str, limit: int, window_seconds: int, lockout_seconds: int) -> int:
     """Record a failed credential attempt; lock the key at the threshold."""
+    if _db_enabled():
+        try:
+            from state_backend import record_failure as db_record_failure
+        except ImportError:
+            from backend.state_backend import record_failure as db_record_failure
+        return db_record_failure(key, limit, window_seconds, lockout_seconds)
+
     def _apply(data: dict[str, Any], now: float) -> int:
         bucket = data["buckets"].get(key)
         if not bucket or float(bucket.get("reset_at", 0)) <= now:
@@ -155,6 +184,14 @@ def record_failure(key: str, limit: int, window_seconds: int, lockout_seconds: i
 
 
 def clear_failures(key: str) -> None:
+    if _db_enabled():
+        try:
+            from state_backend import clear_failures as db_clear_failures
+        except ImportError:
+            from backend.state_backend import clear_failures as db_clear_failures
+        db_clear_failures(key)
+        return
+
     def _apply(data: dict[str, Any], now: float) -> None:
         data["buckets"].pop(key, None)
         data["locks"].pop(key, None)
@@ -195,6 +232,13 @@ def clear_login_failures(username: str) -> None:
 
 def reset_rate_limits() -> None:
     """Test helper: drop all state."""
+    if _db_enabled():
+        try:
+            from state_backend import reset_rate_limits as db_reset
+        except ImportError:
+            from backend.state_backend import reset_rate_limits as db_reset
+        db_reset()
+        return
     with _RATE_LIMIT_LOCK:
         try:
             os.remove(RATE_LIMIT_FILE)

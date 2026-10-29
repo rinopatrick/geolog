@@ -60,6 +60,14 @@ def _empty_metrics() -> dict[str, Any]:
     }
 
 
+def _db_enabled() -> bool:
+    try:
+        from state_backend import enabled
+    except ImportError:
+        from backend.state_backend import enabled
+    return enabled()
+
+
 def _worker_path() -> str:
     directory = os.path.dirname(os.path.abspath(METRICS_FILE))
     return os.path.join(directory, f"metrics-{_START_TOKEN}.json")
@@ -95,6 +103,13 @@ def flush_metrics() -> None:
             "latency_ms_count": int(_LOCAL_METRICS.get("latency_ms_count", 0)),
             "recent_events": list(_LOCAL_METRICS.get("recent_events", [])),
         }
+    if _db_enabled():
+        try:
+            from state_backend import flush_metrics as db_flush_metrics
+        except ImportError:
+            from backend.state_backend import flush_metrics as db_flush_metrics
+        db_flush_metrics(_START_TOKEN, snapshot)
+        return
     _save_json(_worker_path(), snapshot)
 
 
@@ -114,6 +129,19 @@ def _merge_into(target: dict[str, Any], source: dict[str, Any]) -> None:
 def _aggregate() -> dict[str, Any]:
     flush_metrics()
     aggregate = _empty_metrics()
+    if _db_enabled():
+        try:
+            from state_backend import load_metrics as db_load_metrics
+        except ImportError:
+            from backend.state_backend import load_metrics as db_load_metrics
+        for data in db_load_metrics():
+            _merge_into(aggregate, data)
+        events = aggregate.get("recent_events", [])
+        if isinstance(events, list):
+            events.sort(key=lambda e: str(e.get("ts", "")))
+            aggregate["recent_events"] = events[-RECENT_EVENT_LIMIT:]
+        return aggregate
+
     directory = os.path.dirname(os.path.abspath(METRICS_FILE))
     files = sorted(glob.glob(os.path.join(directory, "metrics-*.json")), key=os.path.getmtime)
     if len(files) > _MAX_EVENT_FILES:
