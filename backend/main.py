@@ -69,6 +69,7 @@ try:
     from routers.wells_analytics import router as wells_analytics_router
     from routers.wells_source_rock import router as wells_source_rock_router
     from routers.wells_seismic_tie import router as wells_seismic_tie_router
+    from routers.petro_uncertainty import router as petro_uncertainty_router
     from routers.prospects import router as prospects_router
     from routers.structure import router as structure_router
     from routers.fence import router as fence_router
@@ -117,6 +118,7 @@ except ImportError:
     from backend.routers.wells_analytics import router as wells_analytics_router
     from backend.routers.wells_source_rock import router as wells_source_rock_router
     from backend.routers.wells_seismic_tie import router as wells_seismic_tie_router
+    from backend.routers.petro_uncertainty import router as petro_uncertainty_router
     from backend.routers.prospects import router as prospects_router
     from backend.routers.structure import router as structure_router
     from backend.routers.fence import router as fence_router
@@ -261,6 +263,7 @@ app.include_router(wells_compute_router)
 app.include_router(wells_analytics_router)
 app.include_router(wells_source_rock_router)
 app.include_router(wells_seismic_tie_router)
+app.include_router(petro_uncertainty_router)
 app.include_router(prospects_router)
 app.include_router(structure_router)
 app.include_router(fence_router)

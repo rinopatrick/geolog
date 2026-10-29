@@ -18,6 +18,8 @@ While the major version is `0`, the API is not yet stable.
   compartments with per-compartment GRV/area.
 - **Map and fence workspace.** Project map for wells/ties/faults/prospects,
   arbitrary seismic lines and multi-segment fence diagrams.
+- **Petrophysics uncertainty bands.** Per-depth Monte Carlo Sw/PHIE/Vsh
+  P90/P50/P10 curves with a Sensitivity-view chart.
 
 ## [0.15.0] - 2026-10-31
 
