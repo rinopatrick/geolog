@@ -1,7 +1,8 @@
 # Production Hardening
 
-GeoLog is pre-production. This page lists the minimum work needed before putting
-it behind a real user population.
+GeoLog is a release candidate for a single-team, single-host deployment. This
+page lists the controls to review before putting it behind a real user
+population, and the remaining gaps for a multi-tenant/SLA deployment.
 
 ## 1. Identity provider and token lifecycle
 
@@ -27,9 +28,16 @@ AUTH_JWT_LEEWAY_SECONDS=30
 - HS256 is supported with `AUTH_JWT_SECRET`/`AUTH_JWT_SECRET_FILE`, but a shared
   secret is not an identity provider. Use it only for internal service tokens.
 - Local token issuance (`POST /api/users/token`) returns `expires_in` and is
-  intended for development or small internal deployments. It is not a refresh
-  flow and has no revocation list. Use short TTLs and the IdP for production.
+  intended for development or small internal deployments. It now has refresh
+  rotation and jti revocation; still prefer the IdP for production.
 - Rotate secrets/keys through the secret manager, not a commit.
+- Locally managed user secrets are stored as PBKDF2-HMAC-SHA256 hashes. A
+  plaintext row is upgraded and cleared on its first successful login. Tune the
+  cost with `GEOLOG_PBKDF2_ITERATIONS` (default 240000).
+- Login throttling defaults to 30 attempts per IP per 300s, then 5 failures per
+  account lock the account for 900s. Tune with `GEOLOG_AUTH_*`; if a trusted
+  reverse proxy is in front, set `GEOLOG_TRUST_PROXY=true` so limits use the
+  forwarded client address. Do not enable that on a directly reachable port.
 
 ## 2. Secrets
 
@@ -62,13 +70,16 @@ Non-dev startup also requires `GEOLOG_SECRETS_SOURCE` (a label such as `vault`,
 `aws-secrets-manager`, or `docker-secrets`) unless
 `GEOLOG_ENFORCE_SECRETS_SOURCE=false`.
 
-## 3. TLS
+## 3. TLS and request limits
 
 Terminate TLS at a reverse proxy (Caddy, nginx, an ingress controller) and make
-sure the proxy forwards the original scheme:
+sure the proxy forwards the original scheme. The application enforces
+`GEOLOG_MAX_UPLOAD_BYTES` (default 256 MiB) and `GEOLOG_MAX_BODY_BYTES`
+(default 64 MiB), but the proxy should reject oversized bodies too:
 
 ```nginx
 location / {
+    client_max_body_size 256m;
     proxy_pass http://127.0.0.1:8000;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
@@ -86,11 +97,17 @@ python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 \
 
 Set `GEOLOG_REQUIRE_HTTPS=true` to redirect plain HTTP with 308 and add HSTS on
 HTTPS responses. `/api/health` is exempt so an internal container health check can
-use plain HTTP. The application always sends `X-Content-Type-Options`,
-`X-Frame-Options`, `Referrer-Policy` and `Permissions-Policy`.
+use plain HTTP. The application sends `X-Content-Type-Options`, `X-Frame-Options`,
+`Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Resource-Policy`,
+`X-API-Version` and a Content-Security-Policy. The CSP still allows inline
+handlers because the bundled frontend uses them; remove `'unsafe-inline'` after
+that refactor.
 
 ## 4. Persistence and workers
 
+- Run migrations as a deploy step, once:
+  `GEOLOG_ENV=prod python -m alembic upgrade head`. Production startup verifies
+  the schema and fails fast instead of running DDL from every worker.
 - SQLite is a single-host database. Do not put it on NFS or share it between
   hosts. Use one host (multiple uvicorn workers are fine).
 - Set `GEOLOG_DB_PATH` and `GEOLOG_ARTIFACT_DIR` to mounted persistent volumes.
@@ -102,14 +119,17 @@ use plain HTTP. The application always sends `X-Content-Type-Options`,
 ## 5. Backup and restore drill
 
 ```bash
-bash scripts/backup_restore_drill.sh "$GEOLOG_DB_PATH"
+bash scripts/backup_restore_drill.sh "$GEOLOG_DB_PATH" "$GEOLOG_ARTIFACT_DIR"
 python scripts/security_evidence_attest.py \
   --base-url https://geolog.example.com \
   --artifact-dir artifacts/backup-drill
 ```
 
-Schedule the drill (for example nightly), keep the signed evidence for the
-retention period, and test a restore into a scratch instance. The API gate is:
+The drill uses SQLite's backup API, copies the artifact tree, writes a SHA-256
+manifest, restores both into a scratch directory, checks `PRAGMA integrity_check`
+and every manifest hash, then signs the report. Schedule it nightly, keep the
+signed evidence for the retention period, and test a restore into a scratch
+instance. The API gate is:
 
 ```bash
 GET /api/ops/security-evidence/gate/enforce?max_age_seconds=86400&min_retention_days=30
@@ -140,14 +160,43 @@ Create alerts for 5xx rate, average/p95 latency, audit-chain verification
 failures, and stale security evidence. The runbook endpoint returns the
 machine-readable alert descriptions.
 
-## 7. Release checklist
+## 7. Project membership
+
+Project ACL is enabled by default. A project with no members remains open for
+legacy data; adding the first member restricts it. See
+[`PROJECT_ACL.md`](PROJECT_ACL.md) for the contract and endpoints. Review which
+projects are still open before onboarding external users:
+
+```bash
+# Every project with no membership row is open.
+python - <<'PY'
+from backend.database import SessionLocal
+from backend.models import Project, ProjectMember
+
+db = SessionLocal()
+try:
+    for project in db.query(Project).all():
+        if not db.query(ProjectMember).filter_by(project_id=project.id).count():
+            print(project.id, project.name)
+finally:
+    db.close()
+PY
+```
+
+## 8. Release checklist
 
 - [ ] `AUTH_MODE=jwt`, issuer/audience/JWKS configured, header mode off.
 - [ ] `AUTH_JWT_TTL_SECONDS` and leeway set for the IdP.
+- [ ] `GEOLOG_TRUST_PROXY=true` only when the proxy is the only reachable path.
+- [ ] Login rate limits and upload/body caps reviewed for the expected file sizes.
 - [ ] Secrets mounted as files; no secrets in the image or Compose file.
 - [ ] TLS terminates at the proxy; `GEOLOG_REQUIRE_HTTPS=true`.
+- [ ] Interactive API docs are disabled (`GEOLOG_ENABLE_DOCS` unset in prod) or
+      protected by the proxy.
 - [ ] `GEOLOG_DB_PATH` and `GEOLOG_ARTIFACT_DIR` on persistent volumes.
-- [ ] Backup/restore drill passes and evidence is signed.
+- [ ] `alembic upgrade head` runs once as a deploy step, before workers start.
+- [ ] Every project that must be restricted has at least one member row.
+- [ ] Backup/restore drill passes with the artifact directory and evidence is signed.
 - [ ] Prometheus scrape, SLO alerts and on-call runbook are live.
-- [ ] `pytest`, `alembic check`, browser smoke and the SLO gate pass in CI.
+- [ ] `coverage_gate.sh`, `alembic check`, browser smoke and the SLO gate pass in CI.
 - [ ] A restore has been performed on a scratch instance.
