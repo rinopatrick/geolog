@@ -206,6 +206,7 @@ EXPECTED_ROUTES = [
     "POST /api/wells/{wid}/core/plugs/{plug_id}/thin-sections",
     "POST /api/wells/{wid}/core/plugs/{plug_id}/thin-sections/upload",
     "POST /api/wells/{wid}/core/rock-types",
+    "POST /api/wells/{wid}/core/rock-types/classify",
     "POST /api/wells/{wid}/core/saturation-height/apply",
     "POST /api/wells/{wid}/core/saturation-height/fit",
     "POST /api/wells/{wid}/core/saturation-height/models/{model_id}/approve",

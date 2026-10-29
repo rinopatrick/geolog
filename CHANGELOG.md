@@ -12,6 +12,8 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
+- **Core rock typing.** Winland R35, RQI/FZI, Macro/Meso/Micro/Nanoport classes,
+  plug assignment and a Core/SCAL workbench action.
 - **Source-rock screening.** Passey ΔlogR (sonic/density) and Schmoker TOC,
   kerogen volume, stored `TOC`/`VKER` curves, API and petrophysics UI.
 - **Production economics.** Seeded Monte Carlo around exponential/hyperbolic

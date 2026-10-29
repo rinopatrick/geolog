@@ -32,6 +32,7 @@ try:
         ThinSection,
         Well,
     )
+    from rock_typing import class_color, classify_plug
     from semantics import apply_run_semantics
     from uploads import read_upload
     from well_state import ARTIFACT_DIR
@@ -54,6 +55,7 @@ except ImportError:
         ThinSection,
         Well,
     )
+    from backend.rock_typing import class_color, classify_plug
     from backend.semantics import apply_run_semantics
     from backend.uploads import read_upload
     from backend.well_state import ARTIFACT_DIR
@@ -674,6 +676,70 @@ def cluster_flow_units(wid: int, data: dict, db: Session = Depends(get_db)):
                         "fzi_min": row.fzi_min, "fzi_max": row.fzi_max})
     db.commit()
     return {"version": version, "k": len(groups), "clusters": created}
+
+@router.post("/core/rock-types/classify")
+def classify_rock_types(wid: int, data: dict = None, db: Session = Depends(get_db)):
+    """Classify plugs with Winland R35, RQI and FZI; optionally assign rock types."""
+    _well(db, wid)
+    plugs = db.query(CorePlug).filter(CorePlug.well_id == wid).all()
+    groups: dict[str, list[tuple[CorePlug, dict]]] = {}
+    results = []
+    for plug in plugs:
+        metrics = classify_plug(plug.porosity, plug.perm_air)
+        if metrics is None:
+            continue
+        class_name = str(metrics["winland_class"])
+        groups.setdefault(class_name, []).append((plug, metrics))
+        results.append(
+            {
+                "plug_id": plug.id,
+                "plug_name": plug.plug_name,
+                "depth_md": plug.depth_md,
+                **metrics,
+                "rock_type": f"Winland {class_name.capitalize()}",
+            }
+        )
+    if not results:
+        raise HTTPException(400, "no plugs with positive porosity and air permeability")
+    assign = bool((data or {}).get("assign", True))
+    classes = []
+    for class_name, members in sorted(groups.items()):
+        display = f"Winland {class_name.capitalize()}"
+        color = class_color(class_name)
+        rock = (
+            db.query(RockType)
+            .filter(RockType.well_id == wid, RockType.name == display)
+            .first()
+        )
+        if rock is None:
+            rock = RockType(well_id=wid, name=display, color=color, description="Winland R35 classification")
+            db.add(rock)
+            db.flush()
+        if assign:
+            for plug, _ in members:
+                plug.rock_type_id = rock.id
+        r35_values = [m["r35"] for _, m in members]
+        fzi_values = [m["fzi"] for _, m in members]
+        classes.append(
+            {
+                "name": display,
+                "class": class_name,
+                "color": color,
+                "count": len(members),
+                "r35_min": float(min(r35_values)),
+                "r35_max": float(max(r35_values)),
+                "fzi_mean": float(sum(fzi_values) / len(fzi_values)),
+                "rock_type_id": rock.id,
+            }
+        )
+    db.commit()
+    return {
+        "well_id": wid,
+        "assigned": assign,
+        "classes": classes,
+        "plugs": sorted(results, key=lambda row: row["depth_md"]),
+    }
+
 
 def _model_params(row: SaturationHeightModel) -> dict:
     return json.loads(row.parameters_json or "{}")
