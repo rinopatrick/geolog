@@ -853,6 +853,24 @@
                     <div style="font-size:12px;color:#8b949e;margin-bottom:6px">BHP (cyan) and WHP (magenta)</div>
                     <canvas id="productionPressureCanvas" width="1000" height="260"></canvas>
                 </div>
+                <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:10px">
+                    <div class="toolbar-group" style="margin-bottom:8px"><label>Production Economics</label><span class="toolbar-hint">Probabilistic decline, NPV and payout</span></div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;font-size:12px">
+                        <label>Oil price ($/bbl)<input id="econOilPrice" type="number" value="70" step="1"></label>
+                        <label>Opex ($/bbl)<input id="econOpex" type="number" value="12" step="1"></label>
+                        <label>Capex ($)<input id="econCapex" type="number" value="2000000" step="1000"></label>
+                        <label>Discount (%)<input id="econDiscount" type="number" value="10" step="0.5"></label>
+                        <label>Royalty (%)<input id="econRoyalty" type="number" value="12.5" step="0.5"></label>
+                        <label>Working interest (%)<input id="econWI" type="number" value="100" step="1"></label>
+                        <label>Tax (%)<input id="econTax" type="number" value="25" step="1"></label>
+                        <label>Economic limit (bbl/d)<input id="econLimit" type="number" value="10" step="1"></label>
+                        <label>Years<input id="econYears" type="number" value="20" step="1"></label>
+                        <label>Iterations<input id="econIterations" type="number" value="500" step="50"></label>
+                    </div>
+                    <div style="margin-top:8px"><button class="btn-primary" data-action="app.runProductionEconomics"><i data-lucide="calculator"></i> Run Economics</button></div>
+                    <div id="productionEconomicsResults" style="margin-top:10px;font-size:12px;color:#c9d1d9"></div>
+                    <canvas id="productionEconomicsCanvas" width="1000" height="260" style="margin-top:8px"></canvas>
+                </div>
                 <div id="productionTable" class="stats-container"></div>
             </div>
         </div>

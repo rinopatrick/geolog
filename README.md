@@ -45,6 +45,7 @@ GeoLog currently includes **35+ analysis views/panels** and **100+ API capabilit
 - **Multi-mineral solver workflows** via calculator/derived-curve tooling
 - **NMR T2** vendor-bin interpretation and raw CPMG NNLS inversion (`docs/NMR.md`)
 - **Core/SCAL** plugs, RCA/SCAL, capillary pressure, FZI flow units, five saturation-height models, XLSX import and staged depth matching (`docs/CORE_SCAL.md`)
+- **Production economics** with probabilistic decline (P90/P50/P10), NPV, payout and a simple fiscal model (`docs/PRODUCTION_ECONOMICS.md`)
 - **Geomechanics** screening stress/pore-pressure/mud-window model, provenance labels and breakout calibration (`docs/GEOMECHANICS.md`)
 - **Borehole images** conditioned image assets and manual dip picking (`docs/IMAGE_LOGS.md`)
 - **WITSML/OSDU** 1.4.1.1 and Wellbore DDMS well/log adapters (`docs/INTEROP.md`)
