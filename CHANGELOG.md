@@ -8,6 +8,8 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-31
+
 ### Added
 
 - **3D surface grids.** Build time surfaces from inline/crossline horizon picks
