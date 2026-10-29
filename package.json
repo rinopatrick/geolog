@@ -1,6 +1,6 @@
 {
   "name": "geolog-app",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "private": true,
   "scripts": {
     "e2e:smoke": "node scripts/e2e_panel_smoke.js",
