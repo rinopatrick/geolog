@@ -127,9 +127,11 @@ def update_job(job_id: str, **fields) -> None:
         except ImportError:
             from backend.state_backend import update_job as db_update_job, update_job_result as db_update_result
         result = fields.pop("result", "__missing__")
-        db_update_job(job_id, **fields)
+        # Write the payload before flipping status to done/failed so a poller
+        # cannot observe a terminal job with a null result.
         if result != "__missing__":
             db_update_result(job_id, result)
+        db_update_job(job_id, **fields)
         return
 
     def _update(jobs):

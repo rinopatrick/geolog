@@ -8,6 +8,11 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+### Fixed
+
+- Database job updates write the result before flipping the status to terminal,
+  so a poller cannot see `done` with a null result.
+
 ## [0.10.0] - 2026-10-29
 
 ### Added
