@@ -45,6 +45,9 @@ While the major version is `0`, the API is not yet stable.
 - **Coverage gate** in CI (`scripts/coverage_gate.sh`).
 - **Optional OpenTelemetry tracing** via OTLP/HTTP, with an excluded-url list
   and a no-op fallback when the SDK is absent.
+- **Strict script CSP and modular frontend**: inline handlers replaced with
+  delegated `data-action` attributes; UI, API client, actions, sidebar, reports,
+  data, petrophysics and correlation split into separate scripts.
 - **CodeQL** analysis for Python and JavaScript/TypeScript on push, PR and a
   weekly schedule.
 - **Community health files**: security policy, contribution guide, code of

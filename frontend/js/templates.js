@@ -49,11 +49,10 @@ class TemplateWorkflowPanel {
             const p = t.params;
             const c = t.recommended_cutoffs;
             return `
-            <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px;cursor:pointer;transition:border-color .15s"
-                 onmouseenter="this.style.borderColor='#58a6ff'" onmouseleave="this.style.borderColor='#30363d'"
-                 onclick="window._tmplPanel?._previewTemplate('${t.name}')">
+            <div class="template-card" style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px;cursor:pointer;transition:border-color .15s"
+                 data-template-preview="${escapeHtml(t.name)}">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                    <span style="font-size:15px;font-weight:600;color:#e6edf9">${t.name}</span>
+                    <span style="font-size:15px;font-weight:600;color:#e6edf9">${escapeHtml(t.name)}</span>
                     <span style="font-size:10px;padding:2px 6px;border-radius:3px;background:${color}22;color:${color}">${t.reservoir_type}</span>
                 </div>
                 <div style="font-size:11px;color:#8b949e;margin-bottom:10px">${t.description}</div>
@@ -68,9 +67,9 @@ class TemplateWorkflowPanel {
                     VSH&lt;${c.vsh_cutoff} | PHIE&gt;${c.phie_cutoff} | SW&lt;${c.sw_cutoff}
                 </div>
                 <div style="margin-top:8px;display:flex;gap:6px">
-                    <button onclick="event.stopPropagation();window._tmplPanel?._applyTemplate('${t.name}')"
+                    <button data-template-apply="${escapeHtml(t.name)}"
                         style="padding:4px 10px;border-radius:4px;border:none;background:#238636;color:white;font-size:11px;cursor:pointer">Apply</button>
-                    <button onclick="event.stopPropagation();window._tmplPanel?._previewTemplate('${t.name}')"
+                    <button data-template-preview="${escapeHtml(t.name)}"
                         style="padding:4px 10px;border-radius:4px;border:1px solid #30363d;background:transparent;color:#8b949e;font-size:11px;cursor:pointer">Preview</button>
                 </div>
             </div>`;
@@ -119,9 +118,9 @@ class TemplateWorkflowPanel {
         }
         html += `</tbody></table>
             <div style="margin-top:10px;display:flex;gap:8px">
-                <button onclick="window._tmplPanel?._applyTemplate('${result.template}')"
+                <button data-template-apply="${escapeHtml(result.template)}"
                     style="padding:6px 16px;border-radius:4px;border:none;background:#238636;color:white;font-size:12px;cursor:pointer">✓ Apply Changes</button>
-                <button onclick="document.getElementById('tmplPreview').innerHTML=''"
+                <button data-clear="tmplPreview"
                     style="padding:6px 12px;border-radius:4px;border:1px solid #30363d;background:transparent;color:#8b949e;font-size:12px;cursor:pointer">Cancel</button>
             </div>
         </div>`;
