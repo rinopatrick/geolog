@@ -14,9 +14,9 @@ trace header and stores byte offsets, sample counts, inlines and crosslines
 without decoding the amplitudes. Sections read only the traces they need, so a
 3D volume does not need to fit in memory.
 
-The sequential section endpoint reads at most 2,500 traces, decimates to at most
-1,500 × 1,500 samples, and the UI requests 600 × 600. Use inline/crossline
-sections for the full volume. The upload body is capped by
+The sequential section endpoint decimates the whole indexed line to at most
+1,500 × 1,500 samples; the UI requests 600 × 600. It reports `line_trace_count`
+and `sampled` so a large line can show its original size. The upload body is capped by
 `GEOLOG_MAX_UPLOAD_BYTES` (default 512 MiB).
 
 ## 3D volume sections

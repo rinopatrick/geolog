@@ -238,3 +238,46 @@ def test_seismic_volume_sections_and_fault_links():
     deleted = client.delete(f"/api/seismic/{line_id}/fault-links/{links[0]['id']}", headers=ADMIN)
     assert deleted.status_code == 204
     assert client.get(f"/api/seismic/{line_id}/fault-links", headers=ADMIN).json() == []
+
+def _segy_many_traces(count: int = 3000) -> bytes:
+    textual = b" " * 3200
+    binary = bytearray(400)
+    ns = 8
+    binary[16:18] = (2000).to_bytes(2, "big")
+    binary[20:22] = (ns).to_bytes(2, "big")
+    binary[24:26] = (5).to_bytes(2, "big")
+    rng = np.random.default_rng(9)
+    traces = []
+    for index in range(count):
+        header = bytearray(240)
+        header[114:116] = (ns).to_bytes(2, "big")
+        header[188:192] = (100).to_bytes(4, "big")
+        header[192:196] = (200 + index).to_bytes(4, "big")
+        data = rng.normal(0, 0.01, ns).astype(">f4")
+        traces.append(bytes(header) + data.tobytes())
+    return textual + bytes(binary) + b"".join(traces)
+
+
+def test_sequential_section_decimates_the_whole_line():
+    pid = _project_id()
+    upload = client.post(
+        f"/api/projects/{pid}/seismic",
+        files={"file": ("long.sgy", _segy_many_traces(), "application/octet-stream")},
+        data={"name": "Long Line"},
+        headers=ADMIN,
+    )
+    assert upload.status_code == 201, upload.text
+    line_id = upload.json()["id"]
+    assert upload.json()["trace_count"] == 3000
+
+    section = client.get(
+        f"/api/seismic/{line_id}/section?max_traces=400&max_samples=8",
+        headers=ADMIN,
+    )
+    assert section.status_code == 200, section.text
+    body = section.json()["section"]
+    assert body["line_trace_count"] == 3000
+    assert body["trace_count"] == 400
+    assert body["sampled"] is True
+    assert body["labels"][0] == 0
+    assert body["labels"][-1] == 2999

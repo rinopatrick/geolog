@@ -19,9 +19,9 @@ try:
         auto_track,
         detect_faults,
         index_segy,
+        line_section,
         link_faults_3d,
         parse_segy,
-        section_payload,
         volume_index,
         volume_section,
     )
@@ -35,9 +35,9 @@ except ImportError:
         auto_track,
         detect_faults,
         index_segy,
+        line_section,
         link_faults_3d,
         parse_segy,
-        section_payload,
         volume_index,
         volume_section,
     )
@@ -94,8 +94,8 @@ def _fault(row: SeismicFault) -> dict:
 
 def _section_from_line(row: SeismicLine) -> dict:
     with open(row.file_path, "rb") as handle:
-        parsed = parse_segy(handle.read())
-    return section_payload(parsed, max_traces=600, max_samples=600)
+        content = handle.read()
+    return line_section(content, _seismic_index(row), max_traces=1200, max_samples=800)
 
 def _seismic_index(row: SeismicLine) -> dict:
     if row.trace_headers_path and os.path.exists(row.trace_headers_path):
@@ -215,14 +215,15 @@ def get_seismic_section(
     require_project_access(db, request, row.project_id)
     try:
         with open(row.file_path, "rb") as handle:
-            parsed = parse_segy(handle.read())
-    except (OSError, ValueError) as exc:
+            content = handle.read()
+        section = line_section(
+            content,
+            _seismic_index(row),
+            max_traces=max(50, min(int(max_traces), 1500)),
+            max_samples=max(50, min(int(max_samples), 1500)),
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(500, f"could not read SEG-Y: {exc}")
-    section = section_payload(
-        parsed,
-        max_traces=max(50, min(int(max_traces), 1500)),
-        max_samples=max(50, min(int(max_samples), 1500)),
-    )
     return {"line": _meta(row), "section": section}
 
 @router.get("/seismic/{line_id}/volume")
