@@ -703,6 +703,7 @@ class SharedMetricWorker(Base):
     updated_at = Column(Float, nullable=False, default=0.0)
 
 
+
 class SeismicLine(Base):
     """Uploaded SEG-Y line stored under the artifact directory."""
 
@@ -717,6 +718,7 @@ class SeismicLine(Base):
     sample_interval_ms = Column(Float, default=0.0)
     samples_per_trace = Column(Integer, default=0)
     trace_count = Column(Integer, default=0)
+    trace_headers_path = Column(String(500), default="")
     inline_min = Column(Integer, nullable=True)
     inline_max = Column(Integer, nullable=True)
     crossline_min = Column(Integer, nullable=True)
@@ -727,6 +729,8 @@ class SeismicLine(Base):
 
     horizons = relationship("SeismicHorizon", back_populates="line", cascade="all, delete-orphan")
     faults = relationship("SeismicFault", back_populates="line", cascade="all, delete-orphan")
+    fault_links = relationship("SeismicFaultLink", back_populates="line", cascade="all, delete-orphan")
+
 
 
 class SeismicHorizon(Base):
@@ -740,6 +744,7 @@ class SeismicHorizon(Base):
     created_at = Column(DateTime, default=utcnow)
 
     line = relationship("SeismicLine", back_populates="horizons")
+
 
 
 class SeismicFault(Base):
@@ -756,6 +761,28 @@ class SeismicFault(Base):
     created_at = Column(DateTime, default=utcnow)
 
     line = relationship("SeismicLine", back_populates="faults")
+
+
+
+class SeismicFaultLink(Base):
+    """A fault candidate linked across adjacent 3D inline sections."""
+
+    __tablename__ = "seismic_fault_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    line_id = Column(Integer, ForeignKey("seismic_lines.id"), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    color = Column(String(20), default="#f85149")
+    points_json = Column(Text, default="[]")
+    score = Column(Float, nullable=True)
+    inline_start = Column(Integer, nullable=True)
+    inline_end = Column(Integer, nullable=True)
+    crossline_center = Column(Float, nullable=True)
+    sample_center = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    line = relationship("SeismicLine", back_populates="fault_links")
+
 
 
 class SourceRockAnalysis(Base):

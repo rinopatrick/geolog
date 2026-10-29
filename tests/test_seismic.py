@@ -161,3 +161,80 @@ def test_auto_track_and_fault_endpoints():
     assert fault_id in {item["id"] for item in listed.json()}
     deleted = client.delete(f"/api/seismic/{line_id}/faults/{fault_id}", headers=ADMIN)
     assert deleted.status_code == 204
+
+def _segy_volume() -> bytes:
+    textual = b" " * 3200
+    binary = bytearray(400)
+    n_inlines, n_crosslines, ns = 6, 48, 40
+    binary[16:18] = (2000).to_bytes(2, "big")
+    binary[20:22] = (ns).to_bytes(2, "big")
+    binary[24:26] = (5).to_bytes(2, "big")
+    rng = np.random.default_rng(4)
+    wave = np.array([0.1, 0.5, 1.0, 0.5, 0.1])
+    traces = []
+    for inline in range(n_inlines):
+        for crossline in range(n_crosslines):
+            header = bytearray(240)
+            header[114:116] = (ns).to_bytes(2, "big")
+            header[188:192] = (100 + inline).to_bytes(4, "big")
+            header[192:196] = (200 + crossline).to_bytes(4, "big")
+            data = rng.normal(0, 0.005, ns)
+            center = 10 if crossline < 24 else 14
+            data[center - 2:center + 3] += wave
+            traces.append(bytes(header) + np.asarray(data, dtype=">f4").tobytes())
+    return textual + bytes(binary) + b"".join(traces)
+
+
+def test_seismic_volume_sections_and_fault_links():
+    pid = _project_id()
+    upload = client.post(
+        f"/api/projects/{pid}/seismic",
+        files={"file": ("volume.sgy", _segy_volume(), "application/octet-stream")},
+        data={"name": "3D Volume"},
+        headers=ADMIN,
+    )
+    assert upload.status_code == 201, upload.text
+    line_id = upload.json()["id"]
+    assert upload.json()["trace_count"] == 288
+
+    volume = client.get(f"/api/seismic/{line_id}/volume", headers=ADMIN)
+    assert volume.status_code == 200, volume.text
+    body = volume.json()
+    assert body["is_3d"] is True
+    assert body["inlines"] == [100, 101, 102, 103, 104, 105]
+    assert body["crosslines"][0] == 200 and len(body["crosslines"]) == 48
+
+    inline = client.get(f"/api/seismic/{line_id}/inline/100/section", headers=ADMIN)
+    assert inline.status_code == 200, inline.text
+    section = inline.json()["section"]
+    assert section["trace_count"] == 48
+    assert section["labels"][0] == 200
+    assert section["mode"] == "inline"
+
+    crossline = client.get(f"/api/seismic/{line_id}/crossline/247/section", headers=ADMIN)
+    assert crossline.status_code == 200, crossline.text
+    assert crossline.json()["section"]["trace_count"] == 6
+    assert crossline.json()["section"]["labels"] == [100, 101, 102, 103, 104, 105]
+
+    missing = client.get(f"/api/seismic/{line_id}/inline/999/section", headers=ADMIN)
+    assert missing.status_code == 400
+
+    linked = client.post(
+        f"/api/seismic/{line_id}/faults/link-3d",
+        json={"threshold": 0.5, "min_points": 4, "max_sections": 6, "sample_tolerance": 8},
+        headers=ADMIN,
+    )
+    assert linked.status_code == 201, linked.text
+    links = linked.json()["links"]
+    assert links, linked.text
+    assert linked.json()["scanned_inlines"] == 6
+    assert links[0]["inline_start"] == 100 and links[0]["inline_end"] == 105
+    assert len(links[0]["points"]) >= 6
+
+    listed = client.get(f"/api/seismic/{line_id}/fault-links", headers=ADMIN)
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()] == [item["id"] for item in links]
+
+    deleted = client.delete(f"/api/seismic/{line_id}/fault-links/{links[0]['id']}", headers=ADMIN)
+    assert deleted.status_code == 204
+    assert client.get(f"/api/seismic/{line_id}/fault-links", headers=ADMIN).json() == []

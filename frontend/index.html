@@ -1400,6 +1400,12 @@
                         <button class="btn-primary" data-action="app.uploadSeismic"><i data-lucide="upload"></i> Upload SEG-Y</button>
                         <input id="segyFileInput" type="file" accept=".sgy,.segy,application/octet-stream" hidden data-action="app.onSeismicFileSelected" data-on="change" data-pass-event="true">
                         <select id="segyLineSelect" data-action="app.loadSeismicLine" data-on="change" data-args-value="true" style="min-width:220px"></select>
+                        <select id="segyInlineSelect" title="Inline" style="min-width:120px"></select>
+                        <button class="btn-sm" data-action="app.loadSeismicInline"><i data-lucide="layers"></i> Inline</button>
+                        <select id="segyCrosslineSelect" title="Crossline" style="min-width:120px"></select>
+                        <button class="btn-sm" data-action="app.loadSeismicCrossline"><i data-lucide="layers"></i> Crossline</button>
+                        <button class="btn-sm" data-action="app.linkSeismicFaults3D"><i data-lucide="git-merge"></i> Link 3D faults</button>
+                        <span id="segyVolumeInfo" class="toolbar-hint"></span>
                         <input id="segyHorizonName" placeholder="Horizon name" value="Horizon A" style="min-width:140px">
                         <input id="segyHorizonColor" type="color" value="#f0883e" title="Horizon color">
                         <button class="btn-sm" data-action="app.saveSeismicHorizon"><i data-lucide="save"></i> Save Horizon</button>

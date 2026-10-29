@@ -83,16 +83,27 @@ def parse_segy(content: bytes, max_traces: int = 2500) -> dict[str, Any]:
         "crossline_max": int(max(crosslines)) if crosslines else None,
         "amplitude_min": float(np.min(finite)) if len(finite) else None,
         "amplitude_max": float(np.max(finite)) if len(finite) else None,
+        "trace_inlines": [int(value) for value in inlines],
+        "trace_crosslines": [int(value) for value in crosslines],
     }
 
 
-def section_payload(parsed: dict[str, Any], max_traces: int = 500, max_samples: int = 500) -> dict[str, Any]:
-    matrix = parsed["matrix"]
+def _section_view(
+    matrix: np.ndarray,
+    labels: list[int] | None = None,
+    max_traces: int = 500,
+    max_samples: int = 500,
+    sample_interval_ms: float = 0.0,
+) -> dict[str, Any]:
     nt, ns = matrix.shape
     trace_step = max(1, math.ceil(nt / max(1, max_traces)))
     sample_step = max(1, math.ceil(ns / max(1, max_samples)))
     view = matrix[::trace_step, ::sample_step]
     finite = view[np.isfinite(view)]
+    if labels is None:
+        out_labels = list(range(0, nt, trace_step))
+    else:
+        out_labels = [int(labels[index]) for index in range(0, len(labels), trace_step)]
     return {
         "trace_count": int(view.shape[0]),
         "sample_count": int(view.shape[1]),
@@ -100,12 +111,247 @@ def section_payload(parsed: dict[str, Any], max_traces: int = 500, max_samples: 
         "sample_step": int(sample_step),
         "original_trace_count": int(nt),
         "original_sample_count": int(ns),
-        "sample_interval_ms": parsed["sample_interval_ms"],
+        "sample_interval_ms": sample_interval_ms,
         "amplitude_min": float(np.min(finite)) if len(finite) else 0.0,
         "amplitude_max": float(np.max(finite)) if len(finite) else 0.0,
+        "labels": out_labels,
         "data": np.round(view, 6).tolist(),
     }
 
+def section_payload(parsed: dict[str, Any], max_traces: int = 500, max_samples: int = 500) -> dict[str, Any]:
+    return _section_view(
+        parsed["matrix"],
+        max_traces=max_traces,
+        max_samples=max_samples,
+        sample_interval_ms=parsed["sample_interval_ms"],
+    )
+
+def index_segy(content: bytes, max_traces: int = 500000) -> dict[str, Any]:
+    """Scan trace headers and offsets without decoding trace samples."""
+    if len(content) < TEXT_HEADER + BINARY_HEADER + TRACE_HEADER:
+        raise ValueError("file is too small to be SEG-Y")
+    binary = content[TEXT_HEADER:TEXT_HEADER + BINARY_HEADER]
+    dt_us = int.from_bytes(binary[16:18], "big")
+    binary_ns = int.from_bytes(binary[20:22], "big")
+    format_code = int.from_bytes(binary[24:26], "big")
+    if format_code not in SUPPORTED_FORMATS:
+        raise ValueError(f"unsupported SEG-Y sample format {format_code}; expected 1 or 5")
+
+    offset = TEXT_HEADER + BINARY_HEADER
+    offsets: list[int] = []
+    sample_counts: list[int] = []
+    inlines: list[int] = []
+    crosslines: list[int] = []
+    while offset + TRACE_HEADER <= len(content) and len(offsets) < max_traces:
+        header = content[offset:offset + TRACE_HEADER]
+        trace_ns = int.from_bytes(header[114:116], "big") or binary_ns
+        if trace_ns <= 0:
+            break
+        nbytes = trace_ns * SUPPORTED_FORMATS[format_code]
+        if offset + TRACE_HEADER + nbytes > len(content):
+            break
+        offsets.append(offset + TRACE_HEADER)
+        sample_counts.append(int(trace_ns))
+        inlines.append(int.from_bytes(header[188:192], "big"))
+        crosslines.append(int.from_bytes(header[192:196], "big"))
+        offset += TRACE_HEADER + nbytes
+    if not offsets:
+        raise ValueError("no traces could be read")
+    ns = max(sample_counts) if sample_counts else binary_ns
+    return {
+        "format_code": format_code,
+        "sample_interval_ms": float(dt_us) / 1000.0,
+        "samples_per_trace": int(ns),
+        "trace_count": len(offsets),
+        "trace_offsets": offsets,
+        "trace_sample_counts": sample_counts,
+        "trace_inlines": inlines,
+        "trace_crosslines": crosslines,
+        "inline_min": int(min(inlines)),
+        "inline_max": int(max(inlines)),
+        "crossline_min": int(min(crosslines)),
+        "crossline_max": int(max(crosslines)),
+    }
+
+def read_indexed_traces(content: bytes, index: dict[str, Any], positions: list[int]) -> np.ndarray:
+    """Decode only the requested trace positions from an indexed SEG-Y file."""
+    if not positions:
+        raise ValueError("no traces selected")
+    fmt = int(index["format_code"])
+    ns = int(index["samples_per_trace"])
+    width = SUPPORTED_FORMATS[fmt]
+    traces = []
+    for position in positions:
+        offset = int(index["trace_offsets"][int(position)])
+        count = int(index["trace_sample_counts"][int(position)])
+        raw = content[offset:offset + count * width]
+        if fmt == 1:
+            values = ibm_to_ieee(raw)
+        else:
+            values = np.frombuffer(raw, dtype=">f4").astype(np.float32)
+        if len(values) < ns:
+            values = np.pad(values, (0, ns - len(values)), constant_values=np.nan)
+        traces.append(values[:ns])
+    return np.vstack(traces)
+
+def volume_index(index: dict[str, Any], limit: int = 5000) -> dict[str, Any]:
+    """Return sorted inline/crossline values present in the scanned headers."""
+    inlines = sorted(set(int(value) for value in index.get("trace_inlines", [])))
+    crosslines = sorted(set(int(value) for value in index.get("trace_crosslines", [])))
+    return {
+        "inlines": inlines[:limit],
+        "crosslines": crosslines[:limit],
+        "inline_count": len(inlines),
+        "crossline_count": len(crosslines),
+        "trace_count": int(index["trace_count"]),
+        "is_3d": len(inlines) > 1 and len(crosslines) > 1,
+        "truncated": len(inlines) > limit or len(crosslines) > limit,
+    }
+
+def volume_section(
+    content: bytes,
+    index: dict[str, Any],
+    mode: str,
+    value: int,
+    max_traces: int = 500,
+    max_samples: int = 500,
+) -> dict[str, Any]:
+    """Build an inline or crossline section by reading only matching traces."""
+    inlines = index.get("trace_inlines", [])
+    crosslines = index.get("trace_crosslines", [])
+    if mode == "inline":
+        positions = [pos for pos, inline in enumerate(inlines) if int(inline) == int(value)]
+        labels = [int(crosslines[pos]) for pos in positions]
+    elif mode == "crossline":
+        positions = [pos for pos, crossline in enumerate(crosslines) if int(crossline) == int(value)]
+        labels = [int(inlines[pos]) for pos in positions]
+    else:
+        raise ValueError("mode must be inline or crossline")
+    if not positions:
+        raise ValueError(f"no traces for {mode} {value}")
+    order = sorted(range(len(positions)), key=lambda pos: labels[pos])
+    positions = [positions[pos] for pos in order]
+    labels = [labels[pos] for pos in order]
+    matrix = read_indexed_traces(content, index, positions)
+    payload = _section_view(
+        matrix,
+        labels=labels,
+        max_traces=max_traces,
+        max_samples=max_samples,
+        sample_interval_ms=index["sample_interval_ms"],
+    )
+    payload["mode"] = mode
+    payload["value"] = int(value)
+    payload["label_name"] = "crossline" if mode == "inline" else "inline"
+    return payload
+
+def link_faults_3d(
+    content: bytes,
+    index: dict[str, Any],
+    threshold: float = 0.35,
+    min_points: int = 8,
+    max_faults: int = 20,
+    max_sections: int = 12,
+    crossline_tolerance: float = 3.0,
+    sample_tolerance: float = 16.0,
+) -> list[dict[str, Any]]:
+    """Detect faults on sampled inline sections and link them across inlines."""
+    inlines = index.get("trace_inlines", [])
+    crosslines = index.get("trace_crosslines", [])
+    unique_inlines = sorted(set(int(value) for value in inlines))
+    if len(unique_inlines) < 2:
+        return []
+    limit = max(1, min(int(max_sections), len(unique_inlines)))
+    if len(unique_inlines) > limit:
+        positions = np.linspace(0, len(unique_inlines) - 1, limit).round().astype(int)
+        sampled = [unique_inlines[int(pos)] for pos in sorted(set(positions.tolist()))]
+    else:
+        sampled = unique_inlines
+    spacing = 1.0
+    if len(sampled) > 1:
+        gaps = [b - a for a, b in zip(sampled, sampled[1:])]
+        spacing = float(np.median(gaps)) if gaps else 1.0
+
+    segments: list[dict[str, Any]] = []
+    for inline in sampled:
+        positions = [pos for pos, value in enumerate(inlines) if int(value) == inline]
+        if len(positions) < 3:
+            continue
+        order = sorted(range(len(positions)), key=lambda pos: int(crosslines[positions[pos]]))
+        positions = [positions[pos] for pos in order]
+        labels = [int(crosslines[pos]) for pos in positions]
+        matrix = read_indexed_traces(content, index, positions)
+        view = _section_view(matrix, labels=labels, max_traces=600, max_samples=600)
+        sampled_matrix = np.asarray(view["data"], dtype=float)
+        faults = detect_faults(
+            sampled_matrix,
+            threshold=threshold,
+            min_points=min_points,
+            max_faults=max_faults,
+        )
+        for fault in faults:
+            points = []
+            for pick in fault["picks"]:
+                pos = max(0, min(len(view["labels"]) - 1, int(pick["trace"])))
+                points.append({
+                    "inline": int(inline),
+                    "crossline": int(view["labels"][pos]),
+                    "sample": int(pick["sample"]) * int(view["sample_step"]),
+                })
+            if not points:
+                continue
+            segments.append({
+                "inline": int(inline),
+                "points": points,
+                "crossline": float(np.mean([point["crossline"] for point in points])),
+                "sample": float(np.mean([point["sample"] for point in points])),
+                "score": float(fault.get("score") or 0.0),
+                "size": int(fault.get("size") or len(points)),
+            })
+
+    links: list[dict[str, Any]] = []
+    for segment in sorted(segments, key=lambda item: item["inline"]):
+        best = None
+        best_distance = None
+        for link in links:
+            last = link["_last"]
+            gap = segment["inline"] - last["inline"]
+            if gap <= 0 or gap > max(1.0, spacing * 1.6):
+                continue
+            dx = abs(segment["crossline"] - last["crossline"])
+            dy = abs(segment["sample"] - last["sample"])
+            if dx > float(crossline_tolerance) or dy > float(sample_tolerance):
+                continue
+            distance = dx + dy / max(1.0, float(sample_tolerance))
+            if best_distance is None or distance < best_distance:
+                best, best_distance = link, distance
+        if best is None:
+            links.append({"_last": segment, "segments": [segment]})
+        else:
+            best["segments"].append(segment)
+            best["_last"] = segment
+
+    results = []
+    for link in links:
+        points = [point for segment in link["segments"] for point in segment["points"]]
+        if len(link["segments"]) < 2 or not points:
+            continue
+        inline_values = [segment["inline"] for segment in link["segments"]]
+        results.append({
+            "name": "3D Fault",
+            "color": "#f85149",
+            "points": points,
+            "score": float(np.mean([segment["score"] for segment in link["segments"]])),
+            "inline_start": int(min(inline_values)),
+            "inline_end": int(max(inline_values)),
+            "crossline_center": float(np.mean([point["crossline"] for point in points])),
+            "sample_center": float(np.mean([point["sample"] for point in points])),
+            "section_count": len(link["segments"]),
+        })
+    results.sort(key=lambda item: (item["inline_start"], item["crossline_center"]))
+    for index, item in enumerate(results):
+        item["name"] = f"3D Fault {index + 1}"
+    return results
 
 def _window(trace: np.ndarray, center: int, radius: int) -> np.ndarray:
     start = center - radius
