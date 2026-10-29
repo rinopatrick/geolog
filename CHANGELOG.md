@@ -14,6 +14,8 @@ While the major version is `0`, the API is not yet stable.
   recoverable gas, condensate and BOE percentiles, plus a gas/condensate UI.
 - **Prospect portfolios.** Correlated volume sampling, EMV, ranking, saved
   portfolios and CSV export.
+- **Structural framework.** Fault surfaces from linked picks and map-based
+  compartments with per-compartment GRV/area.
 
 ## [0.15.0] - 2026-10-31
 

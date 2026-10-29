@@ -215,6 +215,10 @@ def _surface(row: SeismicSurface, include_grid: bool = True) -> dict:
         depth_stats = json.loads(row.depth_stats_json or "{}")
     except json.JSONDecodeError:
         depth_stats = {}
+    try:
+        compartments = json.loads(row.compartments_json or "[]")
+    except json.JSONDecodeError:
+        compartments = []
     payload = {
         "id": row.id,
         "line_id": row.line_id,
@@ -227,6 +231,7 @@ def _surface(row: SeismicSurface, include_grid: bool = True) -> dict:
         "stats": stats,
         "velocity_model_id": row.velocity_model_id,
         "depth_stats": depth_stats,
+        "compartments": compartments,
         "created_at": row.created_at.isoformat() if row.created_at else "",
     }
     if include_grid:
