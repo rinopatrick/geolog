@@ -99,9 +99,9 @@ Set `GEOLOG_REQUIRE_HTTPS=true` to redirect plain HTTP with 308 and add HSTS on
 HTTPS responses. `/api/health` is exempt so an internal container health check can
 use plain HTTP. The application sends `X-Content-Type-Options`, `X-Frame-Options`,
 `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Resource-Policy`,
-`X-API-Version` and a Content-Security-Policy. The CSP still allows inline
-handlers because the bundled frontend uses them; remove `'unsafe-inline'` after
-that refactor.
+`X-API-Version` and a Content-Security-Policy. `script-src` is strict (`'self'`);
+the frontend uses delegated `data-action` handlers instead of inline events.
+`style-src` still allows inline style attributes.
 
 ## 4. Persistence and workers
 

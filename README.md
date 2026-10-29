@@ -533,12 +533,14 @@ Completed hardening:
   backup/restore drill covering the database and artifact directory.
 - Project and per-well membership ACL, enabled by default; see
   [`docs/PROJECT_ACL.md`](docs/PROJECT_ACL.md).
-- Pinned, self-hosted Lucide; CSP and escaping fixes for generated HTML.
+- Pinned, self-hosted Lucide; strict script CSP, delegated actions and escaping
+  fixes for generated HTML.
 - Durable background-job registry with crash recovery.
 
 Remaining before a multi-tenant/SLA deployment:
-1. Split `frontend/js/app.js` (9.7k lines) into modules and remove inline event
-   handlers so the CSP can drop `'unsafe-inline'`.
+1. Reduce the remaining core `frontend/js/app.js` and renderer modules further;
+   the split currently covers UI, API, actions, reports, data, petrophysics and
+   correlation.
 2. Raise coverage on the petrophysics compute modules and add more real-world
    LAS/DLIS fixtures.
 3. For more than one host, use PostgreSQL with

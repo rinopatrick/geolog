@@ -17,6 +17,18 @@ const { chromium } = require('playwright');
     } catch (_) { return false; }
   });
 
+  const actionOk = await page.evaluate(() => {
+    let called = 0;
+    app._e2eAction = () => { called += 1; };
+    const button = document.createElement('button');
+    button.dataset.action = 'app._e2eAction';
+    document.body.appendChild(button);
+    button.click();
+    button.remove();
+    delete app._e2eAction;
+    return called === 1;
+  });
+
   const views = ['viewer','crossplot','pickett','mnplot','petrophysics','qc','correlation','statistics','sensitivity','comparison','tools','production','facies','striplog','probability','moveable','dipplot','buckles','hingle','calculator','datatable','topsmgmt','formation','batch','map','dashboard','matrix','audit','tornado','vclmodels','corecal','corescal','geomechanics','qcautofix','seismic','imagelog','analogs','users','jobmonitor'];
 
   const appAvailable = await page.evaluate(() => typeof app !== 'undefined' && typeof app.switchView === 'function');
@@ -34,7 +46,7 @@ const { chromium } = require('playwright');
     if (ok) switched += 1;
     await page.waitForTimeout(80);
   }
-  const out = { ok: switched === views.length && errors.length === 0 && dedupeOk, views: views.length, switched, dedupe_ok: dedupeOk, js_errors: errors.length, errors };
+  const out = { ok: switched === views.length && errors.length === 0 && dedupeOk && actionOk, views: views.length, switched, dedupe_ok: dedupeOk, action_ok: actionOk, js_errors: errors.length, errors };
   console.log(JSON.stringify(out,null,2));
   await browser.close();
   process.exit(out.ok ? 0 : 1);
