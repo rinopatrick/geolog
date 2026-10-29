@@ -6,10 +6,15 @@ locks and snapshots needs an OS-level lock as well.
 
 Works on Windows (`msvcrt`) and POSIX (`fcntl`). The lock is advisory: every
 writer in this codebase must use it.
+
+The lock file name is a hash of the requested logical path and always lives in
+GEOLOG_ARTIFACT_DIR. Callers never control a filesystem path here, which keeps
+the lock primitive free of path traversal.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from contextlib import contextmanager
@@ -19,15 +24,23 @@ if os.name == "nt":  # pragma: no cover - exercised on Windows
 else:  # pragma: no cover - exercised on Linux CI
     import fcntl
 
+
+def _lock_root() -> str:
+    return os.path.abspath(
+        os.getenv("GEOLOG_ARTIFACT_DIR")
+        or os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
+    )
+
+
 @contextmanager
 def interprocess_lock(path: str, timeout: float = 10.0):
-    """Hold an exclusive lock on `path+'.lock'` for the duration of the block."""
-    lock_path = path if path.endswith(".lock") else path + ".lock"
-    parent = os.path.dirname(os.path.abspath(lock_path))
-    if parent:
-        os.makedirs(parent, exist_ok=True)  # codeql[py/path-injection]
+    """Hold an exclusive lock for the logical `path` for the duration of the block."""
+    digest = hashlib.sha256(str(path).encode("utf-8")).hexdigest()
+    root = _lock_root()
+    os.makedirs(root, exist_ok=True)
+    lock_path = os.path.join(root, f"state-{digest}.lock")
 
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)  # codeql[py/path-injection]
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     deadline = time.monotonic() + timeout
     try:
         while True:
@@ -40,7 +53,7 @@ def interprocess_lock(path: str, timeout: float = 10.0):
                 break
             except OSError:
                 if time.monotonic() >= deadline:
-                    raise TimeoutError(f"could not acquire file lock {lock_path}")
+                    raise TimeoutError(f"could not acquire file lock for {path}")
                 time.sleep(0.02)
         yield
     finally:
