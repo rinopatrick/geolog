@@ -43,6 +43,8 @@ While the major version is `0`, the API is not yet stable.
   `GET /api/version` for prefix/version discovery.
 - **Self-hosted Lucide** pinned at v0.468.0 with SRI; no `unpkg@latest` at runtime.
 - **Coverage gate** in CI (`scripts/coverage_gate.sh`).
+- **Optional OpenTelemetry tracing** via OTLP/HTTP, with an excluded-url list
+  and a no-op fallback when the SDK is absent.
 - **CodeQL** analysis for Python and JavaScript/TypeScript on push, PR and a
   weekly schedule.
 - **Community health files**: security policy, contribution guide, code of

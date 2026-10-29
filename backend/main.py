@@ -126,6 +126,7 @@ try:
     )
     from api_version import APIVersionAliasMiddleware
     from error_reporting import report_exception
+    from tracing import setup_tracing, shutdown_tracing
     from uploads import BodySizeLimitMiddleware
     from acl import ProjectAccessMiddleware, can_access_project, can_access_well, require_project_access, require_well_access, request_role, request_subject, visible_project_ids
 except ImportError:
@@ -153,6 +154,7 @@ except ImportError:
     )
     from backend.api_version import APIVersionAliasMiddleware
     from backend.error_reporting import report_exception
+    from backend.tracing import setup_tracing, shutdown_tracing
     from backend.uploads import BodySizeLimitMiddleware
     from backend.acl import ProjectAccessMiddleware, can_access_project, can_access_well, require_project_access, require_well_access, request_role, request_subject, visible_project_ids
 
@@ -578,6 +580,9 @@ app.add_middleware(BodySizeLimitMiddleware)
 # Rewrite /api/v1 -> /api before routing; response header reports v1.
 app.add_middleware(APIVersionAliasMiddleware)
 
+# Optional OpenTelemetry instrumentation; a no-op unless enabled and installed.
+setup_tracing(app)
+
 
 def _enforce_secrets_source_policy() -> None:
     """Fail fast in non-dev environments when secrets source is not configured."""
@@ -590,6 +595,11 @@ def _enforce_secrets_source_policy() -> None:
         return
     if not secrets_source:
         raise RuntimeError("GEOLOG_SECRETS_SOURCE is required for non-dev environments")
+
+
+@app.on_event("shutdown")
+def _shutdown_security_guards():
+    shutdown_tracing()
 
 
 @app.on_event("startup")

@@ -160,6 +160,19 @@ Create alerts for 5xx rate, average/p95 latency, audit-chain verification
 failures, and stale security evidence. The runbook endpoint returns the
 machine-readable alert descriptions.
 
+For distributed tracing, install the optional stack and point it at an OTLP/HTTP
+collector:
+
+```bash
+pip install -r requirements-observability.txt
+export GEOLOG_OTEL_ENABLED=true
+export GEOLOG_OTEL_ENDPOINT=http://otel-collector:4318/v1/traces
+export GEOLOG_OTEL_SERVICE_NAME=geolog
+```
+
+Without those packages, enabling the flag logs one warning and leaves the app
+running. Health and metrics endpoints are excluded by default.
+
 For an external error stream, set `GEOLOG_ERROR_WEBHOOK_URL`. Unhandled 5xx
 errors are sent as JSON with request ID, trace ID, role, path and exception
 type/message; query strings, bodies, tokens and subjects are excluded.
