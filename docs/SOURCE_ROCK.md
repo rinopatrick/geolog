@@ -22,3 +22,11 @@ missing, the API assumes 2.5 g/cc and returns a warning.
 - LOM must come from maturity data.
 - TOC is reported in weight percent, not volume percent.
 - No correction for kerogen density variation or mineral matrix effects.
+
+
+## Combined PDF report
+
+`GET /api/wells/{wid}/report/rock-source.pdf` produces a PDF with rock-type
+counts (Winland class, R35 range and mean FZI) and the latest stored TOC/VKER
+statistics plus a TOC histogram. The buttons live in the Source Rock card and
+the Core/SCAL toolbar. Missing data is reported as a note rather than an error.

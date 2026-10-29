@@ -2467,6 +2467,24 @@ Object.assign(GeoLogApp.prototype, {
     }
 ,
 
+    async downloadRockSourceReport() {
+        if (!this.currentWell?.id) return GeoToast.warn('Load a well first.');
+        try {
+            const blob = await this._apiBlob(`/wells/${this.currentWell.id}/report/rock-source.pdf`);
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${this.currentWell.name || 'well'}_rock_source_report.pdf`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            GeoToast.success('Rock/source report downloaded');
+        } catch (e) {
+            GeoToast.error('Report failed: ' + e.message);
+        }
+    },
+
     async runSourceRock() {
         if (!this.currentWell) return;
         const methodValue = document.getElementById('sourceRockMethod')?.value || 'passey_sonic';

@@ -19,6 +19,8 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
+- **Rock-type/source-rock PDF.** Winland class counts, R35/FZI summaries, TOC/VKER
+  statistics and a TOC histogram in one downloadable report.
 - **Seismic auto-tracking and fault candidates.** Correlation-based horizon
   tracking from a seed, 7-sample coherence fault detection, stored
   `SeismicFault` rows and Seismic panel actions.

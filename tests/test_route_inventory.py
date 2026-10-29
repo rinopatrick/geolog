@@ -137,6 +137,7 @@ EXPECTED_ROUTES = [
     "GET /api/wells/{wid}/production/decline-curve",
     "GET /api/wells/{wid}/report",
     "GET /api/wells/{wid}/report-pdf",
+    "GET /api/wells/{wid}/report/rock-source.pdf",
     "GET /api/wells/{wid}/rft",
     "GET /api/wells/{wid}/rft/pressure-gradient",
     "GET /api/wells/{wid}/snapshots",

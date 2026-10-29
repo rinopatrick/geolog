@@ -4,14 +4,16 @@ from sqlalchemy.orm import Session
 try:
     from acl import require_well_access
     from database import get_db
-    from models import Well, FormationTop, LogRun, CurveData, PetroParams, Zone
+    from models import CorePlug, Well, FormationTop, LogRun, CurveData, PetroParams, RockType, Zone
+    from rock_typing import classify_plug
     # Private name on purpose: reports reuses the QC engine rather than
     # reimplementing it, and that engine currently lives inside routers/qc.py.
     from routers.qc import _run_advanced_qc
 except ImportError:
     from backend.acl import require_well_access
     from backend.database import get_db
-    from backend.models import Well, FormationTop, LogRun, CurveData, PetroParams, Zone
+    from backend.models import CorePlug, Well, FormationTop, LogRun, CurveData, PetroParams, RockType, Zone
+    from backend.rock_typing import classify_plug
     from backend.routers.qc import _run_advanced_qc
 
 import datetime
@@ -561,3 +563,134 @@ def generate_petrophysical_report_pdf(
     return StreamingResponse(buffer, media_type="application/pdf", headers=headers)
 
 
+
+
+def _curve_summary(values: np.ndarray) -> dict:
+    vals = values[np.isfinite(values)]
+    if not len(vals):
+        return {"count": 0, "mean": None, "max": None}
+    return {"count": int(len(vals)), "mean": float(np.mean(vals)), "max": float(np.max(vals))}
+
+
+@router.get("/report/rock-source.pdf")
+def rock_source_report(wid: int, request: Request, db: Session = Depends(get_db)):
+    """PDF combining Winland/FZI rock typing with stored TOC/kerogen curves."""
+    require_well_access(db, request, wid)
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+
+    def _fmt(val, nd=2):
+        if val is None:
+            return "-"
+        try:
+            return f"{float(val):.{nd}f}"
+        except Exception:
+            return str(val)
+
+    groups: dict[str, list[dict]] = {}
+    for plug in db.query(CorePlug).filter(CorePlug.well_id == wid).all():
+        metrics = classify_plug(plug.porosity, plug.perm_air)
+        if metrics is None:
+            continue
+        groups.setdefault(metrics["winland_class"], []).append(metrics)
+    rock_rows = []
+    for class_name, items in sorted(groups.items()):
+        rock_rows.append([
+            f"Winland {class_name.capitalize()}",
+            len(items),
+            f"{min(item['r35'] for item in items):.2f}",
+            f"{max(item['r35'] for item in items):.2f}",
+            f"{np.mean([item['fzi'] for item in items]):.2f}",
+        ])
+
+    toc_cd = (
+        db.query(CurveData)
+        .join(LogRun, CurveData.log_run_id == LogRun.id)
+        .filter(LogRun.well_id == wid, CurveData.mnemonic == "TOC")
+        .order_by(LogRun.id.desc(), CurveData.id.desc())
+        .first()
+    )
+    vker_cd = (
+        db.query(CurveData)
+        .join(LogRun, CurveData.log_run_id == LogRun.id)
+        .filter(LogRun.well_id == wid, CurveData.mnemonic == "VKER")
+        .order_by(LogRun.id.desc(), CurveData.id.desc())
+        .first()
+    )
+    toc = np.frombuffer(toc_cd.data_binary, dtype=np.float64) if toc_cd and toc_cd.data_binary else np.array([])
+    vker = np.frombuffer(vker_cd.data_binary, dtype=np.float64) if vker_cd and vker_cd.data_binary else np.array([])
+    toc_stats = _curve_summary(toc)
+    vker_stats = _curve_summary(vker)
+
+    styles = getSampleStyleSheet()
+    section_style = ParagraphStyle("RockSection", parent=styles["Heading2"], fontSize=11, spaceBefore=8, spaceAfter=4)
+    body_style = ParagraphStyle("RockBody", parent=styles["BodyText"], fontSize=8, leading=10)
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=16 * mm, rightMargin=16 * mm, topMargin=14 * mm, bottomMargin=14 * mm)
+    elements = [
+        Paragraph(f"Rock Type & Source Rock Report — {well.name}", styles["Title"]),
+        Paragraph(f"UWI: {well.uwi or '—'} | Field: {well.field_name or '—'} | Operator: {well.operator or '—'}", body_style),
+        Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", body_style),
+        Spacer(1, 8),
+        Paragraph("1. Rock typing (Winland R35 / FZI)", section_style),
+    ]
+    if rock_rows:
+        rock_table = Table([["Class", "Plugs", "R35 min (µm)", "R35 max (µm)", "Mean FZI (µm)"]] + rock_rows, colWidths=[62 * mm, 18 * mm, 28 * mm, 28 * mm, 28 * mm])
+        rock_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#9ca3af")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        elements.extend([rock_table, Spacer(1, 6)])
+    else:
+        elements.append(Paragraph("No core plugs with positive porosity and air permeability.", body_style))
+
+    elements.append(Paragraph("2. Source-rock screening", section_style))
+    source_rows = [
+        ["Curve", "Samples", "Mean", "Max"],
+        ["TOC (wt%)", toc_stats["count"], _fmt(toc_stats["mean"], 3), _fmt(toc_stats["max"], 3)],
+        ["VKER (v/v)", vker_stats["count"], _fmt(vker_stats["mean"], 4), _fmt(vker_stats["max"], 4)],
+    ]
+    source_table = Table(source_rows, colWidths=[45 * mm, 25 * mm, 35 * mm, 35 * mm])
+    source_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#9ca3af")),
+    ]))
+    elements.extend([source_table, Spacer(1, 6)])
+
+    toc_valid = toc[np.isfinite(toc) & (toc >= 0)]
+    if len(toc_valid) >= 4:
+        counts, edges = np.histogram(toc_valid, bins=min(10, max(3, len(toc_valid) // 5)))
+        labels = [f"{edges[i]:.1f}–{edges[i + 1]:.1f}" for i in range(len(counts))]
+        draw = Drawing(165 * mm, 52 * mm)
+        chart = VerticalBarChart()
+        chart.x = 12
+        chart.y = 12
+        chart.height = 36 * mm
+        chart.width = 145 * mm
+        chart.data = [counts.tolist()]
+        chart.valueAxis.valueMin = 0
+        chart.valueAxis.valueMax = max(counts) * 1.2 or 1
+        chart.categoryAxis.categoryNames = labels
+        chart.categoryAxis.labels.fontSize = 6
+        chart.categoryAxis.labels.angle = 25
+        chart.categoryAxis.labels.boxAnchor = "ne"
+        chart.bars[0].fillColor = colors.HexColor("#0f766e")
+        draw.add(chart)
+        elements.append(Paragraph("TOC distribution (stored curve)", body_style))
+        elements.append(draw)
+
+    elements.extend([
+        Spacer(1, 8),
+        Paragraph("Notes", section_style),
+        Paragraph("Rock typing uses Winland R35 thresholds (10/2/0.5 µm). Source-rock values are the latest stored TOC/VKER curves; the screening method and LOM baseline are not persisted with the curves. This is a screening report, not a reserves audit.", body_style),
+    ])
+    doc.build(elements)
+    buf.seek(0)
+    fname = f"{well.name or 'well'}_rock_source_report.pdf"
+    return StreamingResponse(iter([buf.getvalue()]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{fname}"'})
