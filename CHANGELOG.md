@@ -8,7 +8,34 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
-## [0.12.0] - 2026-10-30 - 2026-10-30 - 2026-10-29
+### Added
+
+- **3D SEG-Y volume support.** Full trace-header index sidecars, inline and
+  crossline sections, and fault linkage across sampled inline sections. The
+  Seismic panel can switch sections and link 3D fault candidates.
+
+## [0.12.0] - 2026-10-30
+
+### Added
+
+- **Report builder.** Saved section templates, custom PDF generation for
+  rock/source, zonation, production, QC and curve inventory, and a dedicated
+  builder panel.
+- **Source-rock analysis metadata.** Method, porosity mode, LOM, baselines,
+  stats and warnings are stored per calculation and listed by history; the PDF
+  report prints the latest method/baselines.
+
+## [0.11.0] - 2026-10-29
+
+### Added
+
+- **Seismic auto-tracking and fault candidates.** Correlation-based horizon
+  tracking from a seed, 7-sample coherence fault detection, stored
+  `SeismicFault` rows and Seismic panel actions.
+- **Rock-type/source-rock PDF.** Winland class counts, R35/FZI summaries, TOC/VKER
+  statistics and a TOC histogram in one downloadable report.
+
+## [0.10.1] - 2026-10-29
 
 ### Fixed
 
@@ -19,17 +46,6 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
-- **Report builder.** Saved section templates, custom PDF generation for
-  rock/source, zonation, production, QC and curve inventory, and a dedicated
-  builder panel.
-- **Source-rock analysis metadata.** Method, porosity mode, LOM, baselines,
-  stats and warnings are stored per calculation and listed by history; the PDF
-  report prints the latest method/baselines.
-- **Rock-type/source-rock PDF.** Winland class counts, R35/FZI summaries, TOC/VKER
-  statistics and a TOC histogram in one downloadable report.
-- **Seismic auto-tracking and fault candidates.** Correlation-based horizon
-  tracking from a seed, 7-sample coherence fault detection, stored
-  `SeismicFault` rows and Seismic panel actions.
 - **SEG-Y seismic.** IBM/IEEE float reader, project upload, decimated section
   viewer, manual horizon picks and horizon persistence.
 - **Core rock typing.** Winland R35, RQI/FZI, Macro/Meso/Micro/Nanoport classes,
@@ -43,8 +59,6 @@ While the major version is `0`, the API is not yet stable.
 
 ### Fixed
 
-- Database job updates no longer assign the `status` column twice, which
-  PostgreSQL rejects and which left jobs stuck in `running`.
 - Baseline migration creates SQLite or PostgreSQL audit-immutability triggers
   for the active dialect. Fresh PostgreSQL databases now migrate successfully.
 

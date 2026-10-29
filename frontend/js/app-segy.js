@@ -60,24 +60,110 @@ Object.assign(GeoLogApp.prototype, {
         if (!id) return;
         GeoLoading.show('Loading seismic section...');
         try {
-            const [payload, horizons, faults] = await Promise.all([
+            const [payload, horizons, faults, volume, links] = await Promise.all([
                 this._api(`/seismic/${id}/section?max_traces=600&max_samples=600`),
                 this._api(`/seismic/${id}/horizons`),
                 this._api(`/seismic/${id}/faults`),
+                this._api(`/seismic/${id}/volume`),
+                this._api(`/seismic/${id}/fault-links`),
             ]);
             this._segySection = payload.section;
             this._segyLine = payload.line;
             this._segyHorizons = horizons || [];
             this._segyFaults = faults || [];
+            this._segyFaultLinks = links || [];
+            this._segyVolume = volume || null;
+            this._segyPicks = [];
+            this._populateSeismicVolume(volume);
+            this._drawSeismic();
+            this._renderSeismicHorizonList();
+            const status = document.getElementById('segyStatus');
+            if (status) {
+                const dimensions = volume?.is_3d ? ` · 3D ${volume.inline_count}×${volume.crossline_count}` : '';
+                status.textContent = `${payload.section.original_trace_count} traces · ${payload.section.original_sample_count} samples · ${payload.line.sample_interval_ms} ms${dimensions}`;
+            }
+        } catch (e) {
+            GeoToast.error('Seismic section failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    },
+
+    _populateSeismicVolume(volume) {
+        const inline = document.getElementById('segyInlineSelect');
+        const crossline = document.getElementById('segyCrosslineSelect');
+        const info = document.getElementById('segyVolumeInfo');
+        const is3d = Boolean(volume?.is_3d);
+        if (inline) {
+            inline.innerHTML = (volume?.inlines || []).map(value => `<option value="${value}">${value}</option>`).join('');
+            inline.disabled = !is3d;
+        }
+        if (crossline) {
+            crossline.innerHTML = (volume?.crosslines || []).map(value => `<option value="${value}">${value}</option>`).join('');
+            crossline.disabled = !is3d;
+        }
+        if (info) {
+            info.textContent = is3d
+                ? `${volume.inline_count} inlines × ${volume.crossline_count} crosslines`
+                : '2D line (no inline/crossline grid)';
+        }
+    },
+
+    async loadSeismicInline() {
+        const value = Number(document.getElementById('segyInlineSelect')?.value);
+        await this.loadSeismicVolumeSection('inline', value);
+    },
+
+    async loadSeismicCrossline() {
+        const value = Number(document.getElementById('segyCrosslineSelect')?.value);
+        await this.loadSeismicVolumeSection('crossline', value);
+    },
+
+    async loadSeismicVolumeSection(mode, value) {
+        const line = this._segyLine;
+        if (!line || !value) return GeoToast.warn('Load a 3D SEG-Y volume first.');
+        GeoLoading.show(`Loading ${mode} ${value}...`);
+        try {
+            const payload = await this._api(`/seismic/${line.id}/${mode}/${value}/section?max_traces=600&max_samples=600`);
+            this._segySection = payload.section;
             this._segyPicks = [];
             this._drawSeismic();
             this._renderSeismicHorizonList();
             const status = document.getElementById('segyStatus');
             if (status) {
-                status.textContent = `${payload.section.original_trace_count} traces · ${payload.section.original_sample_count} samples · ${payload.line.sample_interval_ms} ms`;
+                status.textContent = `${mode} ${value} · ${payload.section.trace_count} traces by ${payload.section.label_name} · ${payload.section.original_sample_count} samples`;
             }
         } catch (e) {
-            GeoToast.error('Seismic section failed: ' + e.message);
+            GeoToast.error(`Could not load ${mode} ${value}: ` + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    },
+
+    async linkSeismicFaults3D() {
+        const line = this._segyLine;
+        if (!line) return GeoToast.warn('Load a SEG-Y line first.');
+        if (!this._segyVolume?.is_3d) return GeoToast.warn('Upload a 3D volume with inline/crossline headers first.');
+        GeoLoading.show('Linking faults across inline sections...');
+        try {
+            const result = await this._api(`/seismic/${line.id}/faults/link-3d`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    threshold: 0.35,
+                    min_points: 4,
+                    max_sections: 12,
+                    crossline_tolerance: 3,
+                    sample_tolerance: 16,
+                }),
+            });
+            this._segyFaultLinks = result.links || [];
+            this._renderSeismicHorizonList();
+            this._drawSeismic();
+            GeoToast.success(result.links?.length
+                ? `${result.links.length} 3D fault link(s) across ${result.scanned_inlines} inlines`
+                : 'No 3D fault links found; try a lower threshold or more sections');
+        } catch (e) {
+            GeoToast.error('3D fault linking failed: ' + e.message);
         } finally {
             GeoLoading.hide();
         }
@@ -132,29 +218,63 @@ Object.assign(GeoLogApp.prototype, {
             });
             ctx.stroke();
         };
-        for (const horizon of this._segyHorizons || []) drawPicks(horizon.picks, horizon.color || '#f0883e', 2);
-        for (const fault of this._segyFaults || []) {
-            if ((fault.picks || []).length === 1) {
-                const pick = fault.picks[0];
-                const x = (Number(pick.trace) / Math.max(1, cols - 1)) * w;
-                const y = (Number(pick.sample) / Math.max(1, rows - 1)) * h;
-                ctx.strokeStyle = fault.color || '#f85149';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(x, Math.max(0, y - 12));
-                ctx.lineTo(x, Math.min(h, y + 12));
-                ctx.stroke();
-            } else {
-                drawPicks(fault.picks, fault.color || '#f85149', 2);
+        if (!section.mode) {
+            for (const horizon of this._segyHorizons || []) drawPicks(horizon.picks, horizon.color || '#f0883e', 2);
+            for (const fault of this._segyFaults || []) {
+                if ((fault.picks || []).length === 1) {
+                    const pick = fault.picks[0];
+                    const x = (Number(pick.trace) / Math.max(1, cols - 1)) * w;
+                    const y = (Number(pick.sample) / Math.max(1, rows - 1)) * h;
+                    ctx.strokeStyle = fault.color || '#f85149';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(x, Math.max(0, y - 12));
+                    ctx.lineTo(x, Math.min(h, y + 12));
+                    ctx.stroke();
+                } else {
+                    drawPicks(fault.picks, fault.color || '#f85149', 2);
+                }
             }
+        } else {
+            this._drawSeismicFaultLinks(ctx, section, w, h, rows);
         }
         drawPicks(this._segyPicks || [], '#ffffff', 1.5);
+    },
+
+    _drawSeismicFaultLinks(ctx, section, w, h, rows) {
+        const labels = section.labels || [];
+        if (!labels.length) return;
+        for (const link of this._segyFaultLinks || []) {
+            const points = (link.points || []).filter(point =>
+                section.mode === 'inline' ? Number(point.inline) === Number(section.value) : Number(point.crossline) === Number(section.value)
+            );
+            if (!points.length) continue;
+            const ordered = points.slice().sort((a, b) =>
+                (section.mode === 'inline' ? a.crossline - b.crossline : a.inline - b.inline)
+            );
+            ctx.strokeStyle = link.color || '#f85149';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ordered.forEach((point, index) => {
+                const other = section.mode === 'inline' ? Number(point.crossline) : Number(point.inline);
+                const labelIndex = labels.indexOf(other);
+                if (labelIndex < 0) return;
+                const x = (labelIndex / Math.max(1, labels.length - 1)) * w;
+                const y = (Number(point.sample) / Math.max(1, section.sample_step || 1) / Math.max(1, rows - 1)) * h;
+                if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+        }
     },
 
     _onSegyClick(event) {
         const canvas = document.getElementById('segyCanvas');
         const section = this._segySection;
         if (!canvas || !section?.data?.length) return;
+        if (section.mode) {
+            GeoToast.warn('Picking is available on the 2D line section; inline/crossline picking is not stored yet.');
+            return;
+        }
         const rect = canvas.getBoundingClientRect();
         const x = (event.clientX - rect.left) / rect.width;
         const y = (event.clientY - rect.top) / rect.height;
@@ -200,7 +320,11 @@ Object.assign(GeoLogApp.prototype, {
         const faultsHtml = faults.length
             ? faults.map(f => `<span style="margin-right:12px;color:#f85149">${escapeHtml(f.name)} · ${(f.picks || []).length} pts</span>`).join('')
             : 'No faults detected.';
-        host.innerHTML = `${horizonsHtml}<div style="margin-top:4px">${faultsHtml}</div>`;
+        const links = this._segyFaultLinks || [];
+        const linksHtml = links.length
+            ? links.map(link => `<span style="margin-right:12px;color:#ff7b72">${escapeHtml(link.name)} · inline ${link.inline_start}-${link.inline_end} · ${(link.points || []).length} pts</span>`).join('')
+            : 'No 3D fault links.';
+        host.innerHTML = `${horizonsHtml}<div style="margin-top:4px">${faultsHtml}</div><div style="margin-top:4px">${linksHtml}</div>`;
     },
 
     async autoTrackSeismic() {
@@ -233,7 +357,7 @@ Object.assign(GeoLogApp.prototype, {
         try {
             const result = await this._api(`/seismic/${line.id}/faults/detect`, {
                 method: 'POST',
-                body: JSON.stringify({ threshold: 0.35, min_points: 8, max_faults: 20 }),
+                body: JSON.stringify({ threshold: 0.35, min_points: 4, max_faults: 20 }),
             });
             GeoToast.success(result.faults?.length ? `${result.faults.length} fault candidate(s)` : 'No faults found');
             await this.loadSeismicLine(line.id);

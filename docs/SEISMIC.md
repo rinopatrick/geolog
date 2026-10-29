@@ -7,10 +7,30 @@
 
 - IBM 4-byte float (SEG-Y format code 1)
 - IEEE 4-byte float (format code 5)
-- 2D lines and 3D lines with inline/crossline headers
+- 2D lines and 3D volumes with inline/crossline headers
 
-The first 2,500 traces are indexed. The section endpoint decimates to at most
-1,500 × 1,500 samples; the UI requests 600 × 600.
+Upload writes a JSON index sidecar next to the SEG-Y file. The index scans every
+trace header and stores byte offsets, sample counts, inlines and crosslines
+without decoding the amplitudes. Sections read only the traces they need, so a
+3D volume does not need to fit in memory.
+
+The sequential section endpoint reads at most 2,500 traces, decimates to at most
+1,500 × 1,500 samples, and the UI requests 600 × 600. Use inline/crossline
+sections for the full volume. The upload body is capped by
+`GEOLOG_MAX_UPLOAD_BYTES` (default 512 MiB).
+
+## 3D volume sections
+
+`GET /api/seismic/{line_id}/volume` returns the sorted inline and crossline
+values, counts, and `is_3d`. Volume index lists are capped at 5,000 values per
+axis and set `truncated` when cut.
+
+- `GET /api/seismic/{line_id}/inline/{value}/section`
+- `GET /api/seismic/{line_id}/crossline/{value}/section`
+
+Each section contains `labels` for the fast axis, `mode`, `value`, `label_name`,
+and the same decimation metadata as the sequential section. Inline sections are
+sorted by crossline; crossline sections are sorted by inline.
 
 ## View and picks
 
@@ -19,30 +39,42 @@ sample interval and original dimensions. The Seismic view renders it and lets
 you click to build a horizon trace. `POST /api/seismic/{line_id}/horizons` stores
 picks as `{trace, sample}` pairs in display coordinates.
 
+Inline and crossline sections are view-only in this version. Horizon picks are
+stored against the sequential section, so the UI blocks picking while a volume
+section is displayed.
+
 ## Auto-tracking
 
 `POST /api/seismic/{line_id}/horizons/auto-track` tracks a reflection away from a
 seed using normalized cross-correlation in a sample window. The seed can be an
 existing horizon or explicit `{seed_trace, seed_sample}` display coordinates.
 `window` controls the correlation window and `search_radius` the sample search
-around the previous pick. The saved horizon is the same `SeismicHorizon` row
-used by manual picks.
+around the previous pick.
 
 ## Fault detection
 
 `POST /api/seismic/{line_id}/faults/detect` computes adjacent-trace coherence in
 a 7-sample window, thresholds low-coherence pixels, filters low-energy areas and
 groups vertical candidates into fault segments. Results are stored as
-`SeismicFault` rows and returned for display. Single-trace vertical segments are
-allowed; they are drawn as a short vertical tick.
+`SeismicFault` rows and returned for display.
 
-This is a screening detector, not a fault framework. It does not handle 3D
-continuity, fault linkage, or throw estimation.
+## 3D fault linkage
+
+`POST /api/seismic/{line_id}/faults/link-3d` detects faults on up to
+`max_sections` inline sections, maps each pick to `{inline, crossline, sample}`,
+and links segments between adjacent inlines when crossline and sample centres
+stay within `crossline_tolerance` and `sample_tolerance`. A link needs at least
+two inline sections. Results are stored as `SeismicFaultLink` rows and can be
+read with `GET /api/seismic/{line_id}/fault-links` or deleted individually.
+
+This is a continuity screening aid, not a fault framework. It does not estimate
+throw, dip, or fault polygons.
 
 ## Limits
 
 - No SEG-Y revision-2 extended headers, variable trace lengths, or compressed
   formats.
 - Amplitudes are not gain-corrected, filtered, or interpreted.
-- Horizon picks are manual; there is no auto-tracking or fault extraction.
+- Fault linkage samples at most 64 inline sections per run and decimates each
+  section to 600 × 600 for detection.
 - Large files are capped by `GEOLOG_MAX_UPLOAD_BYTES`; raise it for 3D volumes.
