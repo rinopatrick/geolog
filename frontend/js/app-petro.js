@@ -948,6 +948,115 @@ Object.assign(GeoLogApp.prototype, {
     }
 ,
 
+    async runPetroUncertainty() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        const iterations = parseInt(document.getElementById('sensIter')?.value || '200', 10);
+        const pct = parseFloat(document.getElementById('sensPct')?.value || '25');
+        const model = document.getElementById('satModel')?.value || 'archie';
+        const getVal = (id) => parseFloat(document.getElementById(id)?.value || '0');
+        GeoLoading.show('Running curve uncertainty...');
+        try {
+            const result = await this._api(`/wells/${this.currentWell.id}/petro-uncertainty`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    a: getVal('archA'),
+                    m: getVal('archM'),
+                    n: getVal('archN'),
+                    rw: getVal('archRw'),
+                    saturation_model: model,
+                    iterations: Math.min(iterations, 500),
+                    variation_pct: pct,
+                    seed: 42,
+                }),
+            });
+            const panel = document.getElementById('sensResults');
+            if (!panel) return;
+            const summary = result.summary || {};
+            panel.innerHTML = `
+                <div class="petro-summary">
+                    <h4>Curve Uncertainty</h4>
+                    <div class="petro-stat"><span>Iterations:</span> <strong>${result.iterations}</strong></div>
+                    <div class="petro-stat"><span>Model:</span> <strong>${escapeHtml(result.saturation_model)}</strong></div>
+                    <div class="petro-stat"><span>Mean Sw / PHIE / Vsh:</span> <strong>${summary.sw_p50_mean} / ${summary.phie_p50_mean} / ${summary.vsh_p50_mean}</strong></div>
+                    <h4 style="margin-top:12px">P90–P10 bands</h4>
+                    <canvas id="petroUncertaintyCanvas" width="900" height="520" style="width:100%;background:#0d1117;border-radius:6px"></canvas>
+                </div>
+            `;
+            this._drawPetroUncertainty(result);
+        } catch (e) {
+            GeoToast.error('Curve uncertainty failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    },
+
+    _drawPetroUncertainty(result) {
+        const canvas = document.getElementById('petroUncertaintyCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, w, h);
+        const depth = result.depth || [];
+        if (!depth.length) return;
+        const tracks = [
+            { key: 'sw', label: 'Sw', color: '#58a6ff', min: 0, max: 1 },
+            { key: 'phie', label: 'PHIE', color: '#3fb950', min: 0, max: 0.4 },
+            { key: 'vsh', label: 'Vsh', color: '#d29922', min: 0, max: 1 },
+        ];
+        const pad = { left: 54, right: 18, top: 22, bottom: 34 };
+        const plotW = w - pad.left - pad.right;
+        const plotH = h - pad.top - pad.bottom;
+        const trackW = plotW / tracks.length;
+        const minDepth = Math.min(...depth);
+        const maxDepth = Math.max(...depth);
+        ctx.strokeStyle = '#30363d';
+        ctx.strokeRect(pad.left, pad.top, plotW, plotH);
+        tracks.forEach((track, trackIndex) => {
+            const band = result[track.key] || {};
+            const x0 = pad.left + trackIndex * trackW + 8;
+            const width = trackW - 16;
+            const x = value => x0 + (Math.max(track.min, Math.min(track.max, value)) - track.min) / (track.max - track.min) * width;
+            const y = value => pad.top + ((value - minDepth) / Math.max(1e-9, maxDepth - minDepth)) * plotH;
+            ctx.fillStyle = track.color + '33';
+            ctx.beginPath();
+            (band.p90 || []).forEach((value, index) => {
+                const px = x(value);
+                const py = y(depth[index]);
+                if (index === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            });
+            for (let index = (band.p10 || []).length - 1; index >= 0; index -= 1) {
+                ctx.lineTo(x(band.p10[index]), y(depth[index]));
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = track.color;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            (band.p50 || []).forEach((value, index) => {
+                const px = x(value);
+                const py = y(depth[index]);
+                if (index === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            });
+            ctx.stroke();
+            ctx.fillStyle = '#c9d1d9';
+            ctx.font = '12px sans-serif';
+            ctx.fillText(track.label, x0 + 4, pad.top + 14);
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '10px sans-serif';
+            ctx.fillText(String(track.max), x0 + width - 16, pad.top + 14);
+        });
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '10px sans-serif';
+        for (let index = 0; index <= 4; index += 1) {
+            const value = minDepth + (index / 4) * (maxDepth - minDepth);
+            const py = pad.top + (index / 4) * plotH;
+            ctx.fillText(`${Math.round(value)}`, 4, py + 3);
+        }
+        ctx.fillText('depth', 4, h - 10);
+    },
+
     _drawTornado(result) {
         const canvas = document.getElementById('tornadoCanvas');
         if (!canvas) return;

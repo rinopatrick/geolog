@@ -127,6 +127,14 @@ function buildVolume() {
         await app.createSeismicTie();
         tieOk = app._segyTie?.correlation != null;
       }
+      let uncertaintyOk = true;
+      if (app.currentWell?.id) {
+        const uncertainty = await app._api(`/wells/${app.currentWell.id}/petro-uncertainty`, {
+          method: 'POST',
+          body: JSON.stringify({ iterations: 20, variation_pct: 10, seed: 1 }),
+        });
+        uncertaintyOk = (uncertainty.depth || []).length > 0;
+      }
       document.getElementById('prospectName').value = 'E2E Prospect';
       document.getElementById('prospectContact').value = '1000';
       await app.createProspect();
@@ -135,7 +143,7 @@ function buildVolume() {
       await app.buildProspectPortfolio();
       const portfolioOk = (app._segyPortfolios || []).length > 0;
       return {
-        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && surfaceOk && depthOk && tieOk && prospectOk && portfolioOk && compartmentsOk && fenceOk && mapOk && (app._segyFaultLinks || []).length > 0,
+        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && surfaceOk && depthOk && tieOk && uncertaintyOk && prospectOk && portfolioOk && compartmentsOk && fenceOk && mapOk && (app._segyFaultLinks || []).length > 0,
         lineId: line.id,
         volumeOk,
         inlineOk,
@@ -152,6 +160,7 @@ function buildVolume() {
         portfolioOk,
         compartmentsOk,
         compartmentCount: (app._segyCompartments || []).length,
+        uncertaintyOk,
         fenceOk,
         mapOk,
         portfolioEmv: app._segyPortfolios?.[0]?.result?.portfolio?.total_emv ?? null,

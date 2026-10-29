@@ -542,6 +542,7 @@
                     <div class="form-row"><label>PHIE cutoff variation ±%</label><input type="number" id="sensPhieCutPct" value="15" step="5" min="0" max="95"></div>
                     <div class="form-row"><label>Sw cutoff variation ±%</label><input type="number" id="sensSwCutPct" value="15" step="5" min="0" max="95"></div>
                     <button class="btn-primary" data-role-required="interpreter" data-action="app.runSensitivity" title="Role required: Interpreter"><i data-lucide="play"></i> Run Sensitivity</button>
+                    <button class="btn-sm" data-role-required="interpreter" data-action="app.runPetroUncertainty" title="Role required: Interpreter"><i data-lucide="chart-spline"></i> Curve uncertainty</button>
                 </div>
                 <div id="sensResults" class="petro-results">
                     <p style="color:#8b949e">Set parameters in Petrophysics tab, then run sensitivity analysis.</p>
