@@ -16,7 +16,8 @@ Object.assign(GeoLogApp.prototype, {
             await this.loadProjects();
             GeoToast.success('Project created');
         } catch (e) { GeoToast.error('Failed to create project: ' + e.message); }
-    },
+    }
+,
 
     async deleteProject(id) {
         const r = await GeoModal.show({ title: 'Delete Project?', fields: [
@@ -28,7 +29,8 @@ Object.assign(GeoLogApp.prototype, {
             await this.loadProjects();
             GeoToast.success('Project deleted');
         } catch (e) { GeoToast.error('Failed to delete project: ' + e.message); }
-    },
+    }
+,
 
     async addWell() {
         if (!this.projects.length) return this.createProject();
@@ -46,7 +48,8 @@ Object.assign(GeoLogApp.prototype, {
             await this.loadWells(this.projects[0].id);
             GeoToast.success('Well added');
         } catch (e) { GeoToast.error('Failed to add well: ' + e.message); }
-    },
+    }
+,
 
     async deleteWell(id) {
         const r = await GeoModal.show({ title: 'Delete Well?', fields: [
@@ -58,14 +61,16 @@ Object.assign(GeoLogApp.prototype, {
             if (this.projects.length > 0) await this.loadWells(this.projects[0].id);
             GeoToast.success('Well deleted');
         } catch (e) { GeoToast.error('Failed to delete well: ' + e.message); }
-    },
+    }
+,
 
     async deleteTop(id) {
         try {
             await this._api(`/tops/${id}`, { method: 'DELETE' });
             await this._loadFormationTops();
         } catch (e) { GeoToast.error('Failed to delete top: ' + e.message); }
-    },
+    }
+,
 
     async editTop(id) {
         const top = this.formationTops.find(t => t.id === id);
@@ -90,7 +95,8 @@ Object.assign(GeoLogApp.prototype, {
             await this._loadFormationTops();
             GeoToast.success('Formation top updated');
         } catch (e) { GeoToast.error('Failed to update top: ' + e.message); }
-    },
+    }
+,
 
     async addFormationTop() {
         if (!this.currentWell) return;
@@ -121,7 +127,8 @@ Object.assign(GeoLogApp.prototype, {
             await this._loadFormationTops();
             this._pushUndo('add_top', { top_id: created?.id, well_id: this.currentWell.id, payload });
         } catch (e) { GeoToast.error('Failed to add top: ' + e.message); }
-    },
+    }
+,
 
     async addFormationTopAtDepth(depth) {
         if (!this.currentWell || !Number.isFinite(depth) || depth < 0) return;
@@ -150,7 +157,8 @@ Object.assign(GeoLogApp.prototype, {
             this._pushUndo('add_top', { top_id: created?.id, well_id: this.currentWell.id, payload });
             GeoToast.success(`Top '${result.name}' added at ${depth.toFixed(1)} ft`);
         } catch (e) { GeoToast.error(e.message); }
-    },
+    }
+,
 
     async editCurrentWell() {
         if (!this.currentWell) return GeoToast.warn('No well selected');
@@ -173,7 +181,8 @@ Object.assign(GeoLogApp.prototype, {
             await this._loadCurveData().catch(() => {});
             GeoToast.success('Well updated');
         } catch (e) { GeoToast.error('Failed to update well: ' + e.message); }
-    },
+    }
+,
 
     async _uploadLogFormatForWell(wellId, format = 'las') {
         const fm = String(format || 'las').toLowerCase();
@@ -214,34 +223,41 @@ Object.assign(GeoLogApp.prototype, {
             }
         };
         input.click();
-    },
+    }
+,
 
     async uploadLAS() {
         if (!this.currentWell) return GeoToast.warn('Select or create a well first.');
         return this._uploadLogFormatForWell(this.currentWell.id, 'las');
-    },
+    }
+,
 
     async uploadDLIS() {
         if (!this.currentWell) return GeoToast.warn('Select or create a well first.');
         return this._uploadLogFormatForWell(this.currentWell.id, 'dlis');
-    },
+    }
+,
 
     async uploadLIS() {
         if (!this.currentWell) return GeoToast.warn('Select or create a well first.');
         return this._uploadLogFormatForWell(this.currentWell.id, 'lis');
-    },
+    }
+,
 
     async uploadLASForWell(wellId) {
         return this._uploadLogFormatForWell(wellId, 'las');
-    },
+    }
+,
 
     async uploadDLISForWell(wellId) {
         return this._uploadLogFormatForWell(wellId, 'dlis');
-    },
+    }
+,
 
     async uploadLISForWell(wellId) {
         return this._uploadLogFormatForWell(wellId, 'lis');
-    },
+    }
+,
 
     openBulkImportWizard() {
         if (!this.projects.length) {
@@ -254,20 +270,23 @@ Object.assign(GeoLogApp.prototype, {
         this._initBulkUpload();
         this._resetBulkImportUI();
         if (typeof lucide !== 'undefined') lucide.createIcons();
-    },
+    }
+,
 
     closeBulkImportWizard(event) {
         if (event && event.target !== event.currentTarget) return;
         const modal = document.getElementById('bulkImportModal');
         if (modal) modal.style.display = 'none';
-    },
+    }
+,
 
     _resetBulkImportUI() {
         const list = document.getElementById('bulkImportList');
         const summary = document.getElementById('bulkImportSummary');
         if (list) list.innerHTML = '';
         if (summary) summary.textContent = 'Drop LAS files to begin.';
-    },
+    }
+,
 
     _parseLASWellName(text, fallbackName = '') {
         const lines = String(text || '').split(/\r?\n/);
@@ -278,12 +297,14 @@ Object.assign(GeoLogApp.prototype, {
             if (p?.[1]) return p[1].trim();
         }
         return (fallbackName || '').replace(/\.las$/i, '').trim() || 'UNKNOWN';
-    },
+    }
+,
 
     _isLASFile(file) {
         if (!file) return false;
         return /\.las$/i.test(file.name || '');
-    },
+    }
+,
 
     _renderBulkImportRows(items) {
         const list = document.getElementById('bulkImportList');
@@ -309,7 +330,8 @@ Object.assign(GeoLogApp.prototype, {
                 </div>
             `;
         }).join('');
-    },
+    }
+,
 
     async _ensureWellByName(name) {
         const normalized = (name || '').trim();
@@ -325,7 +347,8 @@ Object.assign(GeoLogApp.prototype, {
             body: JSON.stringify({ name: normalized, uwi: '', project_id: projectId }),
         });
         return { well: created, created: true };
-    },
+    }
+,
 
     _uploadLASWithProgress(wellId, file, onProgress) {
         return new Promise((resolve, reject) => {
@@ -352,7 +375,8 @@ Object.assign(GeoLogApp.prototype, {
             fd.append('file', file);
             xhr.send(fd);
         });
-    },
+    }
+,
 
     async _startBulkImport(files) {
         const validFiles = Array.from(files || []).filter(f => this._isLASFile(f));
@@ -398,7 +422,8 @@ Object.assign(GeoLogApp.prototype, {
         } finally {
             GeoLoading.hide();
         }
-    },
+    }
+,
 
     async addZone() {
         if (!this.renderer) return;
@@ -426,7 +451,8 @@ Object.assign(GeoLogApp.prototype, {
             zones_before: zonesBefore,
             zones_after: zonesAfter,
         });
-    },
+    }
+,
 
     async removeZone(index) {
         this._pushZoneHistory();
@@ -435,7 +461,8 @@ Object.assign(GeoLogApp.prototype, {
         this.renderer.setZones(zones);
         this._renderZonesList();
         await this._saveZones();
-    },
+    }
+,
 
     _renderZonesList() {
         const panel = document.getElementById('zonesPanel');
@@ -468,7 +495,8 @@ Object.assign(GeoLogApp.prototype, {
             </div>
         `).join('');
         if (typeof lucide !== 'undefined') lucide.createIcons();
-    },
+    }
+,
 
     async editZone(index) {
         const zones = [...(this.renderer.zones || [])];
@@ -487,7 +515,8 @@ Object.assign(GeoLogApp.prototype, {
         this.renderer.setZones(zones);
         this._renderZonesList();
         await this._saveZones();
-    },
+    }
+,
 
     async splitZone(index) {
         const zones = [...(this.renderer.zones || [])];
@@ -504,7 +533,8 @@ Object.assign(GeoLogApp.prototype, {
         this.renderer.setZones(zones);
         this._renderZonesList();
         await this._saveZones();
-    },
+    }
+,
 
     async moveZoneUp(index) {
         const zones = [...(this.renderer.zones || [])];
@@ -514,7 +544,8 @@ Object.assign(GeoLogApp.prototype, {
         this.renderer.setZones(zones);
         this._renderZonesList();
         await this._saveZones();
-    },
+    }
+,
 
     async moveZoneDown(index) {
         const zones = [...(this.renderer.zones || [])];
@@ -524,7 +555,8 @@ Object.assign(GeoLogApp.prototype, {
         this.renderer.setZones(zones);
         this._renderZonesList();
         await this._saveZones();
-    },
+    }
+,
 
     async mergeZone(index) {
         const zones = [...(this.renderer.zones || [])];
@@ -543,7 +575,8 @@ Object.assign(GeoLogApp.prototype, {
         this._renderZonesList();
         await this._saveZones();
         GeoToast.success('Zones merged');
-    },
+    }
+,
 
     async loadDepthShift() {
         const runId = document.getElementById('depthShiftRun')?.value;
@@ -554,7 +587,8 @@ Object.assign(GeoLogApp.prototype, {
             set('depthShiftVal', ds.shift || 0);
             set('depthStretchVal', ds.stretch || 1);
         } catch {}
-    },
+    }
+,
 
     async saveDepthShift() {
         const runId = document.getElementById('depthShiftRun')?.value;
@@ -568,7 +602,8 @@ Object.assign(GeoLogApp.prototype, {
         this.curveRangeCache?.clear();
         await this._loadCurveData().catch(() => {});
         GeoToast.success('Depth shift saved: ' + shift + ' ft, stretch ' + stretch);
-    },
+    }
+,
 
     async editDepthControlPoints() {
         await this._populateToolRunSelectors();
@@ -605,7 +640,8 @@ Object.assign(GeoLogApp.prototype, {
             this.curveRangeCache?.clear();
             await this._loadCurveData().catch(() => {});
         } catch (e) { GeoToast.error('Control points failed: ' + e.message); }
-    },
+    }
+,
 
     async runSplice() {
         if (!this.currentWell) return GeoToast.warn('No well selected');
@@ -637,7 +673,8 @@ Object.assign(GeoLogApp.prototype, {
         } finally {
             GeoLoading.hide();
         }
-    },
+    }
+,
 
     async loadAnnotations() {
         if (!this.currentWell) return;
@@ -656,7 +693,8 @@ Object.assign(GeoLogApp.prototype, {
             ).join('');
             if (typeof lucide !== 'undefined') lucide.createIcons();
         } catch {}
-    },
+    }
+,
 
     async addAnnotation() {
         const r = await GeoModal.show({ title: 'Add Annotation', fields: [
@@ -675,12 +713,14 @@ Object.assign(GeoLogApp.prototype, {
         this._pushUndo('add_annotation', { annotation_id: created?.id, well_id: this.currentWell.id, payload });
         GeoToast.success('Annotation added');
         await this.loadAnnotations();
-    },
+    }
+,
 
     async deleteAnnotation(aid) {
         await this._api('/annotations/' + aid, { method: 'DELETE' });
         await this.loadAnnotations();
-    },
+    }
+,
 
     async loadDST() {
         if (!this.currentWell) return;
@@ -704,7 +744,8 @@ Object.assign(GeoLogApp.prototype, {
             }
         } catch {}
         finally { GeoLoading.hide(); }
-    },
+    }
+,
 
     async addDST() {
         if (!this.currentWell) return GeoToast.warn('No well selected');
@@ -722,7 +763,8 @@ Object.assign(GeoLogApp.prototype, {
         await this._api('/wells/' + this.currentWell.id + '/dst', { method: 'POST', body: JSON.stringify(r) });
         GeoToast.success('DST saved');
         await this.loadDST();
-    },
+    }
+,
 
     async loadRFT() {
         if (!this.currentWell) return;
@@ -739,7 +781,8 @@ Object.assign(GeoLogApp.prototype, {
             this._renderRFTAnalysisSummary();
         } catch {}
         finally { GeoLoading.hide(); }
-    },
+    }
+,
 
     _renderRFTAnalysisSummary() {
         const summaryEl = document.getElementById('rftAnalysisSummary');
@@ -788,7 +831,8 @@ Object.assign(GeoLogApp.prototype, {
         }
         html += '</tbody></table></div>';
         tableEl.innerHTML = html;
-    },
+    }
+,
 
     async addRFT() {
         if (!this.currentWell) return GeoToast.warn('No well selected');
@@ -807,7 +851,8 @@ Object.assign(GeoLogApp.prototype, {
         await this._api('/wells/' + this.currentWell.id + '/rft', { method: 'POST', body: JSON.stringify(r) });
         GeoToast.success('RFT point saved');
         await this.loadRFT();
-    },
+    }
+,
 
     _initRFTCSVUpload() {
         const input = document.getElementById('rftCsvFileInput');
@@ -844,7 +889,8 @@ Object.assign(GeoLogApp.prototype, {
                 input.value = '';
             }
         });
-    },
+    }
+,
 
     async _drawRFTCrossplot() {
         const canvas = document.getElementById('rftCanvas');
@@ -925,7 +971,8 @@ Object.assign(GeoLogApp.prototype, {
         ctx.fillStyle = '#c9d1d9'; ctx.font = '11px DM Sans'; ctx.textAlign = 'center';
         ctx.fillText('Pressure', m.left + pw / 2, H - 8);
         ctx.save(); ctx.translate(14, m.top + ph / 2); ctx.rotate(-Math.PI / 2); ctx.fillText('Depth (ft)', 0, 0); ctx.restore();
-    },
+    }
+,
 
     async loadCompletion() {
         if (!this.currentWell) return;
@@ -938,7 +985,8 @@ Object.assign(GeoLogApp.prototype, {
             this.completionData = [];
             this._renderCompletionList();
         }
-    },
+    }
+,
 
     _renderCompletionList() {
         const el = document.getElementById('completionList');
@@ -954,7 +1002,8 @@ Object.assign(GeoLogApp.prototype, {
             `</div>`
         ).join('');
         if (typeof lucide !== 'undefined') lucide.createIcons();
-    },
+    }
+,
 
     async addCompletionComponent() {
         if (!this.currentWell) return GeoToast.warn('No well selected');
@@ -973,12 +1022,14 @@ Object.assign(GeoLogApp.prototype, {
         await this._api('/wells/' + this.currentWell.id + '/completion', { method: 'POST', body: JSON.stringify(r) });
         GeoToast.success('Completion component added');
         await this.loadCompletion();
-    },
+    }
+,
 
     async deleteCompletionComponent(cid) {
         await this._api('/completion/' + cid, { method: 'DELETE' });
         await this.loadCompletion();
-    },
+    }
+,
 
     async uploadCompletionCSV() {
         const input = document.getElementById('completionCsvFileInput');
@@ -1005,12 +1056,14 @@ Object.assign(GeoLogApp.prototype, {
         } finally {
             if (input) input.value = '';
         }
-    },
+    }
+,
 
     toggleCompletionTrack(enabled = !this.showCompletionTrack) {
         this.showCompletionTrack = !!enabled;
         this.renderer?.setCompletionTrackVisible(this.showCompletionTrack);
-    },
+    }
+,
 
     async loadProduction() {
         if (!this.currentWell) return;
@@ -1027,7 +1080,8 @@ Object.assign(GeoLogApp.prototype, {
             }
         } catch {}
         finally { GeoLoading.hide(); }
-    },
+    }
+,
 
     _renderProductionTable() {
         const el = document.getElementById('productionTable');
@@ -1060,7 +1114,8 @@ Object.assign(GeoLogApp.prototype, {
         }
         html += '</tbody></table></div>';
         el.innerHTML = html;
-    },
+    }
+,
 
     _drawProductionCharts() {
         const draw = (canvasId, series, yLabel, overlay = null) => {
@@ -1119,7 +1174,98 @@ Object.assign(GeoLogApp.prototype, {
             { key: 'bhp', color: '#5bc0de' },
             { key: 'whp', color: '#b46fff' },
         ], 'Pressure (psi)');
-    },
+    }
+,
+
+    async runProductionEconomics() {
+        if (!this.currentWell) return;
+        const num = (id, fallback = 0) => {
+            const value = Number(document.getElementById(id)?.value);
+            return Number.isFinite(value) ? value : fallback;
+        };
+        GeoLoading.show('Running probabilistic economics...');
+        try {
+            const result = await this._api(`/wells/${this.currentWell.id}/production/economics`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    oil_price: num('econOilPrice', 70),
+                    opex_per_bbl: num('econOpex', 12),
+                    capex: num('econCapex', 0),
+                    discount_rate: num('econDiscount', 10) / 100,
+                    royalty_rate: num('econRoyalty', 12.5) / 100,
+                    working_interest: num('econWI', 100) / 100,
+                    tax_rate: num('econTax', 25) / 100,
+                    economic_limit: num('econLimit', 10),
+                    years: num('econYears', 20),
+                    iterations: num('econIterations', 500),
+                    qi_uncertainty_pct: 20,
+                    di_uncertainty_pct: 25,
+                }),
+            });
+            const base = result.base || {};
+            const eur = result.probabilistic?.eur_bbl || {};
+            const npv = result.probabilistic?.npv || {};
+            const fmt = (v, digits = 0) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: digits });
+            const host = document.getElementById('productionEconomicsResults');
+            if (host) {
+                host.innerHTML = `
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px">
+                        <div><span style="color:#8b949e">Model:</span> <strong>${escapeHtml(String(result.model || 'n/a'))}</strong></div>
+                        <div><span style="color:#8b949e">Base EUR:</span> <strong>${fmt(base.eur_bbl)} bbl</strong></div>
+                        <div><span style="color:#8b949e">Base NPV:</span> <strong>$${fmt(base.npv)}</strong></div>
+                        <div><span style="color:#8b949e">Payback:</span> <strong>${base.payback_month ? base.payback_month + ' months' : 'not reached'}</strong></div>
+                        <div><span style="color:#8b949e">P90 / P50 / P10 EUR:</span> <strong>${fmt(eur.p90)} / ${fmt(eur.p50)} / ${fmt(eur.p10)} bbl</strong></div>
+                        <div><span style="color:#8b949e">P90 / P50 / P10 NPV:</span> <strong>$${fmt(npv.p90)} / $${fmt(npv.p50)} / $${fmt(npv.p10)}</strong></div>
+                    </div>`;
+            }
+            this._drawProductionEconomicsChart(result.forecast || []);
+            GeoToast.success('Economics complete');
+        } catch (e) {
+            GeoToast.error('Economics failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    },
+
+    _drawProductionEconomicsChart(rows) {
+        const canvas = document.getElementById('productionEconomicsCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width, h = canvas.height;
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, w, h);
+        if (!rows.length) {
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '13px sans-serif';
+            ctx.fillText('No forecast data', 16, 28);
+            return;
+        }
+        const margin = { left: 64, right: 18, top: 18, bottom: 30 };
+        const pw = w - margin.left - margin.right;
+        const ph = h - margin.top - margin.bottom;
+        const maxOil = Math.max(...rows.map(r => Number(r.oil_bbl) || 0), 1);
+        const x = i => margin.left + (rows.length <= 1 ? 0 : (i / (rows.length - 1)) * pw);
+        const y = v => margin.top + ph - (Number(v) / maxOil) * ph;
+        ctx.strokeStyle = '#30363d';
+        ctx.beginPath();
+        ctx.moveTo(margin.left, margin.top);
+        ctx.lineTo(margin.left, margin.top + ph);
+        ctx.lineTo(margin.left + pw, margin.top + ph);
+        ctx.stroke();
+        ctx.strokeStyle = '#58a6ff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        rows.forEach((row, i) => {
+            const px = x(i), py = y(row.oil_bbl);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        });
+        ctx.stroke();
+        ctx.fillStyle = '#c9d1d9';
+        ctx.font = '12px sans-serif';
+        ctx.fillText('Monthly oil (bbl)', margin.left, 13);
+        ctx.fillText('0', 34, margin.top + ph + 4);
+        ctx.fillText(Math.round(maxOil).toLocaleString(), 8, margin.top + 4);
+    },
 
     async addProductionRecord() {
         if (!this.currentWell) return GeoToast.warn('No well selected');
@@ -1142,7 +1288,8 @@ Object.assign(GeoLogApp.prototype, {
         await this._api('/wells/' + this.currentWell.id + '/production', { method: 'POST', body: JSON.stringify(r) });
         GeoToast.success('Production record saved');
         await this.loadProduction();
-    },
+    }
+,
 
     _initProductionCSVUpload() {
         const input = document.getElementById('productionCsvFileInput');
@@ -1173,7 +1320,8 @@ Object.assign(GeoLogApp.prototype, {
                 input.value = '';
             }
         });
-    },
+    }
+,
 
     async openTrajectoryEditor() {
         if (!this.currentWell) return GeoToast.warn('No well selected');
@@ -1200,7 +1348,8 @@ Object.assign(GeoLogApp.prototype, {
             if (status) status.textContent = result.points + ' pts, TVD ' + result.tvd_range[0] + '-' + result.tvd_range[1] + ' ft';
         } catch (e) { GeoToast.error('Trajectory failed: ' + e.message); }
         finally { GeoLoading.hide(); }
-    },
+    }
+,
 
     async viewTrajectory() {
         if (!this.currentWell) return;
@@ -1211,7 +1360,8 @@ Object.assign(GeoLogApp.prototype, {
             if (panel) panel.textContent = data.points.length + ' pts, TVD range: ' + data.points[0].tvd + '-' + data.points[data.points.length - 1].tvd + ' ft';
             GeoToast.info('Trajectory loaded: ' + data.points.length + ' points');
         } catch { GeoToast.info('No trajectory data'); }
-    },
+    }
+,
 
     async loadDataTable() {
         if (!this.currentWell || !this.currentLogRun) return;
@@ -1241,7 +1391,8 @@ Object.assign(GeoLogApp.prototype, {
             html += '</tbody></table></div>';
             document.getElementById('dataTableContent').innerHTML = html;
         } catch (e) { GeoToast.error(e.message); }
-    },
+    }
+,
 
     _sortDataTable(col) {
         if (!this._lastDataTable) return;
@@ -1273,7 +1424,8 @@ Object.assign(GeoLogApp.prototype, {
         }
         html += '</tbody></table></div>';
         document.getElementById('dataTableContent').innerHTML = html;
-    },
+    }
+,
 
     exportDataTableCSV() {
         if (!this._lastDataTable) { GeoToast.warning('Load data first'); return; }
@@ -1283,7 +1435,8 @@ Object.assign(GeoLogApp.prototype, {
         const blob = new Blob([csv], { type: 'text/csv' });
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
         a.download = `${this.currentWell?.name || 'data'}_table.csv`; a.click();
-    },
+    }
+,
 
     _renderTopsManagement() {
         if (!this.currentWell) return;
@@ -1315,7 +1468,8 @@ Object.assign(GeoLogApp.prototype, {
         html += '</tbody></table></div>';
         if (!tops.length) html = '<p style="color:#8b949e">No formation tops. Add one from the viewer toolbar or import CSV.</p>';
         document.getElementById('topsMgmtContent').innerHTML = html;
-    },
+    }
+,
 
     async exportTopsCSV() {
         if (!this.projects?.[0]) return;
@@ -1328,7 +1482,8 @@ Object.assign(GeoLogApp.prototype, {
             a.download = `tops_project_${pid}.csv`; a.click();
             GeoToast.success('Tops exported');
         } catch (e) { GeoToast.error(e.message); }
-    },
+    }
+,
 
     async exportTopsPetrel() {
         if (!this.currentWell) return;
@@ -1342,7 +1497,8 @@ Object.assign(GeoLogApp.prototype, {
             a.click();
             GeoToast.success('Petrel-format tops exported');
         } catch (e) { GeoToast.error(e.message); }
-    },
+    }
+,
 
     async importTopsCSV() {
         if (!this.currentWell) { GeoToast.warning('Select a well first'); return; }
@@ -1362,7 +1518,8 @@ Object.assign(GeoLogApp.prototype, {
             } catch (e) { GeoToast.error(e.message); }
         };
         input.click();
-    },
+    }
+,
 
     async deleteFormationTop(id) {
         if (!confirm('Delete this formation top?')) return;
@@ -1373,19 +1530,23 @@ Object.assign(GeoLogApp.prototype, {
             if (this.renderer) this.renderer.formationTops = this.formationTops;
             GeoToast.success('Top deleted');
         } catch (e) { GeoToast.error(e.message); }
-    },
+    }
+,
 
     async uploadLASForWell(wid) {
         return this._uploadLogFormatForWell(wid, 'las');
-    },
+    }
+,
 
     async uploadDLISForWell(wid) {
         return this._uploadLogFormatForWell(wid, 'dlis');
-    },
+    }
+,
 
     async uploadLISForWell(wid) {
         return this._uploadLogFormatForWell(wid, 'lis');
-    },
+    }
+,
 
     deleteWell(wid) {
         if (!confirm('Delete this well and all its data?')) return;
@@ -1393,5 +1554,6 @@ Object.assign(GeoLogApp.prototype, {
             GeoToast.success('Well deleted');
             this.loadProjects();
         });
-    },
+    }
+,
 });

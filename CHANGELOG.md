@@ -12,6 +12,8 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
+- **Production economics.** Seeded Monte Carlo around exponential/hyperbolic
+  decline, P90/P50/P10 EUR and NPV, payout, and a simple net-cash-flow model.
 - **Two-instance PostgreSQL probe** in CI: shared ACL, login lockout,
   snapshots/well locks and a job submitted on one instance and polled on another.
 

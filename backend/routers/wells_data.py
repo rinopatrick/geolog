@@ -155,6 +155,7 @@ _trapezoid = getattr(np, "trapezoid", None) or getattr(np, "trapz")
 
 
 try:
+    from production_economics import evaluate as evaluate_production_economics
     from routers.wells import (
         _to_float_or_none, _extract_las_coordinates, _build_petro_summary,
         _semantic_curves, _first_curve, _aligned, _safe_float,
@@ -163,6 +164,7 @@ try:
         _require_well_admin,
     )
 except ImportError:
+    from backend.production_economics import evaluate as evaluate_production_economics
     from backend.routers.wells import (
         _to_float_or_none, _extract_las_coordinates, _build_petro_summary,
         _semantic_curves, _first_curve, _aligned, _safe_float,
@@ -636,6 +638,33 @@ def production_decline_curve(wid: int, db: Session = Depends(get_db)):
         },
     }
     return payload
+
+
+@router.post("/{wid}/production/economics")
+def production_economics(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Probabilistic decline forecast with NPV and payout assumptions."""
+    rows = (
+        db.query(ProductionData)
+        .filter(ProductionData.well_id == wid)
+        .order_by(ProductionData.date.asc(), ProductionData.id.asc())
+        .all()
+    )
+    valid = [
+        (r.date, float(r.oil_rate))
+        for r in rows
+        if r.date is not None and r.oil_rate is not None and r.oil_rate > 0
+    ]
+    if len(valid) < 3:
+        raise HTTPException(400, "Need at least 3 positive oil-rate data points")
+    try:
+        result = evaluate_production_economics(
+            [d for d, _ in valid],
+            [q for _, q in valid],
+            data or {},
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"well_id": wid, **result}
 
 
 @router.get("/{wid}/aliases")
