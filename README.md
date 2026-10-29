@@ -423,7 +423,9 @@ Configuration reference:
 | `AUTH_JWT_ALGORITHMS` | `HS256` | Comma-separated allowed algorithms |
 | `GEOLOG_CORS_ORIGINS` | unset | Comma-separated allowed origins. Unset disables CORS entirely; the bundled frontend is same-origin and needs none |
 | `GEOLOG_DB_PATH` | `backend/geolog.db` | SQLite file location |
-| `GEOLOG_ARTIFACT_DIR` | `backend/artifacts` | Interpretation snapshots, well locks, jobs, metrics and rate-limit state |
+| `GEOLOG_ARTIFACT_DIR` | `backend/artifacts` | File backend state, image/core assets and security evidence |
+| `GEOLOG_STATE_BACKEND` | `file` | `database` moves rate limits, metrics, jobs, locks and snapshots into the primary database; use PostgreSQL for multi-host |
+| `GEOLOG_JOB_STALE_SECONDS` | `900` | Reclaim a running job whose worker stopped heartbeating |
 | `GEOLOG_RUN_MIGRATIONS_ON_STARTUP` | `true` in dev/test, `false` elsewhere | Production must run `alembic upgrade head` as a deploy step |
 | `GEOLOG_FAIL_ON_SCHEMA_MISMATCH` | `true` outside dev | Refuse to start when the live schema differs from the models |
 | `GEOLOG_ENFORCE_PROJECT_ACL` | `true` | Project membership enforcement; see `docs/PROJECT_ACL.md` |

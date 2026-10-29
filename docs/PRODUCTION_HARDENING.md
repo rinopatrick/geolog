@@ -109,7 +109,11 @@ that refactor.
   `GEOLOG_ENV=prod python -m alembic upgrade head`. Production startup verifies
   the schema and fails fast instead of running DDL from every worker.
 - SQLite is a single-host database. Do not put it on NFS or share it between
-  hosts. Use one host (multiple uvicorn workers are fine).
+  hosts. Multiple uvicorn workers on one host are fine.
+- For multiple hosts, use PostgreSQL plus `GEOLOG_STATE_BACKEND=database`.
+  Rate limits, metrics, jobs, locks and snapshots then share the database, and
+  the audit chain uses a PostgreSQL advisory lock. Put binary assets and
+  security evidence on a shared volume or object store.
 - Set `GEOLOG_DB_PATH` and `GEOLOG_ARTIFACT_DIR` to mounted persistent volumes.
 - The audit chain, metrics, jobs, well locks and snapshots use a cross-process
   file lock. The volumes must support file locking.
