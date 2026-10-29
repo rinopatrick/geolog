@@ -87,9 +87,11 @@ const GeoAPI = {
 
     async _apiBlob(app, path, opts = {}) {
         const { headers: optHeaders, ...rest } = opts;
+        const headers = { ...app._authHeaders(), ...(optHeaders || {}) };
+        if (typeof rest.body === 'string' && rest.body) headers['Content-Type'] = 'application/json';
         const resp = await fetch('/api' + path, {
             ...rest,
-            headers: { ...app._authHeaders(), ...(optHeaders || {}) },
+            headers,
         });
         if (!resp.ok) throw new Error(`Export error: ${resp.status}`);
         return resp.blob();

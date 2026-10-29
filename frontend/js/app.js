@@ -475,6 +475,7 @@ class GeoLogApp {
         document.getElementById('zonationPanel').style.display = view === 'zonation' ? 'block' : 'none';
         document.getElementById('unitsPanel').style.display = view === 'units' ? 'block' : 'none';
         document.getElementById('templatesPanel').style.display = view === 'templates' ? 'block' : 'none';
+        document.getElementById('reportBuilderPanel').style.display = view === 'reportbuilder' ? 'block' : 'none';
 
         // Sprint 26: Update status bar + trigger panel-specific loads
         this._updateStatusBar(view);
@@ -483,6 +484,7 @@ class GeoLogApp {
         if (view === 'users') this.loadUsers();
         if (view === 'jobmonitor') this._refreshJobMonitor();
         if (view === 'seismic') this.loadSeismicLines();
+        if (view === 'reportbuilder') this.loadReportTemplates();
 
         if (view === 'crossplot') this._renderCrossPlot();
         if (view === 'pickett') this._renderPickettPlot();

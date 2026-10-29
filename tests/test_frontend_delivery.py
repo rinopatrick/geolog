@@ -62,5 +62,6 @@ def test_markup_has_no_inline_event_handlers():
     assert "/static/js/sidebar.js" in index
     assert "/static/js/ui.js" in index
     assert "/static/js/api-client.js" in index
+    assert "/static/js/app-report-builder.js" in index
     assert "/static/js/bootstrap.js" in index
     assert "<script>" not in index
