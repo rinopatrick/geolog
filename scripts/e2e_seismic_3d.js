@@ -109,6 +109,13 @@ function buildVolume() {
       document.getElementById('segyCompartmentContact').value = '1000';
       await app.buildCompartments();
       const compartmentsOk = (app._segyCompartments || []).length > 0;
+      document.getElementById('fenceStart').value = '100,200';
+      document.getElementById('fenceEnd').value = '100,247';
+      await app.addFenceSegment();
+      const fenceOk = (app._segyFences || []).length > 0;
+      document.getElementById('mapMode').value = 'seismic';
+      await app.renderWellMap();
+      const mapOk = (app._projectMap?.lines || []).length > 0;
       let tieOk = true;
       if (!app.currentWell && app.projects?.[0]) {
         await app.loadWells(app.projects[0].id);
@@ -128,7 +135,7 @@ function buildVolume() {
       await app.buildProspectPortfolio();
       const portfolioOk = (app._segyPortfolios || []).length > 0;
       return {
-        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && surfaceOk && depthOk && tieOk && prospectOk && portfolioOk && compartmentsOk && (app._segyFaultLinks || []).length > 0,
+        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && surfaceOk && depthOk && tieOk && prospectOk && portfolioOk && compartmentsOk && fenceOk && mapOk && (app._segyFaultLinks || []).length > 0,
         lineId: line.id,
         volumeOk,
         inlineOk,
@@ -145,6 +152,8 @@ function buildVolume() {
         portfolioOk,
         compartmentsOk,
         compartmentCount: (app._segyCompartments || []).length,
+        fenceOk,
+        mapOk,
         portfolioEmv: app._segyPortfolios?.[0]?.result?.portfolio?.total_emv ?? null,
         prospectP50: app._segyProspects?.[0]?.result?.stoiip?.p50_m3 ?? null,
         surfaceName: app._segySurface?.name || '',

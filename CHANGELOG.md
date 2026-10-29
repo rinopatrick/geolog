@@ -16,6 +16,8 @@ While the major version is `0`, the API is not yet stable.
   portfolios and CSV export.
 - **Structural framework.** Fault surfaces from linked picks and map-based
   compartments with per-compartment GRV/area.
+- **Map and fence workspace.** Project map for wells/ties/faults/prospects,
+  arbitrary seismic lines and multi-segment fence diagrams.
 
 ## [0.15.0] - 2026-10-31
 

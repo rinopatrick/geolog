@@ -1027,8 +1027,12 @@
 
         <div id="mapPanel" class="panel" style="display:none">
             <div class="panel-toolbar">
-                <div class="toolbar-group"><label>Well Location Map</label><span class="toolbar-hint">Spatial distribution of wells — click dot to select well</span></div>
-                <button class="btn-primary" data-action="app.renderWellMap"><i data-lucide="refresh-cw"></i> Refresh</button>
+                <div class="toolbar-group"><label>Project Map</label><span class="toolbar-hint">Wells, seismic ties, faults and prospects</span></div>
+                <div class="toolbar-group">
+                    <select id="mapMode"><option value="wells">Wells</option><option value="seismic">Seismic</option></select>
+                    <select id="mapLineSelect" style="min-width:180px"></select>
+                    <button class="btn-primary" data-action="app.renderWellMap"><i data-lucide="refresh-cw"></i> Refresh</button>
+                </div>
             </div>
             <div class="crossplot-container"><canvas id="mapCanvas"></canvas></div>
             <div id="mapResults" class="stats-container" style="margin-top:10px"></div>
@@ -1461,6 +1465,14 @@
                     </div>
                     <div id="prospectList" style="font-size:12px;color:#8b949e;margin-top:6px"></div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+                        <input id="fenceStart" placeholder="start inline,xline" style="width:150px">
+                        <input id="fenceEnd" placeholder="end inline,xline" style="width:150px">
+                        <button class="btn-sm" data-action="app.addFenceSegment"><i data-lucide="git-branch"></i> Add fence</button>
+                        <button class="btn-sm" data-action="app.clearFences">Clear</button>
+                        <span id="fenceStatus" class="toolbar-hint"></span>
+                    </div>
+                    <canvas id="segyFenceCanvas" width="1000" height="380" style="width:100%;margin-top:10px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
                         <input id="portfolioName" placeholder="Portfolio" value="Portfolio A" style="min-width:130px">
                         <input id="portfolioPrice" type="number" value="60" title="Price per BOE" style="width:90px">
                         <input id="portfolioOpex" type="number" value="10" title="Opex per BOE" style="width:90px">
@@ -1781,6 +1793,7 @@
     <script src="/static/js/app-petro.js"></script>
     <script src="/static/js/app-correlation.js"></script>
     <script src="/static/js/app-segy.js"></script>
+<script src="/static/js/app-map.js"></script>
     <script src="/static/js/app-report-builder.js"></script>
     <script src="/static/js/bootstrap.js"></script>
 </body>

@@ -432,6 +432,96 @@ Object.assign(GeoLogApp.prototype, {
         }
     },
 
+    async addFenceSegment() {
+        const line = this._segyLine;
+        if (!line) return GeoToast.warn('Load a SEG-Y line first.');
+        const parse = value => String(value || '').split(',').map(item => Number(item.trim()));
+        const start = parse(document.getElementById('fenceStart')?.value);
+        const end = parse(document.getElementById('fenceEnd')?.value);
+        if (start.length !== 2 || end.length !== 2 || start.some(value => !Number.isFinite(value)) || end.some(value => !Number.isFinite(value))) {
+            return GeoToast.warn('Use inline,crossline for both fence ends.');
+        }
+        const inlineSpacing = Number(document.getElementById('segyInlineSpacing')?.value);
+        const crosslineSpacing = Number(document.getElementById('segyCrosslineSpacing')?.value);
+        const params = new URLSearchParams({
+            inline1: String(start[0]),
+            crossline1: String(start[1]),
+            inline2: String(end[0]),
+            crossline2: String(end[1]),
+            max_traces: '600',
+            max_samples: '600',
+        });
+        if (inlineSpacing > 0 && crosslineSpacing > 0) {
+            params.set('inline_spacing_m', String(inlineSpacing));
+            params.set('crossline_spacing_m', String(crosslineSpacing));
+        }
+        try {
+            const fence = await this._api(`/seismic/${line.id}/arbitrary-line?${params.toString()}`);
+            this._segyFences = [...(this._segyFences || []), fence];
+            this._drawSeismicFences();
+            const status = document.getElementById('fenceStatus');
+            if (status) status.textContent = `${this._segyFences.length} fence segment(s)`;
+            GeoToast.success('Fence segment added');
+        } catch (e) {
+            GeoToast.error('Fence failed: ' + e.message);
+        }
+    },
+
+    clearFences() {
+        this._segyFences = [];
+        this._drawSeismicFences();
+        const status = document.getElementById('fenceStatus');
+        if (status) status.textContent = '';
+    },
+
+    _drawSeismicFences() {
+        const canvas = document.getElementById('segyFenceCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, w, h);
+        const fences = this._segyFences || [];
+        if (!fences.length) {
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '13px sans-serif';
+            ctx.fillText('Add an arbitrary line to build a fence diagram', 18, 28);
+            return;
+        }
+        const gap = 12;
+        const segmentWidth = (w - gap * (fences.length + 1)) / fences.length;
+        fences.forEach((fence, fenceIndex) => {
+            const rows = fence.data.length;
+            const cols = fence.data[0]?.length || 0;
+            if (!rows || !cols) return;
+            const x0 = gap + fenceIndex * (segmentWidth + gap);
+            const top = 28;
+            const plotH = h - 58;
+            const maxAbs = Math.max(Math.abs(fence.amplitude_min || 0), Math.abs(fence.amplitude_max || 1), 1e-9);
+            for (let y = 0; y < rows; y += 1) {
+                for (let x = 0; x < cols; x += 1) {
+                    const norm = Math.max(-1, Math.min(1, (Number(fence.data[y][x]) || 0) / maxAbs));
+                    ctx.fillStyle = norm >= 0
+                        ? `rgba(255, ${Math.round(140 - norm * 60)}, ${Math.round(80 - norm * 40)}, 1)`
+                        : `rgba(40, ${Math.round(120 + norm * 40)}, ${Math.round(180 + norm * 60)}, 1)`;
+                    ctx.fillRect(
+                        x0 + (x / cols) * segmentWidth,
+                        top + (y / rows) * plotH,
+                        Math.ceil(segmentWidth / cols) + 1,
+                        Math.ceil(plotH / rows) + 1
+                    );
+                }
+            }
+            ctx.strokeStyle = '#30363d';
+            ctx.strokeRect(x0, top, segmentWidth, plotH);
+            ctx.fillStyle = '#c9d1d9';
+            ctx.font = '11px sans-serif';
+            ctx.fillText(`${fence.start?.inline}/${fence.start?.crossline} → ${fence.end?.inline}/${fence.end?.crossline}`, x0, 16);
+            ctx.fillText(`${fence.labels?.[0] ?? 0} → ${fence.labels?.[fence.labels.length - 1] ?? 0} ${fence.label_name === 'distance_m' ? 'm' : ''}`, x0, h - 10);
+        });
+    },
+
     async buildCompartments() {
         const line = this._segyLine;
         const surface = this._segySurface;
