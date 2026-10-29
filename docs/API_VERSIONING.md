@@ -3,8 +3,9 @@
 The current public API is **v0**, mounted at `/api`. Responses carry
 `X-API-Version: v0`.
 
-`/api/v1/*` is also available as a stable alias for the same handlers while the
-contract is frozen. Responses on that prefix carry `X-API-Version: v1`.
+`/api/v1/*` is the frozen prefix for the current handlers. Responses on that
+prefix carry `X-API-Version: v1`. Future breaking changes go to `/api/v2`; the
+v1 routes stay on the contract documented here.
 `GET /api/version` (or `/api/v1/version`) reports the app version and the prefix
 that served the request.
 
