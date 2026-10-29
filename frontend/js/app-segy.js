@@ -432,6 +432,41 @@ Object.assign(GeoLogApp.prototype, {
         }
     },
 
+    async buildCompartments() {
+        const line = this._segyLine;
+        const surface = this._segySurface;
+        if (!line || !surface) return GeoToast.warn('Build or load a depth surface first.');
+        const contact = Number(document.getElementById('segyCompartmentContact')?.value);
+        if (!(contact > 0)) return GeoToast.warn('Enter a contact depth in metres.');
+        try {
+            const result = await this._api(`/seismic/${line.id}/surfaces/${surface.id}/compartments`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    contact_depth_m: contact,
+                    fault_link_ids: (this._segyFaultLinks || []).map(link => link.id),
+                }),
+            });
+            this._segyCompartments = result.compartments || [];
+            this._renderCompartmentList();
+            const status = document.getElementById('segyCompartmentStatus');
+            if (status) {
+                status.textContent = `${result.compartments.length} compartments · GRV ${Math.round(result.total_grv_m3).toLocaleString()} m³`;
+            }
+            GeoToast.success('Compartments built');
+        } catch (e) {
+            GeoToast.error('Compartment build failed: ' + e.message);
+        }
+    },
+
+    _renderCompartmentList() {
+        const host = document.getElementById('segyCompartmentList');
+        if (!host) return;
+        const compartments = this._segyCompartments || [];
+        host.innerHTML = compartments.length
+            ? compartments.map(item => `<span style="margin-right:14px">C${item.id} · ${Math.round(item.grv_m3).toLocaleString()} m³ · ${Math.round(item.area_m2).toLocaleString()} m²</span>`).join('')
+            : 'No compartments built yet.';
+    },
+
     async convertSurfaceDepth() {
         const line = this._segyLine;
         const surface = this._segySurface;
@@ -539,6 +574,8 @@ Object.assign(GeoLogApp.prototype, {
         if (!line || !id) return;
         try {
             this._segySurface = await this._api(`/seismic/${line.id}/surfaces/${id}`);
+            this._segyCompartments = this._segySurface.compartments || [];
+            this._renderCompartmentList();
             this._drawSeismicSurfaceMap();
             const status = document.getElementById('segySurfaceStatus');
             if (status) {

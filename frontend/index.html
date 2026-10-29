@@ -1431,7 +1431,11 @@
                         <select id="segyVelocityModel" style="min-width:180px"></select>
                         <select id="segySurfaceDomain"><option value="time">Time</option><option value="depth">Depth</option></select>
                         <button class="btn-sm" data-action="app.convertSurfaceDepth"><i data-lucide="arrow-down-up"></i> Convert depth</button>
+                        <input id="segyCompartmentContact" type="number" placeholder="contact m" style="width:100px">
+                        <button class="btn-sm" data-action="app.buildCompartments"><i data-lucide="split"></i> Compartments</button>
+                        <span id="segyCompartmentStatus" class="toolbar-hint"></span>
                     </div>
+                    <div id="segyCompartmentList" style="font-size:12px;color:#8b949e;margin-top:6px"></div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
                         <input id="segyTieInline" type="number" placeholder="tie inline" style="width:100px">
                         <input id="segyTieCrossline" type="number" placeholder="tie xline" style="width:100px">

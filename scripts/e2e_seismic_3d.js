@@ -106,6 +106,9 @@ function buildVolume() {
       });
       await app.loadSeismicSurface(app._segySurface.id);
       const depthOk = (app._segySurface?.depth_grid || []).length > 0;
+      document.getElementById('segyCompartmentContact').value = '1000';
+      await app.buildCompartments();
+      const compartmentsOk = (app._segyCompartments || []).length > 0;
       let tieOk = true;
       if (!app.currentWell && app.projects?.[0]) {
         await app.loadWells(app.projects[0].id);
@@ -125,7 +128,7 @@ function buildVolume() {
       await app.buildProspectPortfolio();
       const portfolioOk = (app._segyPortfolios || []).length > 0;
       return {
-        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && surfaceOk && depthOk && tieOk && prospectOk && portfolioOk && (app._segyFaultLinks || []).length > 0,
+        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && surfaceOk && depthOk && tieOk && prospectOk && portfolioOk && compartmentsOk && (app._segyFaultLinks || []).length > 0,
         lineId: line.id,
         volumeOk,
         inlineOk,
@@ -140,6 +143,8 @@ function buildVolume() {
         tieShiftMs: app._segyTie?.shift_ms ?? null,
         prospectOk,
         portfolioOk,
+        compartmentsOk,
+        compartmentCount: (app._segyCompartments || []).length,
         portfolioEmv: app._segyPortfolios?.[0]?.result?.portfolio?.total_emv ?? null,
         prospectP50: app._segyProspects?.[0]?.result?.stoiip?.p50_m3 ?? null,
         surfaceName: app._segySurface?.name || '',

@@ -421,3 +421,93 @@ def test_build_surface_from_inline_horizons():
 
     deleted = client.delete(f"/api/seismic/{line_id}/surfaces/{body['id']}", headers=ADMIN)
     assert deleted.status_code == 204
+
+def test_structural_fault_surface_and_compartments():
+    pid = _project_id()
+    upload = client.post(
+        f"/api/projects/{pid}/seismic",
+        files={"file": ("structure.sgy", _segy_volume(), "application/octet-stream")},
+        data={"name": "Structure Volume"},
+        headers=ADMIN,
+    )
+    assert upload.status_code == 201, upload.text
+    line_id = upload.json()["id"]
+    for index, inline in enumerate([100, 101, 102]):
+        created = client.post(
+            f"/api/seismic/{line_id}/horizons",
+            json={
+                "name": "Structure Top",
+                "mode": "inline",
+                "section_value": inline,
+                "picks": [
+                    {"trace": 2, "sample": 10 + index},
+                    {"trace": 20, "sample": 14 + index},
+                    {"trace": 30, "sample": 14 + index},
+                ],
+            },
+            headers=ADMIN,
+        )
+        assert created.status_code == 201, created.text
+    surface = client.post(
+        f"/api/seismic/{line_id}/surfaces",
+        json={
+            "name": "Structure Surface",
+            "horizon_name": "Structure Top",
+            "max_grid": 24,
+            "inline_spacing_m": 25,
+            "crossline_spacing_m": 25,
+        },
+        headers=ADMIN,
+    )
+    assert surface.status_code == 201, surface.text
+    surface_id = surface.json()["id"]
+
+    model = client.post(
+        f"/api/projects/{pid}/velocity-models",
+        json={"name": "Structure 2000", "kind": "constant", "velocity_m_s": 2000},
+        headers=ADMIN,
+    )
+    assert model.status_code == 201, model.text
+    model_id = model.json()["id"]
+    converted = client.post(
+        f"/api/seismic/{line_id}/surfaces/{surface_id}/depth",
+        json={"velocity_model_id": model_id},
+        headers=ADMIN,
+    )
+    assert converted.status_code == 200, converted.text
+    assert converted.json()["depth_stats"]["max_depth_m"] > 0
+
+    linked = client.post(
+        f"/api/seismic/{line_id}/faults/link-3d",
+        json={"threshold": 0.5, "min_points": 4, "max_sections": 6, "sample_tolerance": 8},
+        headers=ADMIN,
+    )
+    assert linked.status_code == 201, linked.text
+    links = linked.json()["links"]
+    assert links
+    link_id = links[0]["id"]
+
+    fault_surface = client.post(
+        f"/api/seismic/{line_id}/fault-links/{link_id}/surface",
+        json={"velocity_model_id": model_id, "max_grid": 20},
+        headers=ADMIN,
+    )
+    assert fault_surface.status_code == 201, fault_surface.text
+    fault_body = fault_surface.json()
+    assert fault_body["domain"] == "depth"
+    assert fault_body["grid"] and fault_body["inlines"]
+
+    compartments = client.post(
+        f"/api/seismic/{line_id}/surfaces/{surface_id}/compartments",
+        json={"contact_depth_m": 1000, "fault_link_ids": [link_id]},
+        headers=ADMIN,
+    )
+    assert compartments.status_code == 200, compartments.text
+    body = compartments.json()
+    assert body["fault_count"] == 1
+    assert body["compartments"]
+    assert body["total_grv_m3"] > 0
+
+    detail = client.get(f"/api/seismic/{line_id}/surfaces/{surface_id}", headers=ADMIN)
+    assert detail.status_code == 200
+    assert detail.json()["compartments"]["total_grv_m3"] == body["total_grv_m3"]

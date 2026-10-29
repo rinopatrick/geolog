@@ -816,6 +816,24 @@ class WellSeismicTie(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
+class FaultSurface(Base):
+    """A gridded surface built from one linked 3D fault."""
+
+    __tablename__ = "fault_surfaces"
+
+    id = Column(Integer, primary_key=True, index=True)
+    line_id = Column(Integer, ForeignKey("seismic_lines.id"), nullable=False, index=True)
+    link_id = Column(Integer, ForeignKey("seismic_fault_links.id"), nullable=False, index=True)
+    name = Column(String(160), nullable=False)
+    grid_json = Column(Text, default="[]")
+    inlines_json = Column(Text, default="[]")
+    crosslines_json = Column(Text, default="[]")
+    domain = Column(String(20), default="time")
+    velocity_model_id = Column(Integer, ForeignKey("velocity_models.id"), nullable=True)
+    stats_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=utcnow)
+
+
 class VelocityModel(Base):
     """Project time-depth model for seismic depth conversion."""
 
@@ -847,6 +865,7 @@ class SeismicSurface(Base):
     stats_json = Column(Text, default="{}")
     depth_grid_json = Column(Text, default="[]")
     depth_stats_json = Column(Text, default="{}")
+    compartments_json = Column(Text, default="[]")
     velocity_model_id = Column(Integer, ForeignKey("velocity_models.id"), nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
