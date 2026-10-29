@@ -102,8 +102,8 @@ jobs:
           cat /tmp/geolog-api.log || true
           exit 1
 
-      - name: Backup/restore drill smoke
-        run: bash scripts/backup_restore_drill.sh backend/geolog.db
+      - name: Backup/restore drill smoke (database + artifacts)
+        run: bash scripts/backup_restore_drill.sh backend/geolog.db backend/artifacts
 
       - name: API attestation gate
         run: python scripts/security_evidence_attest.py --base-url http://127.0.0.1:8000 --artifact-dir artifacts/backup-drill

@@ -12,5 +12,9 @@ from __future__ import annotations
 
 __version__ = "0.8.1"
 
+# Public API generation. The `/api` prefix is v0 until a breaking change needs
+# a new prefix; clients can branch on the X-API-Version response header.
+__api_version__ = "v0"
+
 # Short label for the release line, used in the UI and the health payload.
 __release_name__ = "completion"
