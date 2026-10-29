@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 try:
     from database import SessionLocal, get_db
-    from jobs import JOB_EXECUTOR, create_job as _create_job, update_job as _update_job, utc_now_iso as _utc_now_iso
+    from jobs import register_handler as _register_handler, submit_job as _submit_job, update_job as _update_job
     from models import LogRun, NmrInversion, Well
     from nmr import (
         DEFAULT_CUTOFF_MS,
@@ -28,7 +28,7 @@ try:
     )
 except ImportError:
     from backend.database import SessionLocal, get_db
-    from backend.jobs import JOB_EXECUTOR, create_job as _create_job, update_job as _update_job, utc_now_iso as _utc_now_iso
+    from backend.jobs import register_handler as _register_handler, submit_job as _submit_job, update_job as _update_job
     from backend.models import LogRun, NmrInversion, Well
     from backend.nmr import (
         DEFAULT_CUTOFF_MS,
@@ -160,7 +160,7 @@ def invert_nmr_async(wid: int, data: dict):
         raise HTTPException(400, "te_ms must be numeric")
     if any(v <= 0 for v in te):
         raise HTTPException(400, "TE values must be positive")
-    bins = _bins(data, int(data.get("n_bins", 24) or 24))
+    bins = [float(v) for v in _bins(data, int(data.get("n_bins", 24) or 24))]
     cutoff = float(data.get("cutoff_ms", DEFAULT_CUTOFF_MS) or DEFAULT_CUTOFF_MS)
     lam = float(data.get("lambda_value", data.get("lambda", 0.1)) or 0.1)
 
@@ -172,33 +172,13 @@ def invert_nmr_async(wid: int, data: dict):
     finally:
         db.close()
 
-    job_id = _create_job("nmr-inversion")
-
-    def _run():
-        db2 = SessionLocal()
-        try:
-            _update_job(job_id, status="running", progress=10, started_at=_utc_now_iso())
-            lr2 = _log_run(db2, wid, lr_id)
-            depth, matrix, _ = read_echo_matrix(db2, lr2, [str(v) for v in echoes], te)
-            amplitudes = regularized_invert(matrix, te, bins, lam)
-            derived = derived_curves(amplitudes, bins, cutoff)
-            inv = store_inversion(
-                db2, wid, lr2.id, "nnls", bins, amplitudes, depth,
-                cutoff, lam,
-                {"method": "nnls", "echo_mnemonics": echoes, "te_ms": te, "cutoff_ms": cutoff, "lambda": lam},
-            )
-            saved = store_derived_curves(db2, lr2.id, derived)
-            _update_job(
-                job_id, status="done", progress=100,
-                result={"inversion_id": inv.id, "stats": summary(derived), "curves_saved": saved},
-            )
-        except Exception as exc:
-            _update_job(job_id, status="failed", progress=100, error=str(exc))
-        finally:
-            _update_job(job_id, finished_at=_utc_now_iso())
-            db2.close()
-
-    JOB_EXECUTOR.submit(_run)
+    job_id = _submit_job(
+        "nmr-inversion",
+        {
+            "wid": wid, "lr_id": lr_id, "echoes": echoes, "te": te,
+            "bins": bins, "cutoff": cutoff, "lam": lam,
+        },
+    )
     return {"job_id": job_id, "status": "queued"}
 
 @router.get("/nmr/inversions")
@@ -246,3 +226,31 @@ def get_nmr_distribution(wid: int, inversion_id: int, max_points: int = 800, db:
         "amplitudes": [[round(float(v), 6) for v in row] for row in amps[::step]],
         "n_points": int(len(depth[::step])),
     }
+
+
+def _run_nmr_inversion_job(payload: dict, job_id: str):
+    db = SessionLocal()
+    try:
+        _update_job(job_id, progress=10)
+        wid = int(payload["wid"])
+        lr_id = int(payload["lr_id"])
+        echoes = [str(v) for v in payload.get("echoes") or []]
+        te = [float(v) for v in payload.get("te") or []]
+        bins = [float(v) for v in payload.get("bins") or []]
+        cutoff = float(payload.get("cutoff") or DEFAULT_CUTOFF_MS)
+        lam = float(payload.get("lam") or 0.1)
+        lr = _log_run(db, wid, lr_id)
+        depth, matrix, _ = read_echo_matrix(db, lr, echoes, te)
+        amplitudes = regularized_invert(matrix, te, bins, lam)
+        derived = derived_curves(amplitudes, bins, cutoff)
+        inv = store_inversion(
+            db, wid, lr.id, "nnls", bins, amplitudes, depth, cutoff, lam,
+            {"method": "nnls", "echo_mnemonics": echoes, "te_ms": te, "cutoff_ms": cutoff, "lambda": lam},
+        )
+        saved = store_derived_curves(db, lr.id, derived)
+        return {"inversion_id": inv.id, "stats": summary(derived), "curves_saved": saved}
+    finally:
+        db.close()
+
+
+_register_handler("nmr-inversion", _run_nmr_inversion_job)

@@ -33,6 +33,7 @@ try:
         Well,
     )
     from semantics import apply_run_semantics
+    from uploads import read_upload
     from well_state import ARTIFACT_DIR
     from saturation_height import apply_model, fit_model, normalize_model_type
 except ImportError:
@@ -54,6 +55,7 @@ except ImportError:
         Well,
     )
     from backend.semantics import apply_run_semantics
+    from backend.uploads import read_upload
     from backend.well_state import ARTIFACT_DIR
     from backend.saturation_height import apply_model, fit_model, normalize_model_type
 
@@ -405,7 +407,7 @@ async def upload_core_photo(
     _well(db, wid)
     plug = _plug(db, wid, plug_id)
     _draft_guard(plug.dataset)
-    content = await file.read()
+    content = await read_upload(file)
     if not content:
         raise HTTPException(400, "Empty image")
     path, checksum = _save_core_image(wid, plug.id, file, content)
@@ -430,7 +432,7 @@ async def upload_thin_section(
     _well(db, wid)
     plug = _plug(db, wid, plug_id)
     _draft_guard(plug.dataset)
-    content = await file.read()
+    content = await read_upload(file)
     if not content:
         raise HTTPException(400, "Empty image")
     path, checksum = _save_core_image(wid, plug.id, file, content)
@@ -510,7 +512,7 @@ async def import_core_csv(
     db: Session = Depends(get_db),
 ):
     _well(db, wid)
-    content = await file.read()
+    content = await read_upload(file)
     if not content:
         raise HTTPException(400, "Empty file")
     rows = _read_import_rows(content, file.filename or "")
