@@ -45,7 +45,7 @@ GeoLog currently includes **35+ analysis views/panels** and **100+ API capabilit
 - **Multi-mineral solver workflows** via calculator/derived-curve tooling
 - **NMR T2** vendor-bin interpretation and raw CPMG NNLS inversion (`docs/NMR.md`)
 - **Core/SCAL** plugs, RCA/SCAL, capillary pressure, FZI flow units, Winland R35/FZI rock typing, five saturation-height models, XLSX import and staged depth matching (`docs/CORE_SCAL.md`)
-- **SEG-Y seismic** upload, section viewer and manual horizon picks for IBM/IEEE float lines (`docs/SEISMIC.md`)
+- **SEG-Y seismic** upload, section viewer, manual picks, correlation auto-tracking and coherence-based fault candidates for IBM/IEEE float lines (`docs/SEISMIC.md`)
 - **Production economics** with probabilistic decline (P90/P50/P10), NPV, payout and a simple fiscal model (`docs/PRODUCTION_ECONOMICS.md`)
 - **Source-rock screening** with Passey ΔlogR and Schmoker TOC, kerogen volume and stored `TOC`/`VKER` curves (`docs/SOURCE_ROCK.md`)
 - **Geomechanics** screening stress/pore-pressure/mud-window model, provenance labels and breakout calibration (`docs/GEOMECHANICS.md`)

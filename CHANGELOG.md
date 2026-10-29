@@ -19,6 +19,9 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
+- **Seismic auto-tracking and fault candidates.** Correlation-based horizon
+  tracking from a seed, 7-sample coherence fault detection, stored
+  `SeismicFault` rows and Seismic panel actions.
 - **SEG-Y seismic.** IBM/IEEE float reader, project upload, decimated section
   viewer, manual horizon picks and horizon persistence.
 - **Core rock typing.** Winland R35, RQI/FZI, Macro/Meso/Micro/Nanoport classes,

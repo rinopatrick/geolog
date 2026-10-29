@@ -6,21 +6,23 @@ import json
 import os
 import uuid
 
+import numpy as np
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 try:
     from acl import require_project_access
     from database import get_db
-    from models import Project, SeismicHorizon, SeismicLine
-    from seismic import parse_segy, section_payload
+    from models import Project, SeismicFault, SeismicHorizon, SeismicLine
+    from seismic import auto_track, detect_faults, parse_segy, section_payload
     from uploads import read_upload
     from well_state import ARTIFACT_DIR
 except ImportError:
     from backend.acl import require_project_access
     from backend.database import get_db
-    from backend.models import Project, SeismicHorizon, SeismicLine
-    from backend.seismic import parse_segy, section_payload
+    from backend.models import Project, SeismicFault, SeismicHorizon, SeismicLine
+    from backend.seismic import auto_track, detect_faults, parse_segy, section_payload
     from backend.uploads import read_upload
     from backend.well_state import ARTIFACT_DIR
 
@@ -54,6 +56,28 @@ def _meta(row: SeismicLine) -> dict:
         "amplitude_max": row.amplitude_max,
         "created_at": row.created_at.isoformat() if row.created_at else "",
     }
+
+
+def _fault(row: SeismicFault) -> dict:
+    try:
+        picks = json.loads(row.picks_json or "[]")
+    except json.JSONDecodeError:
+        picks = []
+    return {
+        "id": row.id,
+        "line_id": row.line_id,
+        "name": row.name,
+        "color": row.color,
+        "picks": picks,
+        "score": row.score,
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+    }
+
+
+def _section_from_line(row: SeismicLine) -> dict:
+    with open(row.file_path, "rb") as handle:
+        parsed = parse_segy(handle.read())
+    return section_payload(parsed, max_traces=600, max_samples=600)
 
 
 def _horizon(row: SeismicHorizon) -> dict:
@@ -195,5 +219,97 @@ def delete_seismic_horizon(line_id: int, horizon_id: int, request: Request, db: 
     item = db.query(SeismicHorizon).filter(SeismicHorizon.id == horizon_id, SeismicHorizon.line_id == line_id).first()
     if not item:
         raise HTTPException(404, "Horizon not found")
+    db.delete(item)
+    db.commit()
+
+
+@router.post("/seismic/{line_id}/horizons/auto-track", status_code=201)
+def auto_track_seismic_horizon(line_id: int, data: dict, request: Request, db: Session = Depends(get_db)):
+    row = _line(db, line_id)
+    require_project_access(db, request, row.project_id, write=True)
+    try:
+        section = _section_from_line(row)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(500, f"could not read SEG-Y: {exc}")
+    matrix = np.asarray(section["data"], dtype=float)
+    horizon = None
+    if data.get("horizon_id") is not None:
+        horizon = (
+            db.query(SeismicHorizon)
+            .filter(SeismicHorizon.id == int(data["horizon_id"]), SeismicHorizon.line_id == line_id)
+            .first()
+        )
+    seed_trace = data.get("seed_trace")
+    seed_sample = data.get("seed_sample")
+    if (seed_trace is None or seed_sample is None) and horizon is not None:
+        picks = json.loads(horizon.picks_json or "[]")
+        if picks:
+            middle = picks[len(picks) // 2]
+            seed_trace, seed_sample = middle.get("trace"), middle.get("sample")
+    if seed_trace is None or seed_sample is None:
+        seed_trace, seed_sample = matrix.shape[0] // 2, matrix.shape[1] // 2
+    window = max(2, min(int(data.get("window", 8) or 8), 40))
+    search_radius = max(1, min(int(data.get("search_radius", 12) or 12), 80))
+    tracked = auto_track(matrix, int(seed_trace), int(seed_sample), window=window, search_radius=search_radius)
+    name = str(data.get("name") or "Auto horizon").strip()
+    item = SeismicHorizon(
+        line_id=line_id,
+        name=name,
+        color=str(data.get("color") or "#58a6ff"),
+        picks_json=json.dumps(tracked["picks"]),
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {"horizon": _horizon(item), "confidence": tracked["confidence"], "picks_count": tracked["trace_count"]}
+
+
+@router.get("/seismic/{line_id}/faults")
+def list_seismic_faults(line_id: int, request: Request, db: Session = Depends(get_db)):
+    row = _line(db, line_id)
+    require_project_access(db, request, row.project_id)
+    rows = db.query(SeismicFault).filter(SeismicFault.line_id == line_id).order_by(SeismicFault.id.asc()).all()
+    return [_fault(item) for item in rows]
+
+
+@router.post("/seismic/{line_id}/faults/detect", status_code=201)
+def detect_seismic_faults(line_id: int, data: dict, request: Request, db: Session = Depends(get_db)):
+    row = _line(db, line_id)
+    require_project_access(db, request, row.project_id, write=True)
+    try:
+        section = _section_from_line(row)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(500, f"could not read SEG-Y: {exc}")
+    matrix = np.asarray(section["data"], dtype=float)
+    threshold = min(1.0, max(0.01, float(data.get("threshold", 0.35) or 0.35)))
+    min_points = max(2, min(int(data.get("min_points", 8) or 8), 500))
+    max_faults = max(1, min(int(data.get("max_faults", 20) or 20), 100))
+    detected = detect_faults(matrix, threshold=threshold, min_points=min_points, max_faults=max_faults)
+    if not detected:
+        return {"faults": [], "detail": "no low-coherence fault candidates found"}
+    created = []
+    for fault in detected:
+        item = SeismicFault(
+            line_id=line_id,
+            name=fault["name"],
+            color=fault["color"],
+            picks_json=json.dumps(fault["picks"]),
+            score=fault["score"],
+        )
+        db.add(item)
+        created.append(item)
+    db.commit()
+    for item in created:
+        db.refresh(item)
+    return {"faults": [_fault(item) for item in created]}
+
+
+@router.delete("/seismic/{line_id}/faults/{fault_id}", status_code=204)
+def delete_seismic_fault(line_id: int, fault_id: int, request: Request, db: Session = Depends(get_db)):
+    row = _line(db, line_id)
+    require_project_access(db, request, row.project_id, write=True)
+    item = db.query(SeismicFault).filter(SeismicFault.id == fault_id, SeismicFault.line_id == line_id).first()
+    if not item:
+        raise HTTPException(404, "Fault not found")
     db.delete(item)
     db.commit()

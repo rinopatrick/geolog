@@ -60,13 +60,15 @@ Object.assign(GeoLogApp.prototype, {
         if (!id) return;
         GeoLoading.show('Loading seismic section...');
         try {
-            const [payload, horizons] = await Promise.all([
+            const [payload, horizons, faults] = await Promise.all([
                 this._api(`/seismic/${id}/section?max_traces=600&max_samples=600`),
                 this._api(`/seismic/${id}/horizons`),
+                this._api(`/seismic/${id}/faults`),
             ]);
             this._segySection = payload.section;
             this._segyLine = payload.line;
             this._segyHorizons = horizons || [];
+            this._segyFaults = faults || [];
             this._segyPicks = [];
             this._drawSeismic();
             this._renderSeismicHorizonList();
@@ -131,6 +133,21 @@ Object.assign(GeoLogApp.prototype, {
             ctx.stroke();
         };
         for (const horizon of this._segyHorizons || []) drawPicks(horizon.picks, horizon.color || '#f0883e', 2);
+        for (const fault of this._segyFaults || []) {
+            if ((fault.picks || []).length === 1) {
+                const pick = fault.picks[0];
+                const x = (Number(pick.trace) / Math.max(1, cols - 1)) * w;
+                const y = (Number(pick.sample) / Math.max(1, rows - 1)) * h;
+                ctx.strokeStyle = fault.color || '#f85149';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(x, Math.max(0, y - 12));
+                ctx.lineTo(x, Math.min(h, y + 12));
+                ctx.stroke();
+            } else {
+                drawPicks(fault.picks, fault.color || '#f85149', 2);
+            }
+        }
         drawPicks(this._segyPicks || [], '#ffffff', 1.5);
     },
 
@@ -176,8 +193,54 @@ Object.assign(GeoLogApp.prototype, {
         const host = document.getElementById('segyHorizonList');
         if (!host) return;
         const rows = this._segyHorizons || [];
-        host.innerHTML = rows.length
+        const faults = this._segyFaults || [];
+        const horizonsHtml = rows.length
             ? rows.map(h => `<span style="margin-right:12px"><span style="display:inline-block;width:10px;height:10px;background:${escapeHtml(h.color || '#f0883e')};border-radius:2px"></span> ${escapeHtml(h.name)} (${(h.picks || []).length})</span>`).join('')
             : 'No horizons picked yet.';
+        const faultsHtml = faults.length
+            ? faults.map(f => `<span style="margin-right:12px;color:#f85149">${escapeHtml(f.name)} · ${(f.picks || []).length} pts</span>`).join('')
+            : 'No faults detected.';
+        host.innerHTML = `${horizonsHtml}<div style="margin-top:4px">${faultsHtml}</div>`;
+    },
+
+    async autoTrackSeismic() {
+        const line = this._segyLine;
+        if (!line) return GeoToast.warn('Load a SEG-Y line first.');
+        const seed = (this._segyPicks || [])[0];
+        const name = document.getElementById('segyHorizonName')?.value || 'Auto horizon';
+        try {
+            const result = await this._api(`/seismic/${line.id}/horizons/auto-track`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: `${name} auto`,
+                    seed_trace: seed?.trace,
+                    seed_sample: seed?.sample,
+                    window: 8,
+                    search_radius: 12,
+                }),
+            });
+            GeoToast.success(`Auto-tracked ${result.picks_count} traces (${Math.round(result.confidence * 100)}%)`);
+            await this.loadSeismicLine(line.id);
+        } catch (e) {
+            GeoToast.error('Auto-track failed: ' + e.message);
+        }
+    },
+
+    async detectSeismicFaults() {
+        const line = this._segyLine;
+        if (!line) return GeoToast.warn('Load a SEG-Y line first.');
+        GeoLoading.show('Detecting faults...');
+        try {
+            const result = await this._api(`/seismic/${line.id}/faults/detect`, {
+                method: 'POST',
+                body: JSON.stringify({ threshold: 0.35, min_points: 8, max_faults: 20 }),
+            });
+            GeoToast.success(result.faults?.length ? `${result.faults.length} fault candidate(s)` : 'No faults found');
+            await this.loadSeismicLine(line.id);
+        } catch (e) {
+            GeoToast.error('Fault detection failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
     },
 });
