@@ -43,6 +43,8 @@ While the major version is `0`, the API is not yet stable.
   `GET /api/version` for prefix/version discovery.
 - **Self-hosted Lucide** pinned at v0.468.0 with SRI; no `unpkg@latest` at runtime.
 - **Coverage gate** in CI (`scripts/coverage_gate.sh`).
+- **CodeQL** analysis for Python and JavaScript/TypeScript on push, PR and a
+  weekly schedule.
 - **Community health files**: security policy, contribution guide, code of
   conduct, PR template and issue forms.
 - **Dependabot** for pip, npm, GitHub Actions and Docker, grouped by ecosystem
