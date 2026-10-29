@@ -55,6 +55,49 @@ jobs:
             node --check "$f"
           done
 
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: geolog:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run image and probe health
+        run: |
+          set -euo pipefail
+          docker run -d --name geolog-ci -p 8000:8000 \
+            -e GEOLOG_ENV=dev \
+            -e GEOLOG_ENABLE_DEMO_SEED=true \
+            geolog:ci
+          for i in {1..60}; do
+            if curl -sf http://127.0.0.1:8000/api/health >/dev/null; then
+              echo "container API ready"
+              curl -sf http://127.0.0.1:8000/api/version
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "container failed to become healthy"
+          docker logs geolog-ci || true
+          exit 1
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f geolog-ci || true
+
   browser-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20
