@@ -16,11 +16,13 @@ try:
     from database import get_db
     from image_logs import extract_dlis_image, fit_dip, png_size, save_png_gray
     from models import DipPick, ImageAsset, LogRun, Well
+    from uploads import read_upload
     from well_state import ARTIFACT_DIR
 except ImportError:
     from backend.database import get_db
     from backend.image_logs import extract_dlis_image, fit_dip, png_size, save_png_gray
     from backend.models import DipPick, ImageAsset, LogRun, Well
+    from backend.uploads import read_upload
     from backend.well_state import ARTIFACT_DIR
 
 router = APIRouter(prefix="/api/wells/{wid}/image-assets", tags=["image-logs"])
@@ -103,7 +105,7 @@ async def upload_asset(
         lr = db.query(LogRun).filter(LogRun.id == log_run_id, LogRun.well_id == wid).first()
         if not lr:
             raise HTTPException(404, "Log run not found")
-    content = await file.read()
+    content = await read_upload(file, MAX_BYTES)
     if not content:
         raise HTTPException(400, "Empty image")
     if len(content) > MAX_BYTES:
@@ -133,7 +135,7 @@ async def import_dlis(
     db: Session = Depends(get_db),
 ):
     _well(db, wid)
-    content = await file.read()
+    content = await read_upload(file, MAX_BYTES)
     if not content:
         raise HTTPException(400, "Empty DLIS")
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".dlis")

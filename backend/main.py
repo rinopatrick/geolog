@@ -40,10 +40,11 @@ try:
     from jobs import (
         get_job as _get_job,
         list_jobs as _list_jobs,
+        recover_jobs as _recover_jobs,
     )
     from observability import record_request
-    from schema import ensure_schema
-    from version import __version__
+    from schema import bootstrap_schema
+    from version import __api_version__, __version__
     from well_state import get_well_lock as _get_well_lock
     from routers.audit import router as audit_router
     from routers.core import router as core_router
@@ -73,10 +74,11 @@ except ImportError:
     from backend.jobs import (
         get_job as _get_job,
         list_jobs as _list_jobs,
+        recover_jobs as _recover_jobs,
     )
     from backend.observability import record_request
-    from backend.schema import ensure_schema
-    from backend.version import __version__
+    from backend.schema import bootstrap_schema
+    from backend.version import __api_version__, __version__
     from backend.well_state import get_well_lock as _get_well_lock
     from backend.routers.audit import router as audit_router
     from backend.routers.core import router as core_router
@@ -122,6 +124,8 @@ try:
         resolve_auth_context,
         role_from_request,
     )
+    from uploads import BodySizeLimitMiddleware
+    from acl import ProjectAccessMiddleware, can_access_project, require_project_access, require_well_access, request_role, request_subject, visible_project_ids
 except ImportError:
     from backend.database import SessionLocal, get_db
     from backend.las_parser import CURVE_TRACKS, LASParser
@@ -145,6 +149,8 @@ except ImportError:
         resolve_auth_context,
         role_from_request,
     )
+    from backend.uploads import BodySizeLimitMiddleware
+    from backend.acl import ProjectAccessMiddleware, can_access_project, require_project_access, require_well_access, request_role, request_subject, visible_project_ids
 
 # Create tables
 # Configure logging
@@ -156,9 +162,9 @@ logger = logging.getLogger("geolog")
 
 
 
-# Schema is owned by Alembic. See backend/schema.py for why the previous
-# create_all() + _ensure_* helper combination could not be trusted.
-ensure_schema()
+# Schema is owned by Alembic. Dev/test migrate here; production must run
+# `alembic upgrade head` as a deploy step and only verifies at startup.
+bootstrap_schema()
 
 
 
@@ -169,13 +175,19 @@ ensure_schema()
 
 
 
+
+_env = current_env()
+_docs_enabled = _env in {"dev", "local", "test", "ci"} or (
+    (os.getenv("GEOLOG_ENABLE_DOCS") or "").strip().lower() in {"1", "true", "yes", "on"}
+)
 
 app = FastAPI(
     title="GeoLog",
     description="Oil & Gas Well Log Viewer",
     version=__version__,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
     default_response_class=SafeJSONResponse,
 )
 
@@ -335,6 +347,24 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "font-src 'self' https://fonts.gstatic.com data:; "
+                "img-src 'self' data: blob:; "
+                "connect-src 'self' ws: wss:; "
+                "worker-src 'self' blob:; "
+                "object-src 'none'; "
+                "base-uri 'self'; "
+                "frame-ancestors 'none'; "
+                "form-action 'self'"
+            ),
+        )
+        response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+        response.headers.setdefault("X-API-Version", __api_version__)
         if request.url.scheme == "https":
             response.headers.setdefault(
                 "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
@@ -462,7 +492,19 @@ class ImmutableAuditTrailMiddleware(BaseHTTPMiddleware):
         if method not in {"POST", "PUT", "DELETE"} or not path.startswith("/api/"):
             return await call_next(request)
 
-        body = await request.body()
+        # Uploads and very large JSON bodies are not copied into the audit
+        # middleware: buffering them here would defeat the upload limit and
+        # double peak memory for every write.
+        content_type = (request.headers.get("content-type") or "").lower()
+        declared = (request.headers.get("content-length") or "").strip()
+        try:
+            declared_size = int(declared) if declared else 0
+        except ValueError:
+            declared_size = 0
+        if content_type.startswith("multipart/") or declared_size > 1024 * 1024:
+            body = b""
+        else:
+            body = await request.body()
         response = await call_next(request)
 
         # log only successful/accepted writes (exclude auth failures)
@@ -517,10 +559,13 @@ class ImmutableAuditTrailMiddleware(BaseHTTPMiddleware):
 app.add_middleware(RBACWriteGuardMiddleware)
 app.add_middleware(ErrorLoggingMiddleware)
 app.add_middleware(ImmutableAuditTrailMiddleware)
+app.add_middleware(ProjectAccessMiddleware)
 app.add_middleware(AuthContextMiddleware)
 app.add_middleware(RequestMetricsMiddleware)
 app.add_middleware(RequestIdMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
+# Outermost: reject declared oversized bodies before auth or audit work.
+app.add_middleware(BodySizeLimitMiddleware)
 
 
 def _enforce_secrets_source_policy() -> None:
@@ -539,6 +584,12 @@ def _enforce_secrets_source_policy() -> None:
 @app.on_event("startup")
 def _startup_security_guards():
     _enforce_secrets_source_policy()
+    try:
+        recovered = _recover_jobs()
+        if recovered:
+            logger.info("Recovered %d unfinished background job(s)", recovered)
+    except Exception:
+        logger.exception("Background job recovery failed")
 
 
 # ─── Demo seed (startup + tests) ────────────────────────────
@@ -719,7 +770,9 @@ def delete_top(tid: int, db: Session = Depends(get_db)):
 
 # ─── Correlation Markers (persisted) ──────────────────────────
 @app.get("/api/correlation-markers")
-def list_correlation_markers(well_a_id: int, well_b_id: int, db: Session = Depends(get_db)):
+def list_correlation_markers(well_a_id: int, well_b_id: int, request: Request, db: Session = Depends(get_db)):
+    require_well_access(db, request, well_a_id)
+    require_well_access(db, request, well_b_id)
     q = db.query(CorrelationMarker).filter(
         ((CorrelationMarker.well_a_id == well_a_id) & (CorrelationMarker.well_b_id == well_b_id)) |
         ((CorrelationMarker.well_a_id == well_b_id) & (CorrelationMarker.well_b_id == well_a_id))
@@ -735,13 +788,15 @@ def list_correlation_markers(well_a_id: int, well_b_id: int, db: Session = Depen
 
 
 @app.post("/api/correlation-markers", status_code=201)
-def replace_correlation_markers(data: dict, db: Session = Depends(get_db)):
+def replace_correlation_markers(data: dict, request: Request, db: Session = Depends(get_db)):
     well_a_id_raw = data.get("well_a_id")
     well_b_id_raw = data.get("well_b_id")
     if well_a_id_raw is None or well_b_id_raw is None:
         raise HTTPException(400, "well_a_id and well_b_id are required")
     well_a_id = int(well_a_id_raw)
     well_b_id = int(well_b_id_raw)
+    require_well_access(db, request, well_a_id, write=True)
+    require_well_access(db, request, well_b_id, write=True)
     markers = data.get("markers", [])
     # Validate every marker before touching the database. The delete below runs
     # in the same transaction, so a bad marker would have rolled back — but
@@ -777,7 +832,9 @@ def replace_correlation_markers(data: dict, db: Session = Depends(get_db)):
 
 # ─── Correlation Profile (shift/stretch per pair) ─────────────
 @app.get("/api/correlation-profile")
-def get_correlation_profile(well_a_id: int, well_b_id: int, curve: str = "GR", db: Session = Depends(get_db)):
+def get_correlation_profile(well_a_id: int, well_b_id: int, request: Request, curve: str = "GR", db: Session = Depends(get_db)):
+    require_well_access(db, request, well_a_id)
+    require_well_access(db, request, well_b_id)
     p = db.query(CorrelationProfile).filter(
         ((CorrelationProfile.well_a_id == well_a_id) & (CorrelationProfile.well_b_id == well_b_id)) |
         ((CorrelationProfile.well_a_id == well_b_id) & (CorrelationProfile.well_b_id == well_a_id))
@@ -788,13 +845,15 @@ def get_correlation_profile(well_a_id: int, well_b_id: int, curve: str = "GR", d
 
 
 @app.post("/api/correlation-profile", status_code=201)
-def save_correlation_profile(data: dict, db: Session = Depends(get_db)):
+def save_correlation_profile(data: dict, request: Request, db: Session = Depends(get_db)):
     well_a_id_raw = data.get("well_a_id")
     well_b_id_raw = data.get("well_b_id")
     if well_a_id_raw is None or well_b_id_raw is None:
         raise HTTPException(400, "well_a_id and well_b_id are required")
     well_a_id = int(well_a_id_raw)
     well_b_id = int(well_b_id_raw)
+    require_well_access(db, request, well_a_id, write=True)
+    require_well_access(db, request, well_b_id, write=True)
     existing = db.query(CorrelationProfile).filter(
         ((CorrelationProfile.well_a_id == well_a_id) & (CorrelationProfile.well_b_id == well_b_id)) |
         ((CorrelationProfile.well_a_id == well_b_id) & (CorrelationProfile.well_b_id == well_a_id))
@@ -1155,18 +1214,49 @@ def delete_completion_component(cid: int, db: Session = Depends(get_db)):
 
 
 
+def _job_project_id(db: Session, job: dict) -> int | None:
+    payload = job.get("payload") or {}
+    if payload.get("pid") is not None:
+        try:
+            return int(payload["pid"])
+        except (TypeError, ValueError):
+            return None
+    if payload.get("wid") is not None:
+        try:
+            row = db.query(Well.project_id).filter(Well.id == int(payload["wid"])).first()
+            return int(row[0]) if row else None
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 @app.get("/api/jobs/{job_id}")
-def get_job_status(job_id: str, _role: str = Depends(require_viewer)):
+def get_job_status(job_id: str, request: Request, _role: str = Depends(require_viewer)):
     job = _get_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
+    db = SessionLocal()
+    try:
+        project_id = _job_project_id(db, job)
+        if project_id is not None:
+            require_project_access(db, request, project_id)
+    finally:
+        db.close()
     return job
 
 
 @app.get("/api/jobs")
-def list_jobs(_role: str = Depends(require_viewer)):
-    """List all background jobs (newest first)."""
+def list_jobs(request: Request, _role: str = Depends(require_viewer)):
+    """List background jobs visible to the caller, newest first."""
     jobs = sorted(_list_jobs(), key=lambda j: j.get("created_at", ""), reverse=True)
+    db = SessionLocal()
+    try:
+        all_ids = [row[0] for row in db.query(Project.id).all()]
+        visible = visible_project_ids(db, request_subject(request), request_role(request), all_ids)
+        if visible is not None:
+            jobs = [j for j in jobs if (_job_project_id(db, j) in visible)]
+    finally:
+        db.close()
     return {"jobs": jobs, "total": len(jobs)}
 
 
@@ -1474,6 +1564,18 @@ async def websocket_collab(websocket: WebSocket, well_id: int):
         role = role if role in ROLE_RANK else "viewer"
         user_id = websocket.query_params.get("user", f"anon_{id(websocket)}")
     user_name = websocket.query_params.get("name", user_id)
+    # WebSocket auth verifies the token but does not go through the HTTP ACL
+    # middleware, so apply the project membership check here as well.
+    db = SessionLocal()
+    try:
+        row = db.query(Well.project_id).filter(Well.id == well_id).first()
+        if row is not None:
+            acl_subject = (auth_ctx.subject or "local") if AUTH_CONFIG.mode == "jwt" else "local"
+            if not can_access_project(db, int(row[0]), acl_subject, role):
+                await websocket.close(code=1008)
+                return
+    finally:
+        db.close()
     await collab_rooms.connect(well_id, websocket, user_id, user_name, role)
     try:
         while True:

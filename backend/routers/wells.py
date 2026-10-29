@@ -18,7 +18,7 @@ import uuid
 import zipfile
 
 import numpy as np
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
@@ -36,18 +36,19 @@ try:
         density_porosity,
         qc_summary,
     )
+    from acl import request_role, request_subject, visible_project_ids
     from audit import log_audit as _log_audit
     from database import SessionLocal, get_db
     from deps import SafeJSONResponse, require_admin, require_interpreter
     from dlis_lis_parser import parse_dlis_content, parse_lis_content
     from jobs import (
-        JOB_EXECUTOR,
-        create_job as _create_job,
+        register_handler as _register_handler,
+        submit_job as _submit_job,
         update_job as _update_job,
-        utc_now_iso as _utc_now_iso,
     )
     from las_parser import LASParser
     from semantics import apply_run_semantics
+    from uploads import read_upload
     from models import (
         Annotation,
         CompletionData,
@@ -92,18 +93,19 @@ except ImportError:
         density_porosity,
         qc_summary,
     )
+    from backend.acl import request_role, request_subject, visible_project_ids
     from backend.audit import log_audit as _log_audit
     from backend.database import SessionLocal, get_db
     from backend.deps import SafeJSONResponse, require_admin, require_interpreter
     from backend.dlis_lis_parser import parse_dlis_content, parse_lis_content
     from backend.jobs import (
-        JOB_EXECUTOR,
-        create_job as _create_job,
+        register_handler as _register_handler,
+        submit_job as _submit_job,
         update_job as _update_job,
-        utc_now_iso as _utc_now_iso,
     )
     from backend.las_parser import LASParser
     from backend.semantics import apply_run_semantics
+    from backend.uploads import read_upload
     from backend.models import (
         Annotation,
         CompletionData,
@@ -139,8 +141,6 @@ except ImportError:
         require_int,
         require_str,
     )
-
-MAX_UPLOAD_SIZE = 200 * 1024 * 1024
 
 COMPLETION_COMPONENT_TYPES = [
     "casing", "liner", "tubing", "packer", "perforation", "screen",
@@ -277,8 +277,6 @@ def _safe_float(val, default=None):
     except (ValueError, TypeError):
         return default
 
-
-MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 
 
 def _persist_non_las_runs(db: Session, well: Well, filename: str, parsed, source_format: str):
@@ -522,11 +520,16 @@ def _compute_synthetic_seismogram(wid: int, data: dict, db: Session):
 
 
 @router.get("/")
-def list_wells(project_id: int = None, db: Session = Depends(get_db)):
+def list_wells(request: Request, project_id: int = None, db: Session = Depends(get_db)):
     q = db.query(Well)
     if project_id:
         q = q.filter(Well.project_id == project_id)
     wells = q.all()
+    visible = visible_project_ids(
+        db, request_subject(request), request_role(request), [w.project_id for w in wells]
+    )
+    if visible is not None:
+        wells = [w for w in wells if w.project_id in visible]
     result = []
     for w in wells:
         d = {c.name: getattr(w, c.name) for c in Well.__table__.columns}
@@ -617,10 +620,7 @@ async def upload_las(wid: int, file: UploadFile = File(...), db: Session = Depen
     if not well:
         raise HTTPException(404, "Well not found")
 
-    # Read and check size
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_SIZE:
-        raise HTTPException(413, f"File too large (max {MAX_UPLOAD_SIZE // 1024 // 1024}MB)")
+    content = await read_upload(file)
     if len(content) == 0:
         raise HTTPException(400, "Empty file")
 
@@ -710,9 +710,7 @@ async def upload_dlis(wid: int, file: UploadFile = File(...), db: Session = Depe
     if not well:
         raise HTTPException(404, "Well not found")
 
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_SIZE:
-        raise HTTPException(413, f"File too large (max {MAX_UPLOAD_SIZE // 1024 // 1024}MB)")
+    content = await read_upload(file)
     if len(content) == 0:
         raise HTTPException(400, "Empty file")
 
@@ -751,9 +749,7 @@ async def upload_lis(wid: int, file: UploadFile = File(...), db: Session = Depen
     if not well:
         raise HTTPException(404, "Well not found")
 
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_SIZE:
-        raise HTTPException(413, f"File too large (max {MAX_UPLOAD_SIZE // 1024 // 1024}MB)")
+    content = await read_upload(file)
     if len(content) == 0:
         raise HTTPException(400, "Empty file")
 
@@ -1470,8 +1466,8 @@ async def bulk_upload_las(wid: int, files: list[UploadFile] = File(...), db: Ses
     next_run = len(well.log_runs) + 1
     for file in files:
         try:
-            content = await file.read()
-            if len(content) > MAX_UPLOAD_SIZE or len(content) == 0:
+            content = await read_upload(file)
+            if len(content) == 0:
                 results.append({"filename": file.filename, "status": "skipped", "reason": "size"})
                 continue
             text = content.decode("utf-8", errors="replace")
@@ -1616,7 +1612,7 @@ def list_completion_components(wid: int, db: Session = Depends(get_db)):
 
 @router.post("/{wid}/completion/upload-csv")
 async def upload_completion_csv(wid: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    content = await file.read()
+    content = await read_upload(file)
     text_data = content.decode("utf-8", errors="replace")
     reader = csv.DictReader(io.StringIO(text_data))
     inserted = 0
@@ -1657,7 +1653,7 @@ async def upload_completion_csv(wid: int, file: UploadFile = File(...), db: Sess
 
 @router.post("/{wid}/rft/upload-csv")
 async def upload_rft_csv(wid: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    content = await file.read()
+    content = await read_upload(file)
     text_data = content.decode("utf-8", errors="replace")
     reader = csv.DictReader(io.StringIO(text_data))
     inserted = 0
@@ -1934,7 +1930,7 @@ def list_production_rows(wid: int, db: Session = Depends(get_db)):
 
 @router.post("/{wid}/production/upload-csv")
 async def upload_production_csv(wid: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    content = await file.read()
+    content = await read_upload(file)
     text_data = content.decode("utf-8", errors="replace")
     reader = csv.DictReader(io.StringIO(text_data))
     inserted = 0
@@ -2439,7 +2435,7 @@ async def upload_csv(wid: int, file: UploadFile = File(...), db: Session = Depen
     if not well:
         raise HTTPException(404, "Well not found")
 
-    content = await file.read()
+    content = await read_upload(file)
     if len(content) == 0:
         raise HTTPException(400, "Empty file")
 
@@ -4654,42 +4650,14 @@ def synthetic_seismogram(wid: int, data: dict, db: Session = Depends(get_db), _r
 @router.post("/{wid}/synthetic-seismogram-async", status_code=202)
 def synthetic_seismogram_async(wid: int, data: dict, _role: str = Depends(require_interpreter)):
     """Queue synthetic seismogram computation in background job."""
-    job_id = _create_job("synthetic-seismogram")
-
-    def _run():
-        db = SessionLocal()
-        try:
-            _update_job(job_id, status="running", progress=10, started_at=_utc_now_iso())
-            result = _compute_synthetic_seismogram(wid, data, db)
-            _update_job(job_id, status="done", progress=100, result=result)
-        except Exception as e:
-            _update_job(job_id, status="failed", progress=100, error=str(e))
-        finally:
-            _update_job(job_id, finished_at=_utc_now_iso())
-            db.close()
-
-    JOB_EXECUTOR.submit(_run)
+    job_id = _submit_job("synthetic-seismogram", {"wid": wid, "data": data})
     return {"job_id": job_id, "status": "queued"}
 
 
 @router.post("/{wid}/electrofacies-async", status_code=202)
 def electrofacies_async(wid: int, data: dict, _role: str = Depends(require_interpreter)):
     """Queue electrofacies clustering in background job."""
-    job_id = _create_job("electrofacies")
-
-    def _run():
-        db = SessionLocal()
-        try:
-            _update_job(job_id, status="running", progress=10, started_at=_utc_now_iso())
-            result = compute_electrofacies(wid, data, db)
-            _update_job(job_id, status="done", progress=100, result=result)
-        except Exception as e:
-            _update_job(job_id, status="failed", progress=100, error=str(e))
-        finally:
-            _update_job(job_id, finished_at=_utc_now_iso())
-            db.close()
-
-    JOB_EXECUTOR.submit(_run)
+    job_id = _submit_job("electrofacies", {"wid": wid, "data": data})
     return {"job_id": job_id, "status": "queued"}
 
 
@@ -5069,3 +5037,25 @@ def export_client_bundle(wid: int, db: Session = Depends(get_db)):
     return StreamingResponse(buf, media_type="application/zip", headers={
         "Content-Disposition": f"attachment; filename={well.name}_bundle.zip"
     })
+
+
+def _run_synthetic_seismogram_job(payload: dict, job_id: str):
+    db = SessionLocal()
+    try:
+        _update_job(job_id, progress=10)
+        return _compute_synthetic_seismogram(int(payload["wid"]), payload.get("data") or {}, db)
+    finally:
+        db.close()
+
+
+def _run_electrofacies_job(payload: dict, job_id: str):
+    db = SessionLocal()
+    try:
+        _update_job(job_id, progress=10)
+        return compute_electrofacies(int(payload["wid"]), payload.get("data") or {}, db)
+    finally:
+        db.close()
+
+
+_register_handler("synthetic-seismogram", _run_synthetic_seismogram_job)
+_register_handler("electrofacies", _run_electrofacies_job)
