@@ -211,3 +211,119 @@ def test_job_list_hides_restricted_project_payloads(jwt_mode):
     assert job_id in {j["id"] for j in owner["jobs"]}
 
     assert client.get(f"/api/jobs/{job_id}", headers=_h("outsider", "viewer")).status_code == 403
+
+
+def _add_project_member(pid: int, subject: str, role: str = "viewer") -> None:
+    r = client.post(
+        f"/api/projects/{pid}/members",
+        json={"subject": subject, "role": role},
+        headers=_h("acl_admin", "admin"),
+    )
+    assert r.status_code == 201, r.text
+
+
+def _add_well_member(pid: int, wid: int, subject: str, role: str = "viewer", admin_subject: str = "acl_admin") -> None:
+    r = client.post(
+        f"/api/wells/{wid}/members",
+        json={"subject": subject, "role": role},
+        headers=_h(admin_subject, "admin"),
+    )
+    assert r.status_code == 201, r.text
+
+
+def _well(pid: int, name: str = "ACL Well") -> int:
+    db = SessionLocal()
+    try:
+        well = Well(project_id=pid, name=name)
+        db.add(well)
+        db.commit()
+        db.refresh(well)
+        return well.id
+    finally:
+        db.close()
+
+
+def test_well_member_overrides_project_membership(jwt_mode):
+    pid = _create_project("acl_admin")
+    _add_project_member(pid, "project_reader", "viewer")
+    wid = _well(pid, "Restricted Well")
+
+    # No well members yet: project membership is enough.
+    assert client.get(f"/api/wells/{wid}", headers=_h("project_reader", "viewer")).status_code == 200
+
+    _add_well_member(pid, wid, "well_reader", "viewer")
+
+    # The well is now restricted: project membership alone is denied.
+    assert client.get(f"/api/wells/{wid}", headers=_h("project_reader", "viewer")).status_code == 403
+    assert client.get(f"/api/wells/{wid}", headers=_h("well_reader", "viewer")).status_code == 200
+    assert client.get(f"/api/wells/{wid}", headers=_h("acl_admin", "admin")).status_code == 200
+    assert client.get(f"/api/wells/{wid}", headers=_h("global_admin", "admin")).status_code == 200
+
+
+def test_well_member_list_and_filtering(jwt_mode):
+    pid = _create_project("filter_owner")
+    _add_project_member(pid, "project_reader", "viewer")
+    wid = _well(pid, "Hidden Well")
+    _add_well_member(pid, wid, "well_reader", "viewer")
+
+    members = client.get(f"/api/wells/{wid}/members", headers=_h("well_reader", "viewer"))
+    assert members.status_code == 200, members.text
+    assert [m["subject"] for m in members.json()] == ["well_reader"]
+
+    listed = client.get("/api/wells", headers=_h("project_reader", "viewer")).json()
+    assert wid not in {w["id"] for w in listed}
+    listed = client.get("/api/wells", headers=_h("well_reader", "viewer")).json()
+    assert wid in {w["id"] for w in listed}
+
+
+def test_project_admin_can_manage_well_members_without_well_membership(jwt_mode):
+    pid = _create_project("manage_owner")
+    wid = _well(pid, "Managed Well")
+    _add_well_member(pid, wid, "existing", "viewer")
+
+    # manage_owner is project admin but not a well member; the manager
+    # exception must let them add another member.
+    added = client.post(
+        f"/api/wells/{wid}/members",
+        json={"subject": "new_member", "role": "interpreter"},
+        headers=_h("manage_owner", "admin"),
+    )
+    assert added.status_code == 201, added.text
+
+
+def test_well_member_write_requires_well_role(jwt_mode):
+    pid = _create_project("write_owner")
+    _add_project_member(pid, "project_writer", "interpreter")
+    wid = _well(pid, "Write Well")
+    _add_well_member(pid, wid, "well_writer", "interpreter")
+
+    payload = {"depth": 1000.0, "text": "note"}
+    denied = client.post(
+        f"/api/wells/{wid}/annotations",
+        json=payload,
+        headers=_h("project_writer", "interpreter"),
+    )
+    assert denied.status_code == 403, denied.text
+    allowed = client.post(
+        f"/api/wells/{wid}/annotations",
+        json=payload,
+        headers=_h("well_writer", "interpreter"),
+    )
+    assert allowed.status_code == 201, allowed.text
+
+
+def test_last_well_member_removal_requires_force(jwt_mode):
+    pid = _create_project("last_well_owner")
+    wid = _well(pid, "Last Member Well")
+    _add_well_member(pid, wid, "only_member", "admin", admin_subject="acl_admin")
+
+    blocked = client.delete(
+        f"/api/wells/{wid}/members/only_member",
+        headers=_h("acl_admin", "admin"),
+    )
+    assert blocked.status_code == 400, blocked.text
+    forced = client.delete(
+        f"/api/wells/{wid}/members/only_member?force=true",
+        headers=_h("acl_admin", "admin"),
+    )
+    assert forced.status_code == 204, forced.text

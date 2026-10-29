@@ -162,10 +162,10 @@ machine-readable alert descriptions.
 
 ## 7. Project membership
 
-Project ACL is enabled by default. A project with no members remains open for
-legacy data; adding the first member restricts it. See
-[`PROJECT_ACL.md`](PROJECT_ACL.md) for the contract and endpoints. Review which
-projects are still open before onboarding external users:
+Project and per-well ACL are enabled by default. A project or well with no
+members remains open for legacy data; adding the first member restricts it.
+See [`PROJECT_ACL.md`](PROJECT_ACL.md) for the contract and endpoints. Review
+which projects are still open before onboarding external users:
 
 ```bash
 # Every project with no membership row is open.
@@ -195,7 +195,7 @@ PY
       protected by the proxy.
 - [ ] `GEOLOG_DB_PATH` and `GEOLOG_ARTIFACT_DIR` on persistent volumes.
 - [ ] `alembic upgrade head` runs once as a deploy step, before workers start.
-- [ ] Every project that must be restricted has at least one member row.
+- [ ] Every project or well that must be restricted has at least one member row.
 - [ ] Backup/restore drill passes with the artifact directory and evidence is signed.
 - [ ] Prometheus scrape, SLO alerts and on-call runbook are live.
 - [ ] `coverage_gate.sh`, `alembic check`, browser smoke and the SLO gate pass in CI.
