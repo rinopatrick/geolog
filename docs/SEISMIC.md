@@ -39,9 +39,10 @@ sample interval and original dimensions. The Seismic view renders it and lets
 you click to build a horizon trace. `POST /api/seismic/{line_id}/horizons` stores
 picks as `{trace, sample}` pairs in display coordinates.
 
-Inline and crossline sections are view-only in this version. Horizon picks are
-stored against the sequential section, so the UI blocks picking while a volume
-section is displayed.
+Inline and crossline sections support the same picking workflow. A horizon now
+stores `mode` (`line`, `inline`, `crossline`) and `section_value`, so picks made
+on one inline section are not drawn on a different one. `auto-track` accepts the
+same two fields and seeds from a horizon on the matching section.
 
 ## Auto-tracking
 

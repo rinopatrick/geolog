@@ -95,7 +95,40 @@ def _fault(row: SeismicFault) -> dict:
 def _section_from_line(row: SeismicLine) -> dict:
     with open(row.file_path, "rb") as handle:
         content = handle.read()
-    return line_section(content, _seismic_index(row), max_traces=1200, max_samples=800)
+    return line_section(content, _seismic_index(row), max_traces=600, max_samples=600)
+
+def _section_for_mode(row: SeismicLine, mode: str, section_value: int | None) -> dict:
+    if mode == "line":
+        return _section_from_line(row)
+    with open(row.file_path, "rb") as handle:
+        content = handle.read()
+    return volume_section(
+        content,
+        _seismic_index(row),
+        mode,
+        int(section_value),
+        max_traces=600,
+        max_samples=600,
+    )
+
+def _section_fields(
+    data: dict,
+    default_mode: str = "line",
+    default_value: int | None = None,
+) -> tuple[str, int | None]:
+    mode = str(data.get("mode") or default_mode).lower()
+    if mode not in {"line", "inline", "crossline"}:
+        raise HTTPException(400, "mode must be line, inline or crossline")
+    if mode == "line":
+        return mode, None
+    raw = data.get("section_value", default_value)
+    if raw is None:
+        raise HTTPException(400, f"section_value is required for {mode} horizons")
+    try:
+        section_value = int(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "section_value must be an integer")
+    return mode, section_value
 
 def _seismic_index(row: SeismicLine) -> dict:
     if row.trace_headers_path and os.path.exists(row.trace_headers_path):
@@ -137,6 +170,8 @@ def _horizon(row: SeismicHorizon) -> dict:
         "line_id": row.line_id,
         "name": row.name,
         "color": row.color,
+        "mode": row.mode or "line",
+        "section_value": row.section_value,
         "picks": picks,
         "created_at": row.created_at.isoformat() if row.created_at else "",
     }
@@ -379,6 +414,7 @@ def create_seismic_horizon(line_id: int, data: dict, request: Request, db: Sessi
     name = str(data.get("name") or "").strip()
     if not name:
         raise HTTPException(400, "name is required")
+    mode, section_value = _section_fields(data)
     picks = data.get("picks") or []
     if not isinstance(picks, list) or len(picks) > 5000:
         raise HTTPException(400, "picks must be a list of at most 5000 points")
@@ -394,6 +430,8 @@ def create_seismic_horizon(line_id: int, data: dict, request: Request, db: Sessi
         line_id=line_id,
         name=name,
         color=str(data.get("color") or "#f0883e"),
+        mode=mode,
+        section_value=section_value,
         picks_json=json.dumps(prepared),
     )
     db.add(item)
@@ -417,11 +455,6 @@ def delete_seismic_horizon(line_id: int, horizon_id: int, request: Request, db: 
 def auto_track_seismic_horizon(line_id: int, data: dict, request: Request, db: Session = Depends(get_db)):
     row = _line(db, line_id)
     require_project_access(db, request, row.project_id, write=True)
-    try:
-        section = _section_from_line(row)
-    except (OSError, ValueError) as exc:
-        raise HTTPException(500, f"could not read SEG-Y: {exc}")
-    matrix = np.asarray(section["data"], dtype=float)
     horizon = None
     if data.get("horizon_id") is not None:
         horizon = (
@@ -429,6 +462,18 @@ def auto_track_seismic_horizon(line_id: int, data: dict, request: Request, db: S
             .filter(SeismicHorizon.id == int(data["horizon_id"]), SeismicHorizon.line_id == line_id)
             .first()
         )
+        if horizon is None:
+            raise HTTPException(404, "Horizon not found")
+    mode, section_value = _section_fields(
+        data,
+        default_mode=(horizon.mode or "line") if horizon is not None else "line",
+        default_value=horizon.section_value if horizon is not None else None,
+    )
+    try:
+        section = _section_for_mode(row, mode, section_value)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(500, f"could not read SEG-Y: {exc}")
+    matrix = np.asarray(section["data"], dtype=float)
     seed_trace = data.get("seed_trace")
     seed_sample = data.get("seed_sample")
     if (seed_trace is None or seed_sample is None) and horizon is not None:
@@ -446,6 +491,8 @@ def auto_track_seismic_horizon(line_id: int, data: dict, request: Request, db: S
         line_id=line_id,
         name=name,
         color=str(data.get("color") or "#58a6ff"),
+        mode=mode,
+        section_value=section_value,
         picks_json=json.dumps(tracked["picks"]),
     )
     db.add(item)

@@ -126,8 +126,14 @@ Object.assign(GeoLogApp.prototype, {
         if (!line || !value) return GeoToast.warn('Load a 3D SEG-Y volume first.');
         GeoLoading.show(`Loading ${mode} ${value}...`);
         try {
-            const payload = await this._api(`/seismic/${line.id}/${mode}/${value}/section?max_traces=600&max_samples=600`);
+            const [payload, horizons, links] = await Promise.all([
+                this._api(`/seismic/${line.id}/${mode}/${value}/section?max_traces=600&max_samples=600`),
+                this._api(`/seismic/${line.id}/horizons`),
+                this._api(`/seismic/${line.id}/fault-links`),
+            ]);
             this._segySection = payload.section;
+            this._segyHorizons = horizons || [];
+            this._segyFaultLinks = links || [];
             this._segyPicks = [];
             this._drawSeismic();
             this._renderSeismicHorizonList();
@@ -220,8 +226,14 @@ Object.assign(GeoLogApp.prototype, {
             });
             ctx.stroke();
         };
+        const sectionMode = section.mode || 'line';
+        const sectionValue = section.mode ? Number(section.value) : null;
+        const visibleHorizons = (this._segyHorizons || []).filter(horizon => {
+            if ((horizon.mode || 'line') !== sectionMode) return false;
+            return sectionValue === null || Number(horizon.section_value) === sectionValue;
+        });
+        for (const horizon of visibleHorizons) drawPicks(horizon.picks, horizon.color || '#f0883e', 2);
         if (!section.mode) {
-            for (const horizon of this._segyHorizons || []) drawPicks(horizon.picks, horizon.color || '#f0883e', 2);
             for (const fault of this._segyFaults || []) {
                 if ((fault.picks || []).length === 1) {
                     const pick = fault.picks[0];
@@ -273,10 +285,6 @@ Object.assign(GeoLogApp.prototype, {
         const canvas = document.getElementById('segyCanvas');
         const section = this._segySection;
         if (!canvas || !section?.data?.length) return;
-        if (section.mode) {
-            GeoToast.warn('Picking is available on the 2D line section; inline/crossline picking is not stored yet.');
-            return;
-        }
         const rect = canvas.getBoundingClientRect();
         const x = (event.clientX - rect.left) / rect.width;
         const y = (event.clientY - rect.top) / rect.height;
@@ -299,15 +307,27 @@ Object.assign(GeoLogApp.prototype, {
         if (!picks.length) return GeoToast.warn('Click the section to add picks first.');
         const name = document.getElementById('segyHorizonName')?.value || 'Horizon';
         const color = document.getElementById('segyHorizonColor')?.value || '#f0883e';
+        const section = this._segySection || {};
+        const mode = section.mode || 'line';
+        const sectionValue = section.mode ? Number(section.value) : null;
         try {
             await this._api(`/seismic/${line.id}/horizons`, {
                 method: 'POST',
-                body: JSON.stringify({ name, color, picks }),
+                body: JSON.stringify({ name, color, mode, section_value: sectionValue, picks }),
             });
-            GeoToast.success('Horizon saved');
-            await this.loadSeismicLine(line.id);
+            GeoToast.success(`Horizon saved${section.mode ? ` on ${mode} ${sectionValue}` : ''}`);
+            await this._reloadSeismicSection();
         } catch (e) {
             GeoToast.error('Horizon save failed: ' + e.message);
+        }
+    },
+
+    async _reloadSeismicSection() {
+        const section = this._segySection;
+        if (section?.mode) {
+            await this.loadSeismicVolumeSection(section.mode, section.value);
+        } else if (this._segyLine) {
+            await this.loadSeismicLine(this._segyLine.id);
         }
     },
 
@@ -317,7 +337,10 @@ Object.assign(GeoLogApp.prototype, {
         const rows = this._segyHorizons || [];
         const faults = this._segyFaults || [];
         const horizonsHtml = rows.length
-            ? rows.map(h => `<span style="margin-right:12px"><span style="display:inline-block;width:10px;height:10px;background:${escapeHtml(h.color || '#f0883e')};border-radius:2px"></span> ${escapeHtml(h.name)} (${(h.picks || []).length})</span>`).join('')
+            ? rows.map(h => {
+                const sectionLabel = h.mode && h.mode !== 'line' ? ` · ${escapeHtml(h.mode)} ${h.section_value}` : '';
+                return `<span style="margin-right:12px"><span style="display:inline-block;width:10px;height:10px;background:${escapeHtml(h.color || '#f0883e')};border-radius:2px"></span> ${escapeHtml(h.name)}${sectionLabel} (${(h.picks || []).length})</span>`;
+            }).join('')
             : 'No horizons picked yet.';
         const faultsHtml = faults.length
             ? faults.map(f => `<span style="margin-right:12px;color:#f85149">${escapeHtml(f.name)} · ${(f.picks || []).length} pts</span>`).join('')
@@ -333,12 +356,17 @@ Object.assign(GeoLogApp.prototype, {
         const line = this._segyLine;
         if (!line) return GeoToast.warn('Load a SEG-Y line first.');
         const seed = (this._segyPicks || [])[0];
+        const section = this._segySection || {};
+        const mode = section.mode || 'line';
+        const sectionValue = section.mode ? Number(section.value) : null;
         const name = document.getElementById('segyHorizonName')?.value || 'Auto horizon';
         try {
             const result = await this._api(`/seismic/${line.id}/horizons/auto-track`, {
                 method: 'POST',
                 body: JSON.stringify({
                     name: `${name} auto`,
+                    mode,
+                    section_value: sectionValue,
                     seed_trace: seed?.trace,
                     seed_sample: seed?.sample,
                     window: 8,
@@ -346,7 +374,7 @@ Object.assign(GeoLogApp.prototype, {
                 }),
             });
             GeoToast.success(`Auto-tracked ${result.picks_count} traces (${Math.round(result.confidence * 100)}%)`);
-            await this.loadSeismicLine(line.id);
+            await this._reloadSeismicSection();
         } catch (e) {
             GeoToast.error('Auto-track failed: ' + e.message);
         }
