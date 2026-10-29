@@ -2467,6 +2467,46 @@ Object.assign(GeoLogApp.prototype, {
     }
 ,
 
+    async runSourceRock() {
+        if (!this.currentWell) return;
+        const methodValue = document.getElementById('sourceRockMethod')?.value || 'passey_sonic';
+        const method = methodValue.startsWith('schmoker') ? 'schmoker' : 'passey';
+        const porosityMode = methodValue.endsWith('_density') ? 'density' : 'sonic';
+        const num = (id, fallback) => {
+            const value = Number(document.getElementById(id)?.value);
+            return Number.isFinite(value) ? value : fallback;
+        };
+        GeoLoading.show('Computing source-rock TOC...');
+        try {
+            const result = await this._api(`/wells/${this.currentWell.id}/source-rock`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    method,
+                    porosity_mode: porosityMode,
+                    lom: num('sourceRockLom', 10),
+                    toc_base: num('sourceRockTocBase', 0),
+                }),
+            });
+            const toc = result.stats?.toc || {};
+            const vker = result.stats?.vker || {};
+            const fmt = (v, digits = 2) => Number(v ?? 0).toFixed(digits);
+            const host = document.getElementById('sourceRockResults');
+            if (host) {
+                host.innerHTML = `
+                    <div><span style="color:#8b949e">TOC:</span> mean ${fmt(toc.mean)} wt%, max ${fmt(toc.max)} wt%</div>
+                    <div><span style="color:#8b949e">Kerogen:</span> mean ${fmt(vker.mean, 3)} v/v</div>
+                    <div><span style="color:#8b949e">Curves:</span> ${escapeHtml(result.curves?.toc || 'TOC')}, ${escapeHtml(result.curves?.vker || 'VKER')}</div>
+                    ${(result.warnings || []).map(w => `<div style="color:#d29922">${escapeHtml(String(w))}</div>`).join('')}`;
+            }
+            GeoToast.success('TOC and VKER curves added');
+            await this._loadCurveData();
+        } catch (e) {
+            GeoToast.error('Source rock failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    },
+
     async runDualWater() {
         if (!this.currentWell?.id) { GeoToast.warn('Load a well first'); return; }
         const result = document.getElementById('petroResults');

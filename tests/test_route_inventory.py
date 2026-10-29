@@ -250,6 +250,7 @@ EXPECTED_ROUTES = [
     "POST /api/wells/{wid}/sensitivity",
     "POST /api/wells/{wid}/snapshots",
     "POST /api/wells/{wid}/snapshots/{snapshot_id}/approve",
+    "POST /api/wells/{wid}/source-rock",
     "POST /api/wells/{wid}/splice",
     "POST /api/wells/{wid}/strat-normalize",
     "POST /api/wells/{wid}/synthetic-seismogram",
