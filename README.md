@@ -510,7 +510,8 @@ is single-host.
 Version: see [`backend/version.py`](backend/version.py) (single source of truth)
 and [CHANGELOG.md](CHANGELOG.md). While the major version is `0`, the API is not
 stable and the schema may change between releases. Responses carry
-`X-API-Version: v0` so clients can pin behavior; see
+`X-API-Version: v0` so clients can pin behavior. `/api/v1` is available as a
+stable alias and reports `X-API-Version: v1`; see
 [`docs/API_VERSIONING.md`](docs/API_VERSIONING.md).
 
 Completed hardening:
