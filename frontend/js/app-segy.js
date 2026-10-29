@@ -153,6 +153,8 @@ Object.assign(GeoLogApp.prototype, {
         if (!line) return GeoToast.warn('Load a SEG-Y line first.');
         if (!this._segyVolume?.is_3d) return GeoToast.warn('Upload a 3D volume with inline/crossline headers first.');
         GeoLoading.show('Linking faults across inline sections...');
+        const inlineSpacing = Number(document.getElementById('segyInlineSpacing')?.value);
+        const crosslineSpacing = Number(document.getElementById('segyCrosslineSpacing')?.value);
         try {
             const result = await this._api(`/seismic/${line.id}/faults/link-3d`, {
                 method: 'POST',
@@ -162,6 +164,8 @@ Object.assign(GeoLogApp.prototype, {
                     max_sections: 12,
                     crossline_tolerance: 3,
                     sample_tolerance: 16,
+                    inline_spacing_m: inlineSpacing > 0 ? inlineSpacing : null,
+                    crossline_spacing_m: crosslineSpacing > 0 ? crosslineSpacing : null,
                 }),
             });
             this._segyFaultLinks = result.links || [];
@@ -189,6 +193,7 @@ Object.assign(GeoLogApp.prototype, {
             ctx.fillStyle = '#8b949e';
             ctx.font = '13px sans-serif';
             ctx.fillText('Upload a SEG-Y line to view a section', 18, 30);
+            this._drawSeismicFaultMap();
             return;
         }
         const rows = section.data.length;
@@ -253,6 +258,7 @@ Object.assign(GeoLogApp.prototype, {
             this._drawSeismicFaultLinks(ctx, section, w, h, rows);
         }
         drawPicks(this._segyPicks || [], '#ffffff', 1.5);
+        this._drawSeismicFaultMap();
     },
 
     _drawSeismicFaultLinks(ctx, section, w, h, rows) {
@@ -276,6 +282,91 @@ Object.assign(GeoLogApp.prototype, {
                 const x = (labelIndex / Math.max(1, labels.length - 1)) * w;
                 const y = (Number(point.sample) / Math.max(1, section.sample_step || 1) / Math.max(1, rows - 1)) * h;
                 if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+        }
+    },
+
+    _drawSeismicFaultMap() {
+        const canvas = document.getElementById('segyFaultMap');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, w, h);
+        const links = this._segyFaultLinks || [];
+        const points = links.flatMap(link => link.points || []);
+        if (!points.length) {
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '13px sans-serif';
+            ctx.fillText('No 3D fault links to map', 18, 28);
+            return;
+        }
+        const all = points.concat(...links.map(link => link.polygon || []));
+        const inlineValues = all.map(point => Number(point.inline)).filter(Number.isFinite);
+        const crosslineValues = all.map(point => Number(point.crossline)).filter(Number.isFinite);
+        const inlineMin = Math.min(...inlineValues);
+        const inlineMax = Math.max(...inlineValues);
+        const crosslineMin = Math.min(...crosslineValues);
+        const crosslineMax = Math.max(...crosslineValues);
+        const left = 52;
+        const right = w - 18;
+        const top = 18;
+        const bottom = h - 30;
+        const x = value => left + ((value - crosslineMin) / Math.max(1, crosslineMax - crosslineMin)) * (right - left);
+        const y = value => bottom - ((value - inlineMin) / Math.max(1, inlineMax - inlineMin)) * (bottom - top);
+        ctx.strokeStyle = '#21262d';
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '11px sans-serif';
+        ctx.lineWidth = 1;
+        for (let index = 0; index <= 4; index += 1) {
+            const gx = left + (index / 4) * (right - left);
+            const gy = bottom - (index / 4) * (bottom - top);
+            ctx.beginPath();
+            ctx.moveTo(gx, top);
+            ctx.lineTo(gx, bottom);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(left, gy);
+            ctx.lineTo(right, gy);
+            ctx.stroke();
+            ctx.fillText(String(Math.round(crosslineMin + (index / 4) * (crosslineMax - crosslineMin))), gx - 10, h - 10);
+            ctx.fillText(String(Math.round(inlineMin + (index / 4) * (inlineMax - inlineMin))), 6, gy + 4);
+        }
+        ctx.fillText('crossline', right - 54, h - 10);
+        ctx.save();
+        ctx.translate(12, top + 34);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('inline', 0, 0);
+        ctx.restore();
+        for (const link of links) {
+            const color = link.color || '#f85149';
+            const polygon = link.polygon || [];
+            if (polygon.length >= 3) {
+                ctx.beginPath();
+                polygon.forEach((point, index) => {
+                    const px = x(Number(point.crossline));
+                    const py = y(Number(point.inline));
+                    if (index === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                });
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(248, 81, 73, 0.16)';
+                ctx.fill();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+            const ordered = (link.points || []).slice().sort((a, b) =>
+                Number(a.inline) - Number(b.inline) || Number(a.crossline) - Number(b.crossline)
+            );
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ordered.forEach((point, index) => {
+                const px = x(Number(point.crossline));
+                const py = y(Number(point.inline));
+                if (index === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
             });
             ctx.stroke();
         }
@@ -347,7 +438,14 @@ Object.assign(GeoLogApp.prototype, {
             : 'No faults detected.';
         const links = this._segyFaultLinks || [];
         const linksHtml = links.length
-            ? links.map(link => `<span style="margin-right:12px;color:#ff7b72">${escapeHtml(link.name)} · inline ${link.inline_start}-${link.inline_end} · ${(link.points || []).length} pts</span>`).join('')
+            ? links.map(link => {
+                const geometry = link.geometry || {};
+                const throwText = geometry.throw_ms != null ? ` · throw ±${geometry.throw_ms} ms` : '';
+                const dipText = geometry.dip_angle_deg != null
+                    ? ` · dip ${geometry.dip_angle_deg}°`
+                    : (geometry.dip_inline_ms_per_line != null ? ` · dip ${geometry.dip_inline_ms_per_line}/${geometry.dip_crossline_ms_per_line} ms/line` : '');
+                return `<span style="margin-right:12px;color:#ff7b72">${escapeHtml(link.name)} · inline ${link.inline_start}-${link.inline_end} · ${(link.points || []).length} pts${throwText}${dipText}</span>`;
+            }).join('')
             : 'No 3D fault links.';
         host.innerHTML = `${horizonsHtml}<div style="margin-top:4px">${faultsHtml}</div><div style="margin-top:4px">${linksHtml}</div>`;
     },

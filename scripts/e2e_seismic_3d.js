@@ -76,15 +76,23 @@ function buildVolume() {
       const autoTrackOk = (app._segyHorizons || []).some(h => h.mode === 'inline' && h.picks.length >= 20);
       await app.loadSeismicVolumeSection('crossline', 247);
       const crosslineOk = app._segySection?.mode === 'crossline' && app._segySection.labels.length === 6;
+      document.getElementById('segyInlineSpacing').value = '25';
+      document.getElementById('segyCrosslineSpacing').value = '25';
       await app.linkSeismicFaults3D();
+      const geometry = app._segyFaultLinks?.[0]?.geometry || {};
+      const geometryOk = geometry.throw_ms > 0 && geometry.dip_angle_deg != null;
       return {
-        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && (app._segyFaultLinks || []).length > 0,
+        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && (app._segyFaultLinks || []).length > 0,
         lineId: line.id,
         volumeOk,
         inlineOk,
         crosslineOk,
         horizonOk,
         autoTrackOk,
+        geometryOk,
+        throwMs: geometry.throw_ms,
+        dipAngle: geometry.dip_angle_deg,
+        polygonPoints: (app._segyFaultLinks?.[0]?.polygon || []).length,
         links: (app._segyFaultLinks || []).length,
         sectionMode: app._segySection?.mode,
         status: document.getElementById('segyStatus')?.textContent || '',

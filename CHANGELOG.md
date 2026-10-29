@@ -19,6 +19,9 @@ While the major version is `0`, the API is not yet stable.
   indexed trace instead of stopping at the first 2,500.
 - **3D horizon picks.** Horizons store `mode` and `section_value`; inline and
   crossline picking and auto-tracking use the selected volume section.
+- **3D fault geometry.** Linked faults store a throw estimate, fault-plane dip,
+  vertical extent and a map polygon; the Seismic panel draws an inline/crossline
+  fault map and shows throw/dip summaries.
 
 ## [0.12.0] - 2026-10-30
 

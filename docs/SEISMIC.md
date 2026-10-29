@@ -68,8 +68,20 @@ stay within `crossline_tolerance` and `sample_tolerance`. A link needs at least
 two inline sections. Results are stored as `SeismicFaultLink` rows and can be
 read with `GET /api/seismic/{line_id}/fault-links` or deleted individually.
 
-This is a continuity screening aid, not a fault framework. It does not estimate
-throw, dip, or fault polygons.
+Each link also stores a geometry summary and a map polygon:
+
+- `throw_ms`: median cross-correlation lag across the fault plane, in ms.
+- `vertical_extent_ms` and `throw_range_ms`: fault cut and per-section range.
+- `dip_inline_ms_per_line`, `dip_crossline_ms_per_line` and `plane_rms_ms`:
+  least-squares fault plane fit in time units.
+- `dip_angle_deg`: set when `inline_spacing_m` and `crossline_spacing_m` are
+  supplied; this is a time-dip angle, not a depth-converted structural dip.
+- `polygon`: convex hull of `{inline, crossline}` points, buffered for a
+  collinear fault trace.
+
+These are screening estimates from the seismic amplitudes. They do not include
+velocity/depth conversion, fault throw from well correlations, or a structural
+model.
 
 ## Limits
 

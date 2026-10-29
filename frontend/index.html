@@ -1404,6 +1404,8 @@
                         <button class="btn-sm" data-action="app.loadSeismicInline"><i data-lucide="layers"></i> Inline</button>
                         <select id="segyCrosslineSelect" title="Crossline" style="min-width:120px"></select>
                         <button class="btn-sm" data-action="app.loadSeismicCrossline"><i data-lucide="layers"></i> Crossline</button>
+                        <input id="segyInlineSpacing" type="number" min="1" placeholder="inline m" title="Inline spacing (m)" style="width:90px">
+                        <input id="segyCrosslineSpacing" type="number" min="1" placeholder="xline m" title="Crossline spacing (m)" style="width:90px">
                         <button class="btn-sm" data-action="app.linkSeismicFaults3D"><i data-lucide="git-merge"></i> Link 3D faults</button>
                         <span id="segyVolumeInfo" class="toolbar-hint"></span>
                         <input id="segyHorizonName" placeholder="Horizon name" value="Horizon A" style="min-width:140px">
@@ -1414,6 +1416,7 @@
                         <span id="segyStatus" class="toolbar-hint"></span>
                     </div>
                     <canvas id="segyCanvas" width="1000" height="380" style="width:100%;margin-top:10px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
+                    <canvas id="segyFaultMap" width="1000" height="280" style="width:100%;margin-top:10px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
                     <div id="segyHorizonList" style="font-size:12px;color:#8b949e;margin-top:8px"></div>
                 </div>
             </div>
