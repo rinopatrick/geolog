@@ -355,3 +355,69 @@ def test_seismic_3d_horizon_picks_and_auto_track():
 
     rows = client.get(f"/api/seismic/{line_id}/horizons", headers=ADMIN).json()
     assert {row["mode"] for row in rows} == {"inline"}
+
+def test_build_surface_from_inline_horizons():
+    pid = _project_id()
+    upload = client.post(
+        f"/api/projects/{pid}/seismic",
+        files={"file": ("surface.sgy", _segy_volume(), "application/octet-stream")},
+        data={"name": "Surface Volume"},
+        headers=ADMIN,
+    )
+    assert upload.status_code == 201, upload.text
+    line_id = upload.json()["id"]
+
+    for index, inline in enumerate([100, 101, 102]):
+        created = client.post(
+            f"/api/seismic/{line_id}/horizons",
+            json={
+                "name": "Top A",
+                "mode": "inline",
+                "section_value": inline,
+                "picks": [
+                    {"trace": 2, "sample": 10 + index},
+                    {"trace": 10, "sample": 10 + index},
+                    {"trace": 20, "sample": 14 + index},
+                    {"trace": 30, "sample": 14 + index},
+                ],
+            },
+            headers=ADMIN,
+        )
+        assert created.status_code == 201, created.text
+
+    surface = client.post(
+        f"/api/seismic/{line_id}/surfaces",
+        json={
+            "name": "Top A Surface",
+            "horizon_name": "Top A",
+            "max_grid": 24,
+            "inline_spacing_m": 25,
+            "crossline_spacing_m": 25,
+        },
+        headers=ADMIN,
+    )
+    assert surface.status_code == 201, surface.text
+    body = surface.json()
+    assert body["inlines"] == [100, 101, 102]
+    assert body["stats"]["point_count"] == 12
+    assert body["stats"]["coverage"] > 0
+    assert len(body["grid"]) == 3
+    assert len(body["grid"][0]) == 4
+
+    listed = client.get(f"/api/seismic/{line_id}/surfaces", headers=ADMIN)
+    assert listed.status_code == 200
+    assert listed.json()[0]["id"] == body["id"]
+    assert "grid" not in listed.json()[0]
+
+    detail = client.get(f"/api/seismic/{line_id}/surfaces/{body['id']}", headers=ADMIN)
+    assert detail.status_code == 200
+    assert len(detail.json()["grid"]) == 3
+
+    exported = client.get(f"/api/seismic/{line_id}/surfaces/{body['id']}/export.csv", headers=ADMIN)
+    assert exported.status_code == 200
+    assert exported.headers["content-type"].startswith("text/csv")
+    assert exported.text.splitlines()[0] == "inline,crossline,time_ms"
+    assert len(exported.text.splitlines()) == 1 + 3 * 4
+
+    deleted = client.delete(f"/api/seismic/{line_id}/surfaces/{body['id']}", headers=ADMIN)
+    assert deleted.status_code == 204

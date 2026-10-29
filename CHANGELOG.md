@@ -8,6 +8,11 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+### Added
+
+- **3D surface grids.** Build time surfaces from inline/crossline horizon picks
+  with IDW, store them, export CSV and draw the surface map with fault overlays.
+
 ## [0.14.0] - 2026-10-31
 
 ### Added

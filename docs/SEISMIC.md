@@ -52,6 +52,23 @@ existing horizon or explicit `{seed_trace, seed_sample}` display coordinates.
 `window` controls the correlation window and `search_radius` the sample search
 around the previous pick.
 
+## Surface grids
+
+`POST /api/seismic/{line_id}/surfaces` grids horizon picks into a time surface.
+Use `horizon_ids` for an explicit set, `horizon_name` to group horizons with the
+same name, or omit both to use every inline/crossline horizon. Only 3D
+(`inline`/`crossline`) horizons are used; `line` picks are ignored.
+
+The builder uses inverse-distance weighting on the picked inline/crossline
+points and caps the grid at 96 × 96 by default (`max_grid` up to 200). It returns
+`inlines`, `crosslines`, `grid` (time in ms), `stats.point_count`,
+`stats.coverage` and time min/max/mean. Surfaces are stored as
+`SeismicSurface` rows. `GET .../surfaces/{id}/export.csv` writes
+`inline,crossline,time_ms` for external tools.
+
+The Seismic panel can build a surface by name, select a stored surface and draw
+its time map. Fault traces are overlaid on the same inline/crossline map.
+
 ## Fault detection
 
 `POST /api/seismic/{line_id}/faults/detect` computes adjacent-trace coherence in

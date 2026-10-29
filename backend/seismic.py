@@ -272,6 +272,107 @@ def volume_section(
     payload["label_name"] = "crossline" if mode == "inline" else "inline"
     return payload
 
+def surface_from_horizons(
+    content: bytes,
+    index: dict[str, Any],
+    horizons: list[dict[str, Any]],
+    max_grid: int = 96,
+    inline_spacing_m: float | None = None,
+    crossline_spacing_m: float | None = None,
+) -> dict[str, Any]:
+    """Grid inline/crossline horizon picks into a time surface with IDW."""
+    points: list[tuple[float, float, float]] = []
+    cache: dict[tuple[str, int], dict[str, Any]] = {}
+    for horizon in horizons:
+        mode = str(horizon.get("mode") or "")
+        if mode not in {"inline", "crossline"}:
+            continue
+        value = horizon.get("section_value")
+        if value is None:
+            continue
+        key = (mode, int(value))
+        if key not in cache:
+            cache[key] = volume_section(
+                content,
+                index,
+                mode,
+                int(value),
+                max_traces=600,
+                max_samples=600,
+            )
+        section = cache[key]
+        labels = section.get("labels") or []
+        step = int(section.get("sample_step") or 1)
+        for pick in horizon.get("picks") or []:
+            try:
+                trace = int(pick["trace"])
+                sample = int(pick["sample"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if trace < 0 or trace >= len(labels):
+                continue
+            if mode == "inline":
+                inline_value = float(value)
+                crossline_value = float(labels[trace])
+            else:
+                inline_value = float(labels[trace])
+                crossline_value = float(value)
+            points.append((inline_value, crossline_value, float(sample * step) * float(index["sample_interval_ms"])))
+    if len(points) < 3:
+        raise ValueError("need at least three inline/crossline horizon picks")
+    if len(points) > 8000:
+        positions = np.linspace(0, len(points) - 1, 8000).round().astype(int).tolist()
+        points = [points[position] for position in positions]
+    points_array = np.asarray(points, dtype=float)
+    inline_values = sorted(set(float(value) for value in points_array[:, 0]))
+    crossline_values = sorted(set(float(value) for value in points_array[:, 1]))
+    if len(inline_values) < 2 or len(crossline_values) < 2:
+        raise ValueError("surface needs at least two inlines and two crosslines")
+
+    def axis(values: list[float], limit: int) -> list[float]:
+        if len(values) <= limit:
+            return values
+        positions = np.linspace(0, len(values) - 1, limit).round().astype(int)
+        return [values[int(position)] for position in sorted(set(positions.tolist()))]
+
+    grid_inlines = axis(inline_values, max(2, int(max_grid)))
+    grid_crosslines = axis(crossline_values, max(2, int(max_grid)))
+    point_inlines = points_array[:, 0]
+    point_crosslines = points_array[:, 1]
+    point_samples = points_array[:, 2]
+    grid: list[list[float]] = []
+    for inline in grid_inlines:
+        distance_sq = (
+            (inline - point_inlines) ** 2
+            + (np.asarray(grid_crosslines)[:, None] - point_crosslines[None, :]) ** 2
+        )
+        weights = 1.0 / (distance_sq + 1e-9)
+        values = (weights * point_samples[None, :]).sum(axis=1) / weights.sum(axis=1)
+        grid.append([round(float(value), 4) for value in values])
+    flat = [value for row in grid for value in row]
+    unique_cells = len({
+        (int(round(inline)), int(round(crossline)))
+        for inline, crossline in zip(point_inlines, point_crosslines)
+    })
+    stats = {
+        "point_count": len(points),
+        "inline_count": len(grid_inlines),
+        "crossline_count": len(grid_crosslines),
+        "coverage": round(min(1.0, unique_cells / max(1, len(grid_inlines) * len(grid_crosslines))), 4),
+        "min_time_ms": round(float(np.min(flat)), 3),
+        "max_time_ms": round(float(np.max(flat)), 3),
+        "mean_time_ms": round(float(np.mean(flat)), 3),
+    }
+    return {
+        "grid": grid,
+        "inlines": [int(value) for value in grid_inlines],
+        "crosslines": [int(value) for value in grid_crosslines],
+        "sample_interval_ms": float(index["sample_interval_ms"]),
+        "inline_spacing_m": inline_spacing_m,
+        "crossline_spacing_m": crossline_spacing_m,
+        "stats": stats,
+    }
+
 def _convex_hull(points: list[dict[str, Any]]) -> list[dict[str, float]]:
     values = sorted({(float(point["inline"]), float(point["crossline"])) for point in points})
     if len(values) == 1:

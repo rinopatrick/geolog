@@ -81,8 +81,23 @@ function buildVolume() {
       await app.linkSeismicFaults3D();
       const geometry = app._segyFaultLinks?.[0]?.geometry || {};
       const geometryOk = geometry.throw_ms > 0 && geometry.dip_angle_deg != null;
+      for (const inline of [100, 101]) {
+        await app._api(`/seismic/${line.id}/horizons`, {
+          method: 'POST',
+          body: JSON.stringify({
+            name: 'E2E Surface',
+            mode: 'inline',
+            section_value: inline,
+            picks: [{ trace: 2, sample: 10 }, { trace: 10, sample: 10 }, { trace: 20, sample: 14 }],
+          }),
+        });
+      }
+      document.getElementById('segySurfaceName').value = 'E2E Surface';
+      document.getElementById('segySurfaceHorizon').value = 'E2E Surface';
+      await app.buildSeismicSurface();
+      const surfaceOk = app._segySurface?.grid?.length > 0 && (app._segySurfaces || []).length > 0;
       return {
-        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && (app._segyFaultLinks || []).length > 0,
+        ok: volumeOk && inlineOk && crosslineOk && horizonOk && autoTrackOk && geometryOk && surfaceOk && (app._segyFaultLinks || []).length > 0,
         lineId: line.id,
         volumeOk,
         inlineOk,
@@ -90,6 +105,8 @@ function buildVolume() {
         horizonOk,
         autoTrackOk,
         geometryOk,
+        surfaceOk,
+        surfaceName: app._segySurface?.name || '',
         throwMs: geometry.throw_ms,
         dipAngle: geometry.dip_angle_deg,
         polygonPoints: (app._segyFaultLinks?.[0]?.polygon || []).length,

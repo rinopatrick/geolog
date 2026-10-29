@@ -8,13 +8,20 @@ import uuid
 
 import numpy as np
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from sqlalchemy.orm import Session
 
 try:
     from acl import require_project_access
     from database import get_db
-    from models import Project, SeismicFault, SeismicFaultLink, SeismicHorizon, SeismicLine
+    from models import (
+        Project,
+        SeismicFault,
+        SeismicFaultLink,
+        SeismicHorizon,
+        SeismicLine,
+        SeismicSurface,
+    )
     from seismic import (
         auto_track,
         detect_faults,
@@ -22,6 +29,7 @@ try:
         line_section,
         link_faults_3d,
         parse_segy,
+        surface_from_horizons,
         volume_index,
         volume_section,
     )
@@ -30,7 +38,14 @@ try:
 except ImportError:
     from backend.acl import require_project_access
     from backend.database import get_db
-    from backend.models import Project, SeismicFault, SeismicFaultLink, SeismicHorizon, SeismicLine
+    from backend.models import (
+        Project,
+        SeismicFault,
+        SeismicFaultLink,
+        SeismicHorizon,
+        SeismicLine,
+        SeismicSurface,
+    )
     from backend.seismic import (
         auto_track,
         detect_faults,
@@ -38,6 +53,7 @@ except ImportError:
         line_section,
         link_faults_3d,
         parse_segy,
+        surface_from_horizons,
         volume_index,
         volume_section,
     )
@@ -168,6 +184,40 @@ def _fault_link(row: SeismicFaultLink) -> dict:
         "sample_center": row.sample_center,
         "created_at": row.created_at.isoformat() if row.created_at else "",
     }
+
+
+def _surface(row: SeismicSurface, include_grid: bool = True) -> dict:
+    try:
+        grid = json.loads(row.grid_json or "[]")
+    except json.JSONDecodeError:
+        grid = []
+    try:
+        inlines = json.loads(row.inlines_json or "[]")
+    except json.JSONDecodeError:
+        inlines = []
+    try:
+        crosslines = json.loads(row.crosslines_json or "[]")
+    except json.JSONDecodeError:
+        crosslines = []
+    try:
+        stats = json.loads(row.stats_json or "{}")
+    except json.JSONDecodeError:
+        stats = {}
+    payload = {
+        "id": row.id,
+        "line_id": row.line_id,
+        "name": row.name,
+        "inlines": inlines,
+        "crosslines": crosslines,
+        "sample_interval_ms": row.sample_interval_ms,
+        "inline_spacing_m": row.inline_spacing_m,
+        "crossline_spacing_m": row.crossline_spacing_m,
+        "stats": stats,
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+    }
+    if include_grid:
+        payload["grid"] = grid
+    return payload
 
 
 def _horizon(row: SeismicHorizon) -> dict:
@@ -416,6 +466,136 @@ def delete_seismic_fault_link(line_id: int, link_id: int, request: Request, db: 
         raise HTTPException(404, "Fault link not found")
     db.delete(item)
     db.commit()
+
+@router.post("/seismic/{line_id}/surfaces", status_code=201)
+def create_seismic_surface(line_id: int, data: dict, request: Request, db: Session = Depends(get_db)):
+    row = _line(db, line_id)
+    require_project_access(db, request, row.project_id, write=True)
+    name = str(data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name is required")
+    query = db.query(SeismicHorizon).filter(SeismicHorizon.line_id == line_id)
+    horizon_ids = data.get("horizon_ids")
+    if horizon_ids:
+        try:
+            ids = [int(value) for value in horizon_ids]
+        except (TypeError, ValueError):
+            raise HTTPException(400, "horizon_ids must be integers")
+        query = query.filter(SeismicHorizon.id.in_(ids))
+    elif data.get("horizon_name"):
+        query = query.filter(SeismicHorizon.name == str(data["horizon_name"]).strip())
+    else:
+        query = query.filter(SeismicHorizon.mode.in_(["inline", "crossline"]))
+    horizons = query.order_by(SeismicHorizon.id.asc()).all()
+    if not horizons:
+        raise HTTPException(400, "no inline/crossline horizons matched")
+    inline_spacing = data.get("inline_spacing_m")
+    crossline_spacing = data.get("crossline_spacing_m")
+    inline_spacing = max(1.0, float(inline_spacing)) if inline_spacing else None
+    crossline_spacing = max(1.0, float(crossline_spacing)) if crossline_spacing else None
+    max_grid = max(8, min(int(data.get("max_grid", 96) or 96), 200))
+    payloads = [
+        {
+            "mode": horizon.mode,
+            "section_value": horizon.section_value,
+            "picks": json.loads(horizon.picks_json or "[]"),
+        }
+        for horizon in horizons
+    ]
+    try:
+        with open(row.file_path, "rb") as handle:
+            content = handle.read()
+        built = surface_from_horizons(
+            content,
+            _seismic_index(row),
+            payloads,
+            max_grid=max_grid,
+            inline_spacing_m=inline_spacing,
+            crossline_spacing_m=crossline_spacing,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(400, f"could not build surface: {exc}")
+    item = SeismicSurface(
+        line_id=line_id,
+        name=name,
+        grid_json=json.dumps(built["grid"]),
+        inlines_json=json.dumps(built["inlines"]),
+        crosslines_json=json.dumps(built["crosslines"]),
+        sample_interval_ms=built["sample_interval_ms"],
+        inline_spacing_m=built["inline_spacing_m"],
+        crossline_spacing_m=built["crossline_spacing_m"],
+        stats_json=json.dumps(built["stats"]),
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return _surface(item)
+
+
+@router.get("/seismic/{line_id}/surfaces")
+def list_seismic_surfaces(line_id: int, request: Request, db: Session = Depends(get_db)):
+    row = _line(db, line_id)
+    require_project_access(db, request, row.project_id)
+    rows = (
+        db.query(SeismicSurface)
+        .filter(SeismicSurface.line_id == line_id)
+        .order_by(SeismicSurface.id.asc())
+        .all()
+    )
+    return [_surface(item, include_grid=False) for item in rows]
+
+
+@router.get("/seismic/{line_id}/surfaces/{surface_id}")
+def get_seismic_surface(line_id: int, surface_id: int, request: Request, db: Session = Depends(get_db)):
+    row = _line(db, line_id)
+    require_project_access(db, request, row.project_id)
+    item = (
+        db.query(SeismicSurface)
+        .filter(SeismicSurface.id == surface_id, SeismicSurface.line_id == line_id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(404, "Surface not found")
+    return _surface(item)
+
+
+@router.get("/seismic/{line_id}/surfaces/{surface_id}/export.csv")
+def export_seismic_surface(line_id: int, surface_id: int, request: Request, db: Session = Depends(get_db)):
+    row = _line(db, line_id)
+    require_project_access(db, request, row.project_id)
+    item = (
+        db.query(SeismicSurface)
+        .filter(SeismicSurface.id == surface_id, SeismicSurface.line_id == line_id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(404, "Surface not found")
+    payload = _surface(item)
+    lines = ["inline,crossline,time_ms"]
+    for inline, grid_row in zip(payload["inlines"], payload.get("grid", [])):
+        for crossline, value in zip(payload["crosslines"], grid_row):
+            lines.append(f"{inline},{crossline},{value}")
+    return Response(
+        "\n".join(lines),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="surface_{item.id}.csv"'},
+    )
+
+
+@router.delete("/seismic/{line_id}/surfaces/{surface_id}", status_code=204)
+def delete_seismic_surface(line_id: int, surface_id: int, request: Request, db: Session = Depends(get_db)):
+    row = _line(db, line_id)
+    require_project_access(db, request, row.project_id, write=True)
+    item = (
+        db.query(SeismicSurface)
+        .filter(SeismicSurface.id == surface_id, SeismicSurface.line_id == line_id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(404, "Surface not found")
+    db.delete(item)
+    db.commit()
+
 
 @router.get("/seismic/{line_id}/horizons")
 def list_seismic_horizons(line_id: int, request: Request, db: Session = Depends(get_db)):
