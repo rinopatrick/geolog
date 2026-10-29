@@ -726,6 +726,7 @@ class SeismicLine(Base):
     created_at = Column(DateTime, default=utcnow)
 
     horizons = relationship("SeismicHorizon", back_populates="line", cascade="all, delete-orphan")
+    faults = relationship("SeismicFault", back_populates="line", cascade="all, delete-orphan")
 
 
 class SeismicHorizon(Base):
@@ -739,6 +740,22 @@ class SeismicHorizon(Base):
     created_at = Column(DateTime, default=utcnow)
 
     line = relationship("SeismicLine", back_populates="horizons")
+
+
+class SeismicFault(Base):
+    """Auto-detected fault segments on a SEG-Y section."""
+
+    __tablename__ = "seismic_faults"
+
+    id = Column(Integer, primary_key=True, index=True)
+    line_id = Column(Integer, ForeignKey("seismic_lines.id"), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    color = Column(String(20), default="#f85149")
+    picks_json = Column(Text, default="[]")
+    score = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    line = relationship("SeismicLine", back_populates="faults")
 
 
 class SharedWellState(Base):

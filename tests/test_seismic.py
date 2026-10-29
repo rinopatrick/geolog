@@ -104,3 +104,60 @@ def test_seismic_rejects_invalid_file():
         headers=ADMIN,
     )
     assert r.status_code == 400
+
+
+def _segy_large() -> bytes:
+    textual = b" " * 3200
+    binary = bytearray(400)
+    ntraces, ns = 48, 40
+    binary[16:18] = (2000).to_bytes(2, "big")
+    binary[20:22] = (ns).to_bytes(2, "big")
+    binary[24:26] = (5).to_bytes(2, "big")
+    rng = np.random.default_rng(4)
+    wave = np.array([0.1, 0.5, 1.0, 0.5, 0.1])
+    traces = []
+    for i in range(ntraces):
+        header = bytearray(240)
+        header[114:116] = (ns).to_bytes(2, "big")
+        header[188:192] = (100 + i).to_bytes(4, "big")
+        header[192:196] = (200).to_bytes(4, "big")
+        data = rng.normal(0, 0.005, ns)
+        center = 10 if i < 24 else 14
+        data[center - 2:center + 3] += wave
+        traces.append(bytes(header) + np.asarray(data, dtype=">f4").tobytes())
+    return textual + bytes(binary) + b"".join(traces)
+
+
+def test_auto_track_and_fault_endpoints():
+    pid = _project_id()
+    upload = client.post(
+        f"/api/projects/{pid}/seismic",
+        files={"file": ("auto.sgy", _segy_large(), "application/octet-stream")},
+        data={"name": "Auto Line"},
+        headers=ADMIN,
+    )
+    assert upload.status_code == 201, upload.text
+    line_id = upload.json()["id"]
+
+    tracked = client.post(
+        f"/api/seismic/{line_id}/horizons/auto-track",
+        json={"name": "Auto A", "seed_trace": 0, "seed_sample": 10, "window": 3, "search_radius": 4},
+        headers=ADMIN,
+    )
+    assert tracked.status_code == 201, tracked.text
+    assert tracked.json()["picks_count"] >= 20
+    assert tracked.json()["confidence"] >= 0.5
+
+    faults = client.post(
+        f"/api/seismic/{line_id}/faults/detect",
+        json={"threshold": 0.5, "min_points": 4, "max_faults": 5},
+        headers=ADMIN,
+    )
+    assert faults.status_code == 201, faults.text
+    assert faults.json()["faults"], faults.text
+    fault_id = faults.json()["faults"][0]["id"]
+    listed = client.get(f"/api/seismic/{line_id}/faults", headers=ADMIN)
+    assert listed.status_code == 200
+    assert fault_id in {item["id"] for item in listed.json()}
+    deleted = client.delete(f"/api/seismic/{line_id}/faults/{fault_id}", headers=ADMIN)
+    assert deleted.status_code == 204
