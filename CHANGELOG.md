@@ -13,6 +13,11 @@ While the major version is `0`, the API is not yet stable.
 - **Two-instance PostgreSQL probe** in CI: shared ACL, login lockout,
   snapshots/well locks and a job submitted on one instance and polled on another.
 
+### Fixed
+
+- Baseline migration creates SQLite or PostgreSQL audit-immutability triggers
+  for the active dialect. Fresh PostgreSQL databases now migrate successfully.
+
 ## [0.9.0] - 2026-10-29
 
 ### Added
