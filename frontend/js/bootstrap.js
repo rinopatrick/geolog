@@ -186,5 +186,7 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+document.getElementById('segyCanvas')?.addEventListener('click', (event) => app._onSegyClick(event));
+
 // Expose the singleton so standalone modules can read the current role/token.
 window.app = app;
