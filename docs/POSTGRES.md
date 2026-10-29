@@ -48,6 +48,13 @@ After a successful copy, run `alembic stamp head` because the copy does not
 include Alembic's `alembic_version` table. `rollback` deletes every row in every
 GeoLog table in the target; it requires `--confirm`.
 
+## Multi-instance CI
+
+`.github/workflows/postgres-multi-instance.yml` starts PostgreSQL, two uvicorn
+instances and runs `scripts/multi_instance_probe.py`. The probe verifies shared
+project/well ACL, login lockout, snapshot/well lock state and a job submitted on
+one instance and observed on the other.
+
 ## Limits
 
 - Multi-host app state requires `GEOLOG_STATE_BACKEND=database` and a shared
