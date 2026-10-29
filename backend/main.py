@@ -62,6 +62,11 @@ try:
     from routers.units import router as units_router
     from routers.users import router as users_router
     from routers.wells import router as wells_router
+    from routers.wells_uploads import router as wells_uploads_router
+    from routers.wells_data import router as wells_data_router
+    from routers.wells_exports import router as wells_exports_router
+    from routers.wells_compute import router as wells_compute_router
+    from routers.wells_analytics import router as wells_analytics_router
     from routers.zonation import router as zonation_router
 except ImportError:
     from backend.audit import append_audit_entry
@@ -96,6 +101,11 @@ except ImportError:
     from backend.routers.units import router as units_router
     from backend.routers.users import router as users_router
     from backend.routers.wells import router as wells_router
+    from backend.routers.wells_uploads import router as wells_uploads_router
+    from backend.routers.wells_data import router as wells_data_router
+    from backend.routers.wells_exports import router as wells_exports_router
+    from backend.routers.wells_compute import router as wells_compute_router
+    from backend.routers.wells_analytics import router as wells_analytics_router
     from backend.routers.zonation import router as zonation_router
 
 
@@ -226,6 +236,11 @@ app.include_router(projects_router)
 app.include_router(audit_router)
 app.include_router(ops_router)
 app.include_router(wells_router)
+app.include_router(wells_uploads_router)
+app.include_router(wells_data_router)
+app.include_router(wells_exports_router)
+app.include_router(wells_compute_router)
+app.include_router(wells_analytics_router)
 
 
 
