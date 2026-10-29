@@ -486,7 +486,8 @@ Notes:
 
 ## License
 
-MIT License — see [LICENSE](LICENSE).
+MIT License — see [LICENSE](LICENSE). Contribution and security guidance:
+[CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
 ---
 
