@@ -5,7 +5,7 @@ alembic==1.20.1
 pydantic==2.14.1
 python-multipart==0.0.32
 numpy==2.4.6
-reportlab==4.5.1
+reportlab==5.1.0
 openpyxl==3.1.5
 PyJWT==2.15.1
 dlisio==1.0.4; python_version >= "3.10"
