@@ -875,17 +875,29 @@ class GeoLogApp {
     async _api(path, opts = {}) {
         const method = (opts.method || 'GET').toUpperCase();
         const dedupe = opts.dedupe !== false;
-        const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : this.apiTimeoutMs;
         const key = `${method}:${path}`;
+        if (dedupe) {
+            const pending = this._apiPendingRequests.get(key);
+            if (pending) return pending;
+        }
+        const promise = this._apiExecute(path, opts);
+        if (dedupe) {
+            this._apiPendingRequests.set(key, promise);
+            promise.finally(() => {
+                if (this._apiPendingRequests.get(key) === promise) {
+                    this._apiPendingRequests.delete(key);
+                }
+            }).catch(() => {});
+        }
+        return promise;
+    }
+
+    async _apiExecute(path, opts = {}) {
+        const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : this.apiTimeoutMs;
         const externalSignal = opts.signal;
         const controller = new AbortController();
         let timeoutId = null;
         let externalAbortListener = null;
-
-        if (dedupe && this._apiPendingRequests.has(key)) {
-            this._apiPendingRequests.get(key).abort('dedupe');
-        }
-        this._apiPendingRequests.set(key, controller);
 
         if (externalSignal) {
             if (externalSignal.aborted) controller.abort();
@@ -922,9 +934,6 @@ class GeoLogApp {
             return resp.json();
         } catch (e) {
             if (e.name === 'AbortError') {
-                if (controller.signal?.reason === 'dedupe') {
-                    throw new Error('Request superseded by a newer call');
-                }
                 const msg = timeoutMs > 0 ? `Request timed out after ${Math.round(timeoutMs / 1000)}s` : 'Request was cancelled';
                 GeoToast.error(msg);
                 throw new Error(msg);
@@ -941,9 +950,6 @@ class GeoLogApp {
             if (timeoutId) clearTimeout(timeoutId);
             if (externalSignal && externalAbortListener) {
                 externalSignal.removeEventListener('abort', externalAbortListener);
-            }
-            if (this._apiPendingRequests.get(key) === controller) {
-                this._apiPendingRequests.delete(key);
             }
         }
     }
