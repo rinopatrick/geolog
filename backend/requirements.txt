@@ -4,7 +4,7 @@ sqlalchemy==2.0.35
 alembic==1.20.0
 pydantic==2.9.2
 python-multipart==0.0.32
-numpy==1.26.4
+numpy==2.4.6
 reportlab==4.5.1
 openpyxl==3.1.5
 PyJWT==2.15.1
