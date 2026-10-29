@@ -92,6 +92,7 @@
                     <button class="nav-btn" data-view="formationtester" title="Formation tester pressure gradient"><i data-lucide="gauge"></i><span>Pressure</span></button>
                     <button class="nav-btn" data-view="analogs" title="Offset-well analog recommendation"><i data-lucide="git-branch"></i><span>Analogs</span></button>
                     <button class="nav-btn" data-view="users" title="Manage users and roles"><i data-lucide="users"></i><span>Users</span></button>
+                    <button class="nav-btn" data-view="reportbuilder" title="Build a custom PDF report"><i data-lucide="file-text"></i><span>Report Builder</span></button>
                     <button class="nav-btn" data-view="jobmonitor" title="Background job queue monitor"><i data-lucide="activity"></i><span>Jobs</span></button>
                 </div>
             </details>
@@ -1636,6 +1637,36 @@
             <div id="templatesDashboard"></div>
         </div>
 
+        <!-- Report Builder Panel -->
+        <div id="reportBuilderPanel" class="panel" style="display:none">
+            <div class="panel-toolbar">
+                <div class="toolbar-group"><label>Report Builder</label><span class="toolbar-hint">Choose sections and generate a custom PDF</span></div>
+                <button class="btn-sm" data-action="app.loadReportTemplates"><i data-lucide="refresh-cw"></i> Refresh</button>
+            </div>
+            <div style="padding:12px;display:grid;grid-template-columns:minmax(280px,420px) 1fr;gap:16px">
+                <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:12px">
+                    <div style="display:grid;gap:8px">
+                        <label>Template name<input id="reportTemplateName" placeholder="e.g. Field review" style="width:100%"></label>
+                        <label>Report title<input id="reportTemplateTitle" value="GeoLog Well Report" style="width:100%"></label>
+                        <div style="font-size:12px;color:#8b949e">Sections</div>
+                        <label><input type="checkbox" id="rbSectionRock" checked> Rock typing & source rock</label>
+                        <label><input type="checkbox" id="rbSectionZonation" checked> Zonation</label>
+                        <label><input type="checkbox" id="rbSectionProduction" checked> Production</label>
+                        <label><input type="checkbox" id="rbSectionQc" checked> Advanced QC</label>
+                        <label><input type="checkbox" id="rbSectionCurves" checked> Curve inventory</label>
+                        <button class="btn-primary" data-action="app.saveReportTemplate"><i data-lucide="save"></i> Save template</button>
+                        <button class="btn-sm" data-action="app.generateCustomReport"><i data-lucide="download"></i> Generate PDF</button>
+                        <div id="reportTemplateStatus" style="font-size:12px;color:#8b949e"></div>
+                    </div>
+                </div>
+                <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:12px">
+                    <div style="font-size:12px;color:#8b949e;margin-bottom:6px">Saved templates</div>
+                    <select id="reportTemplateSelect" data-action="app.applyReportTemplate" data-on="change" data-args-value="true" style="width:100%;min-height:32px"></select>
+                    <div id="reportTemplateList" style="font-size:12px;color:#c9d1d9;margin-top:10px"></div>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <!-- Status Bar -->
@@ -1687,6 +1718,7 @@
     <script src="/static/js/app-petro.js"></script>
     <script src="/static/js/app-correlation.js"></script>
     <script src="/static/js/app-segy.js"></script>
+    <script src="/static/js/app-report-builder.js"></script>
     <script src="/static/js/bootstrap.js"></script>
 </body>
 </html>

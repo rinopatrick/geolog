@@ -779,6 +779,19 @@ class SourceRockAnalysis(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
+class ReportTemplate(Base):
+    """Saved section selection for the custom well report."""
+
+    __tablename__ = "report_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(120), nullable=False)
+    description = Column(Text, default="")
+    config_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class SharedWellState(Base):
     """Opaque per-well state (locks, snapshots, template lock) shared by instances."""
 

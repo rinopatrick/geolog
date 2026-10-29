@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 try:
     from acl import require_well_access
     from database import get_db
-    from models import CorePlug, Well, FormationTop, LogRun, CurveData, PetroParams, RockType, SourceRockAnalysis, Zone
+    from models import CorePlug, Well, FormationTop, LogRun, CurveData, PetroParams, ProductionData, ReportTemplate, RockType, SourceRockAnalysis, Zone
+    from decline import compute_eur, fit_best
     from rock_typing import classify_plug
     # Private name on purpose: reports reuses the QC engine rather than
     # reimplementing it, and that engine currently lives inside routers/qc.py.
@@ -12,13 +13,15 @@ try:
 except ImportError:
     from backend.acl import require_well_access
     from backend.database import get_db
-    from backend.models import CorePlug, Well, FormationTop, LogRun, CurveData, PetroParams, RockType, SourceRockAnalysis, Zone
+    from backend.models import CorePlug, Well, FormationTop, LogRun, CurveData, PetroParams, ProductionData, ReportTemplate, RockType, SourceRockAnalysis, Zone
+    from backend.decline import compute_eur, fit_best
     from backend.rock_typing import classify_plug
     from backend.routers.qc import _run_advanced_qc
 
 import datetime
 import io
 import csv
+import json
 import numpy as np
 
 from reportlab.lib import colors
@@ -706,4 +709,212 @@ def rock_source_report(wid: int, request: Request, db: Session = Depends(get_db)
     doc.build(elements)
     buf.seek(0)
     fname = f"{well.name or 'well'}_rock_source_report.pdf"
+    return StreamingResponse(iter([buf.getvalue()]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+def _fmt_value(val, nd=2):
+    if val is None:
+        return "-"
+    try:
+        return f"{float(val):.{nd}f}"
+    except Exception:
+        return str(val)
+
+
+def _pdf_table(rows, widths, header=False):
+    table = Table(rows, colWidths=widths)
+    style = [
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#9ca3af")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]
+    if header:
+        style += [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ]
+    table.setStyle(TableStyle(style))
+    return table
+
+
+def _custom_header(elements, well, title, styles, body_style):
+    elements.append(Paragraph(title or "GeoLog Well Report", styles["Title"]))
+    elements.append(Paragraph(
+        f"Well: {well.name or '—'} | UWI: {well.uwi or '—'} | "
+        f"Field: {well.field_name or '—'} | Operator: {well.operator or '—'}",
+        body_style,
+    ))
+    elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", body_style))
+    elements.append(Spacer(1, 8))
+
+
+def _custom_rock_source(elements, db, wid, styles, body_style):
+    elements.append(Paragraph("Rock Typing & Source Rock", styles["Heading2"]))
+    groups: dict[str, list[dict]] = {}
+    for plug in db.query(CorePlug).filter(CorePlug.well_id == wid).all():
+        metrics = classify_plug(plug.porosity, plug.perm_air)
+        if metrics:
+            groups.setdefault(metrics["winland_class"], []).append(metrics)
+    if groups:
+        rows = [["Class", "Plugs", "R35 min", "R35 max", "Mean FZI"]]
+        for name, items in sorted(groups.items()):
+            rows.append([
+                f"Winland {name.capitalize()}",
+                len(items),
+                f"{min(i['r35'] for i in items):.2f}",
+                f"{max(i['r35'] for i in items):.2f}",
+                f"{np.mean([i['fzi'] for i in items]):.2f}",
+            ])
+        elements.extend([_pdf_table(rows, [55 * mm, 18 * mm, 25 * mm, 25 * mm, 28 * mm], True), Spacer(1, 5)])
+    else:
+        elements.append(Paragraph("No core rock-typing data.", body_style))
+
+    def _curve(name):
+        row = (
+            db.query(CurveData)
+            .join(LogRun, CurveData.log_run_id == LogRun.id)
+            .filter(LogRun.well_id == wid, CurveData.mnemonic == name)
+            .order_by(LogRun.id.desc(), CurveData.id.desc())
+            .first()
+        )
+        if not row or not row.data_binary:
+            return np.array([])
+        return np.frombuffer(row.data_binary, dtype=np.float64)
+
+    toc = _curve("TOC")
+    vker = _curve("VKER")
+    toc_valid = toc[np.isfinite(toc)]
+    vker_valid = vker[np.isfinite(vker)]
+    analysis = (
+        db.query(SourceRockAnalysis)
+        .filter(SourceRockAnalysis.well_id == wid)
+        .order_by(SourceRockAnalysis.id.desc())
+        .first()
+    )
+    if analysis:
+        elements.append(Paragraph(
+            f"TOC method: {analysis.method} | mode: {analysis.porosity_mode or '—'} | "
+            f"LOM: {analysis.lom if analysis.lom is not None else '—'} | "
+            f"TOC base: {analysis.toc_base if analysis.toc_base is not None else '—'}",
+            body_style,
+        ))
+    source_rows = [
+        ["Curve", "Samples", "Mean", "Max"],
+        ["TOC (wt%)", len(toc_valid), f"{np.mean(toc_valid):.3f}" if len(toc_valid) else "—", f"{np.max(toc_valid):.3f}" if len(toc_valid) else "—"],
+        ["VKER (v/v)", len(vker_valid), f"{np.mean(vker_valid):.4f}" if len(vker_valid) else "—", f"{np.max(vker_valid):.4f}" if len(vker_valid) else "—"],
+    ]
+    elements.extend([_pdf_table(source_rows, [42 * mm, 25 * mm, 32 * mm, 32 * mm], True), Spacer(1, 6)])
+
+
+def _custom_zonation(elements, db, wid, styles, body_style):
+    elements.append(Paragraph("Zonation Summary", styles["Heading2"]))
+    zones = db.query(Zone).filter(Zone.well_id == wid).order_by(Zone.sort_order.asc(), Zone.top_depth.asc()).all()
+    if not zones:
+        elements.append(Paragraph("No zones defined.", body_style))
+        return
+    rows = [["Zone", "Top", "Base", "Gross (ft)"]]
+    total = 0.0
+    for zone in zones:
+        gross = abs(float(zone.bottom_depth or 0) - float(zone.top_depth or 0))
+        total += gross
+        rows.append([zone.name, f"{zone.top_depth:.1f}", f"{zone.bottom_depth:.1f}", f"{gross:.1f}"])
+    rows.append(["TOTAL", "", "", f"{total:.1f}"])
+    elements.extend([_pdf_table(rows, [70 * mm, 28 * mm, 28 * mm, 28 * mm], True), Spacer(1, 6)])
+
+
+def _custom_production(elements, db, wid, styles, body_style):
+    elements.append(Paragraph("Production & Decline", styles["Heading2"]))
+    rows = db.query(ProductionData).filter(ProductionData.well_id == wid).order_by(ProductionData.date.asc()).all()
+    valid = [(r.date, float(r.oil_rate)) for r in rows if r.date and r.oil_rate and r.oil_rate > 0]
+    if len(valid) < 3:
+        elements.append(Paragraph("Not enough positive oil-rate history for decline analysis.", body_style))
+        return
+    fit = fit_best([d for d, _ in valid], [q for _, q in valid])
+    eur = compute_eur(fit) if fit else None
+    latest = valid[-1][1]
+    table_rows = [
+        ["Metric", "Value"],
+        ["Production points", len(valid)],
+        ["Latest oil rate", f"{latest:.1f} bbl/d"],
+        ["Decline model", fit["model"] if fit else "—"],
+        ["EUR to 1 bbl/d", f"{eur:,.0f} bbl" if eur else "—"],
+    ]
+    elements.extend([_pdf_table(table_rows, [55 * mm, 70 * mm], True), Spacer(1, 6)])
+
+
+def _custom_qc(elements, db, wid, styles, body_style):
+    elements.append(Paragraph("Advanced QC Summary", styles["Heading2"]))
+    try:
+        qc = _run_advanced_qc(wid, db)
+    except Exception as exc:
+        elements.append(Paragraph(f"QC unavailable: {exc}", body_style))
+        return
+    summary = qc.get("summary", {})
+    rows = [
+        ["Metric", "Value"],
+        ["Overall score", summary.get("overall_score", "—")],
+        ["Rating", summary.get("overall_rating", "—")],
+        ["Curves", summary.get("curve_count", 0)],
+        ["Missing intervals", summary.get("total_missing_intervals", 0)],
+        ["Spike points", summary.get("total_spike_points", 0)],
+    ]
+    elements.extend([_pdf_table(rows, [55 * mm, 70 * mm], True), Spacer(1, 6)])
+
+
+def _custom_curves(elements, db, wid, styles, body_style):
+    elements.append(Paragraph("Curve Inventory", styles["Heading2"]))
+    run = db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    if not run:
+        elements.append(Paragraph("No log runs.", body_style))
+        return
+    curves = db.query(CurveData).filter(CurveData.log_run_id == run.id).order_by(CurveData.mnemonic.asc()).limit(40).all()
+    rows = [["Mnemonic", "Unit", "Points", "Min", "Max"]]
+    for curve in curves:
+        rows.append([curve.mnemonic, curve.unit or "", curve.num_points or 0, _fmt_value(curve.min_value, 3), _fmt_value(curve.max_value, 3)])
+    elements.extend([_pdf_table(rows, [45 * mm, 28 * mm, 22 * mm, 25 * mm, 25 * mm], True), Spacer(1, 6)])
+
+
+@router.post("/report/custom.pdf")
+def custom_report(wid: int, data: dict, request: Request, db: Session = Depends(get_db)):
+    """Build a PDF from a saved template or inline section selection."""
+    require_well_access(db, request, wid)
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
+    template_id = (data or {}).get("template_id")
+    if template_id is not None:
+        template = db.query(ReportTemplate).filter(ReportTemplate.id == int(template_id)).first()
+        if not template:
+            raise HTTPException(404, "Report template not found")
+        try:
+            config = json.loads(template.config_json or "{}")
+        except json.JSONDecodeError:
+            config = {}
+    else:
+        config = data or {}
+    sections = config.get("sections") or ["rock_source", "zonation", "production", "qc", "curves"]
+    allowed = {"rock_source", "zonation", "production", "qc", "curves"}
+    sections = [section for section in sections if section in allowed]
+    if not sections:
+        raise HTTPException(400, "no valid report sections selected")
+
+    styles = getSampleStyleSheet()
+    body_style = ParagraphStyle("CustomBody", parent=styles["BodyText"], fontSize=8, leading=10)
+    elements = []
+    _custom_header(elements, well, str(config.get("title") or "GeoLog Well Report"), styles, body_style)
+    builders = {
+        "rock_source": _custom_rock_source,
+        "zonation": _custom_zonation,
+        "production": _custom_production,
+        "qc": _custom_qc,
+        "curves": _custom_curves,
+    }
+    for section in sections:
+        builders[section](elements, db, wid, styles, body_style)
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=16 * mm, rightMargin=16 * mm, topMargin=14 * mm, bottomMargin=14 * mm)
+    doc.build(elements)
+    buf.seek(0)
+    fname = f"{well.name or 'well'}_custom_report.pdf"
     return StreamingResponse(iter([buf.getvalue()]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{fname}"'})

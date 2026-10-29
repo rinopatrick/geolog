@@ -29,7 +29,7 @@ const { chromium } = require('playwright');
     return called === 1;
   });
 
-  const views = ['viewer','crossplot','pickett','mnplot','petrophysics','qc','correlation','statistics','sensitivity','comparison','tools','production','facies','striplog','probability','moveable','dipplot','buckles','hingle','calculator','datatable','topsmgmt','formation','batch','map','dashboard','matrix','audit','tornado','vclmodels','corecal','corescal','geomechanics','qcautofix','seismic','imagelog','analogs','users','jobmonitor'];
+  const views = ['viewer','crossplot','pickett','mnplot','petrophysics','qc','correlation','statistics','sensitivity','comparison','tools','production','facies','striplog','probability','moveable','dipplot','buckles','hingle','calculator','datatable','topsmgmt','formation','batch','map','dashboard','matrix','audit','tornado','vclmodels','corecal','corescal','geomechanics','qcautofix','seismic','imagelog','analogs','users','jobmonitor','reportbuilder'];
 
   const appAvailable = await page.evaluate(() => typeof app !== 'undefined' && typeof app.switchView === 'function');
   if (!appAvailable) {

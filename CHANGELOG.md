@@ -19,6 +19,9 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
+- **Report builder.** Saved section templates, custom PDF generation for
+  rock/source, zonation, production, QC and curve inventory, and a dedicated
+  builder panel.
 - **Source-rock analysis metadata.** Method, porosity mode, LOM, baselines,
   stats and warnings are stored per calculation and listed by history; the PDF
   report prints the latest method/baselines.
