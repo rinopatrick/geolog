@@ -758,6 +758,27 @@ class SeismicFault(Base):
     line = relationship("SeismicLine", back_populates="faults")
 
 
+class SourceRockAnalysis(Base):
+    """Metadata for one stored TOC/VKER calculation."""
+
+    __tablename__ = "source_rock_analyses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, index=True)
+    log_run_id = Column(Integer, ForeignKey("log_runs.id"), nullable=False, index=True)
+    method = Column(String(30), nullable=False, default="passey")
+    porosity_mode = Column(String(20), default="sonic")
+    lom = Column(Float, nullable=True)
+    toc_base = Column(Float, nullable=True)
+    rt_base = Column(Float, nullable=True)
+    porosity_base = Column(Float, nullable=True)
+    toc_curve = Column(String(30), default="TOC")
+    vker_curve = Column(String(30), default="VKER")
+    stats_json = Column(Text, default="{}")
+    warnings_json = Column(Text, default="[]")
+    created_at = Column(DateTime, default=utcnow)
+
+
 class SharedWellState(Base):
     """Opaque per-well state (locks, snapshots, template lock) shared by instances."""
 

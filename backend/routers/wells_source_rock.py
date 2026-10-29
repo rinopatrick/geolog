@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 try:
     from database import get_db
-    from models import CurveData, LogRun, Well
+    from models import CurveData, LogRun, SourceRockAnalysis, Well
     from routers.wells import _aligned, _first_curve, _semantic_curves
     from source_rock import kerogen_volume, passey_toc, schmoker_toc, stats
 except ImportError:
     from backend.database import get_db
-    from backend.models import CurveData, LogRun, Well
+    from backend.models import CurveData, LogRun, SourceRockAnalysis, Well
     from backend.routers.wells import _aligned, _first_curve, _semantic_curves
     from backend.source_rock import kerogen_volume, passey_toc, schmoker_toc, stats
 
@@ -83,6 +85,7 @@ def compute_source_rock(wid: int, data: dict, db: Session = Depends(get_db)):
     rt = _aligned(rt, n)
 
     method = str(data.get("method", "passey") or "passey").lower()
+    porosity_mode = str(data.get("porosity_mode", "sonic") or "sonic").lower()
     rhob = _first_curve(by_name, ["RHOB", "DEN", "ZDEN"])
     rhob_arr = _aligned(rhob, n) if rhob is not None else None
     warnings: list[str] = []
@@ -94,7 +97,7 @@ def compute_source_rock(wid: int, data: dict, db: Session = Depends(get_db)):
         baseline = {"method": "schmoker"}
         method = "schmoker"
     elif method == "passey":
-        mode = str(data.get("porosity_mode", "sonic") or "sonic").lower()
+        mode = porosity_mode
         if mode == "density":
             porosity = rhob_arr
             if porosity is None:
@@ -131,15 +134,68 @@ def compute_source_rock(wid: int, data: dict, db: Session = Depends(get_db)):
 
     toc_name = _upsert_curve(db, lr.id, "TOC", toc, "wt%", f"{method} TOC")
     vker_name = _upsert_curve(db, lr.id, "VKER", vker, "v/v", f"{method} kerogen volume")
+    toc_stats = stats(toc)
+    vker_stats = stats(vker)
+    analysis = SourceRockAnalysis(
+        well_id=wid,
+        log_run_id=lr.id,
+        method=method,
+        porosity_mode=porosity_mode,
+        lom=(baseline or {}).get("lom") if isinstance(baseline, dict) else None,
+        toc_base=(baseline or {}).get("toc_base") if isinstance(baseline, dict) else None,
+        rt_base=(baseline or {}).get("rt_base") if isinstance(baseline, dict) else None,
+        porosity_base=(baseline or {}).get("porosity_base") if isinstance(baseline, dict) else None,
+        toc_curve=toc_name,
+        vker_curve=vker_name,
+        stats_json=json.dumps({"toc": toc_stats, "vker": vker_stats}),
+        warnings_json=json.dumps(warnings),
+    )
+    db.add(analysis)
     db.commit()
+    db.refresh(analysis)
 
     return {
         "status": "ok",
+        "analysis_id": analysis.id,
         "well_id": wid,
         "log_run_id": lr.id,
         "method": method,
         "curves": {"toc": toc_name, "vker": vker_name},
         "baseline": baseline,
-        "stats": {"toc": stats(toc), "vker": stats(vker)},
+        "stats": {"toc": toc_stats, "vker": vker_stats},
         "warnings": warnings,
     }
+
+
+@router.get("/{wid}/source-rock/analyses")
+def list_source_rock_analyses(wid: int, db: Session = Depends(get_db)):
+    if not db.query(Well.id).filter(Well.id == wid).first():
+        raise HTTPException(404, "Well not found")
+    rows = (
+        db.query(SourceRockAnalysis)
+        .filter(SourceRockAnalysis.well_id == wid)
+        .order_by(SourceRockAnalysis.id.desc())
+        .all()
+    )
+    result = []
+    for row in rows:
+        try:
+            result.append({
+                "id": row.id,
+                "well_id": row.well_id,
+                "log_run_id": row.log_run_id,
+                "method": row.method,
+                "porosity_mode": row.porosity_mode,
+                "lom": row.lom,
+                "toc_base": row.toc_base,
+                "rt_base": row.rt_base,
+                "porosity_base": row.porosity_base,
+                "toc_curve": row.toc_curve,
+                "vker_curve": row.vker_curve,
+                "stats": json.loads(row.stats_json or "{}"),
+                "warnings": json.loads(row.warnings_json or "[]"),
+                "created_at": row.created_at.isoformat() if row.created_at else "",
+            })
+        except Exception:
+            continue
+    return result

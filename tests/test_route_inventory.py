@@ -143,6 +143,7 @@ EXPECTED_ROUTES = [
     "GET /api/wells/{wid}/snapshots",
     "GET /api/wells/{wid}/snapshots/{base_id}/diff/{target_id}",
     "GET /api/wells/{wid}/snapshots/{snapshot_id}",
+    "GET /api/wells/{wid}/source-rock/analyses",
     "GET /api/wells/{wid}/template-comparison",
     "GET /api/wells/{wid}/template-lock-status",
     "GET /api/wells/{wid}/tops",

@@ -19,6 +19,9 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
+- **Source-rock analysis metadata.** Method, porosity mode, LOM, baselines,
+  stats and warnings are stored per calculation and listed by history; the PDF
+  report prints the latest method/baselines.
 - **Rock-type/source-rock PDF.** Winland class counts, R35/FZI summaries, TOC/VKER
   statistics and a TOC histogram in one downloadable report.
 - **Seismic auto-tracking and fault candidates.** Correlation-based horizon
