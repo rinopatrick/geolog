@@ -217,7 +217,11 @@ def set_template_lock(wid: int, lock_payload: dict):
 
 
 def snapshot_path(wid: int) -> str:
-    return os.path.join(SNAPSHOT_DIR, f"well_{wid}.json")
+    base = os.path.abspath(SNAPSHOT_DIR)
+    candidate = os.path.abspath(os.path.join(base, f"well_{int(wid)}.json"))
+    if os.path.commonpath([base, candidate]) != base:
+        raise ValueError("invalid well id for snapshot path")
+    return candidate
 
 def snapshot_lock(wid: int):
     """Cross-process lock for a read-modify-write of one well's snapshots."""
@@ -236,7 +240,7 @@ def load_snapshots(wid: int):
     if not os.path.exists(p):
         return []
     try:
-        with open(p, "r", encoding="utf-8") as f:
+        with open(p, "r", encoding="utf-8") as f:  # codeql[py/path-injection]
             return json.load(f)
     except Exception:
         # Corrupt/partial file fallback
@@ -254,9 +258,9 @@ def save_snapshots(wid: int, snapshots):
     # Atomic write + datetime-safe serialization
     out = snapshot_path(wid)
     tmp = out + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    with open(tmp, "w", encoding="utf-8") as f:  # codeql[py/path-injection]
         json.dump(snapshots, f, indent=2, default=str)
-    os.replace(tmp, out)
+    os.replace(tmp, out)  # codeql[py/path-injection]
 
 def mutate_snapshots(wid: int, fn):
     """Read-modify-write one well's snapshot list under a cross-process lock."""
@@ -299,7 +303,7 @@ def delete_well_state(wid: int) -> None:
             locks.pop(str(wid), None)
             save_locks(locks)
     try:
-        os.remove(snapshot_path(wid))
+        os.remove(snapshot_path(wid))  # codeql[py/path-injection]
     except FileNotFoundError:
         pass
 

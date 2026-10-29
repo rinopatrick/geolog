@@ -164,3 +164,20 @@ def test_light_compute_endpoints(make_well):
 def test_well_not_found_on_compute_endpoints():
     r = client.post("/api/wells/999999/compute-sw", json={"model": "archie"}, headers=INTERPRETER)
     assert r.status_code == 404
+
+
+def test_curve_calc_uses_safe_expression_evaluator(make_well):
+    wid = _well(make_well, "SAFE-CALC")
+    ok = client.post(
+        f"/api/wells/{wid}/curve-calc",
+        json={"expression": "GR * 2 + 1", "output_name": "GR2"},
+        headers=INTERPRETER,
+    )
+    assert ok.status_code == 200, ok.text
+
+    bad = client.post(
+        f"/api/wells/{wid}/curve-calc",
+        json={"expression": "__import__('os').system('echo nope')", "output_name": "BAD"},
+        headers=INTERPRETER,
+    )
+    assert bad.status_code == 400, bad.text
