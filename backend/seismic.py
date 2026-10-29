@@ -194,6 +194,33 @@ def read_indexed_traces(content: bytes, index: dict[str, Any], positions: list[i
         traces.append(values[:ns])
     return np.vstack(traces)
 
+def line_section(
+    content: bytes,
+    index: dict[str, Any],
+    max_traces: int = 1200,
+    max_samples: int = 800,
+) -> dict[str, Any]:
+    """Decimate the whole indexed line/volume instead of stopping at a trace count."""
+    total = int(index["trace_count"])
+    count = max(1, min(total, int(max_traces)))
+    if count >= total:
+        positions = list(range(total))
+    else:
+        positions = sorted(set(
+            int(value) for value in np.linspace(0, total - 1, count).round().astype(int).tolist()
+        ))
+    matrix = read_indexed_traces(content, index, positions)
+    payload = _section_view(
+        matrix,
+        labels=positions,
+        max_traces=count,
+        max_samples=max_samples,
+        sample_interval_ms=index["sample_interval_ms"],
+    )
+    payload["line_trace_count"] = total
+    payload["sampled"] = len(positions) < total
+    return payload
+
 def volume_index(index: dict[str, Any], limit: int = 5000) -> dict[str, Any]:
     """Return sorted inline/crossline values present in the scanned headers."""
     inlines = sorted(set(int(value) for value in index.get("trace_inlines", [])))

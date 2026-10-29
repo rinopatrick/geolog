@@ -80,7 +80,9 @@ Object.assign(GeoLogApp.prototype, {
             const status = document.getElementById('segyStatus');
             if (status) {
                 const dimensions = volume?.is_3d ? ` · 3D ${volume.inline_count}×${volume.crossline_count}` : '';
-                status.textContent = `${payload.section.original_trace_count} traces · ${payload.section.original_sample_count} samples · ${payload.line.sample_interval_ms} ms${dimensions}`;
+                const total = payload.section.line_trace_count || payload.section.original_trace_count;
+                const sampled = payload.section.sampled ? ` (${payload.section.original_trace_count} shown)` : '';
+                status.textContent = `${total} traces${sampled} · ${payload.section.original_sample_count} samples · ${payload.line.sample_interval_ms} ms${dimensions}`;
             }
         } catch (e) {
             GeoToast.error('Seismic section failed: ' + e.message);
