@@ -24,7 +24,7 @@ except ImportError:
     from backend.timeutils import utcnow
 
 try:
-    from acl import require_project_access, require_well_access, request_role, request_subject, visible_project_ids
+    from acl import can_access_well, require_project_access, require_well_access, request_role, request_subject, visible_project_ids
     from audit import (
         compute_audit_chain_report,
         resolve_audit_export_signing_key,
@@ -35,7 +35,7 @@ try:
     from models import AuditLog
     from version import __version__
 except ImportError:
-    from backend.acl import require_project_access, require_well_access, request_role, request_subject, visible_project_ids
+    from backend.acl import can_access_well, require_project_access, require_well_access, request_role, request_subject, visible_project_ids
     from backend.audit import (
         compute_audit_chain_report,
         resolve_audit_export_signing_key,
@@ -91,6 +91,13 @@ def get_audit_log(request: Request, project_id: int = None, well_id: int = None,
         if visible is not None:
             q = q.filter(AuditLog.project_id.in_(visible))
     rows = q.order_by(AuditLog.created_at.desc()).limit(min(limit, 500)).all()
+    if request_role(request) != "admin":
+        subject = request_subject(request)
+        role = request_role(request)
+        rows = [
+            r for r in rows
+            if not r.well_id or can_access_well(db, int(r.well_id), subject, role)
+        ]
     result = []
     for r in rows:
         d = {c.name: getattr(r, c.name) for c in AuditLog.__table__.columns}

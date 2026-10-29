@@ -59,6 +59,7 @@ class Well(Base):
     flow_units = relationship("FlowUnit", back_populates="well", cascade="all, delete-orphan")
     contacts = relationship("Contact", back_populates="well", cascade="all, delete-orphan")
     saturation_height_models = relationship("SaturationHeightModel", back_populates="well", cascade="all, delete-orphan")
+    members = relationship("WellMember", back_populates="well", cascade="all, delete-orphan")
     geomechanics_models = relationship("GeomechanicsModel", back_populates="well", cascade="all, delete-orphan")
     image_assets = relationship("ImageAsset", back_populates="well", cascade="all, delete-orphan")
     core_depth_matches = relationship("CoreDepthMatch", back_populates="well", cascade="all, delete-orphan")
@@ -710,6 +711,23 @@ class User(Base):
     token = Column(String(200), default="")
     token_hash = Column(String(255), default="")
     created_at = Column(DateTime, default=utcnow)
+
+
+class WellMember(Base):
+    """Per-well ACL override. A well with no members inherits its project."""
+
+    __tablename__ = "well_members"
+    __table_args__ = (
+        UniqueConstraint("well_id", "subject", name="uq_well_member_subject"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    well_id = Column(Integer, ForeignKey("wells.id"), nullable=False, index=True)
+    subject = Column(String(160), nullable=False, index=True)
+    role = Column(String(20), nullable=False, default="viewer")
+    created_at = Column(DateTime, default=utcnow)
+
+    well = relationship("Well", back_populates="members")
 
 
 class ProjectMember(Base):

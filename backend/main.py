@@ -125,7 +125,7 @@ try:
         role_from_request,
     )
     from uploads import BodySizeLimitMiddleware
-    from acl import ProjectAccessMiddleware, can_access_project, require_project_access, require_well_access, request_role, request_subject, visible_project_ids
+    from acl import ProjectAccessMiddleware, can_access_project, can_access_well, require_project_access, require_well_access, request_role, request_subject, visible_project_ids
 except ImportError:
     from backend.database import SessionLocal, get_db
     from backend.las_parser import CURVE_TRACKS, LASParser
@@ -150,7 +150,7 @@ except ImportError:
         role_from_request,
     )
     from backend.uploads import BodySizeLimitMiddleware
-    from backend.acl import ProjectAccessMiddleware, can_access_project, require_project_access, require_well_access, request_role, request_subject, visible_project_ids
+    from backend.acl import ProjectAccessMiddleware, can_access_project, can_access_well, require_project_access, require_well_access, request_role, request_subject, visible_project_ids
 
 # Create tables
 # Configure logging
@@ -1214,6 +1214,16 @@ def delete_completion_component(cid: int, db: Session = Depends(get_db)):
 
 
 
+def _job_well_id(job: dict) -> int | None:
+    payload = job.get("payload") or {}
+    if payload.get("wid") is None:
+        return None
+    try:
+        return int(payload["wid"])
+    except (TypeError, ValueError):
+        return None
+
+
 def _job_project_id(db: Session, job: dict) -> int | None:
     payload = job.get("payload") or {}
     if payload.get("pid") is not None:
@@ -1237,9 +1247,13 @@ def get_job_status(job_id: str, request: Request, _role: str = Depends(require_v
         raise HTTPException(404, "Job not found")
     db = SessionLocal()
     try:
-        project_id = _job_project_id(db, job)
-        if project_id is not None:
-            require_project_access(db, request, project_id)
+        well_id = _job_well_id(job)
+        if well_id is not None:
+            require_well_access(db, request, well_id)
+        else:
+            project_id = _job_project_id(db, job)
+            if project_id is not None:
+                require_project_access(db, request, project_id)
     finally:
         db.close()
     return job
@@ -1254,7 +1268,17 @@ def list_jobs(request: Request, _role: str = Depends(require_viewer)):
         all_ids = [row[0] for row in db.query(Project.id).all()]
         visible = visible_project_ids(db, request_subject(request), request_role(request), all_ids)
         if visible is not None:
-            jobs = [j for j in jobs if (_job_project_id(db, j) in visible)]
+            subject = request_subject(request)
+            role = request_role(request)
+            filtered = []
+            for job in jobs:
+                well_id = _job_well_id(job)
+                if well_id is not None:
+                    if can_access_well(db, well_id, subject, role):
+                        filtered.append(job)
+                elif _job_project_id(db, job) in visible:
+                    filtered.append(job)
+            jobs = filtered
     finally:
         db.close()
     return {"jobs": jobs, "total": len(jobs)}
@@ -1571,7 +1595,7 @@ async def websocket_collab(websocket: WebSocket, well_id: int):
         row = db.query(Well.project_id).filter(Well.id == well_id).first()
         if row is not None:
             acl_subject = (auth_ctx.subject or "local") if AUTH_CONFIG.mode == "jwt" else "local"
-            if not can_access_project(db, int(row[0]), acl_subject, role):
+            if not can_access_well(db, well_id, acl_subject, role):
                 await websocket.close(code=1008)
                 return
     finally:
