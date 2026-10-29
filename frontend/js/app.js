@@ -482,6 +482,7 @@ class GeoLogApp {
         if (view === 'audit') this._renderAuditPanel();
         if (view === 'users') this.loadUsers();
         if (view === 'jobmonitor') this._refreshJobMonitor();
+        if (view === 'seismic') this.loadSeismicLines();
 
         if (view === 'crossplot') this._renderCrossPlot();
         if (view === 'pickett') this._renderPickettPlot();

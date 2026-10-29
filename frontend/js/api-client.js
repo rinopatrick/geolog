@@ -44,11 +44,9 @@ const GeoAPI = {
         }
 
         try {
-            const headers = {
-                'Content-Type': 'application/json',
-                ...app._authHeaders(),
-                ...opts.headers,
-            };
+            const headers = opts.body instanceof FormData
+                ? { ...app._authHeaders(), ...opts.headers }
+                : { 'Content-Type': 'application/json', ...app._authHeaders(), ...opts.headers };
             const resp = await fetch('/api' + path, {
                 headers,
                 ...opts,

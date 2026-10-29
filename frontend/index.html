@@ -1391,6 +1391,20 @@
                     <h3>Synthetic Seismogram</h3>
                     <p>Generate synthetic trace from sonic (DT) and density (RHOB). Requires both curves.</p>
                 </div>
+                <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:12px;margin-top:16px">
+                    <div class="toolbar-group" style="margin-bottom:8px"><label>SEG-Y Seismic</label><span class="toolbar-hint">Upload, view and pick horizons</span></div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                        <button class="btn-primary" data-action="app.uploadSeismic"><i data-lucide="upload"></i> Upload SEG-Y</button>
+                        <input id="segyFileInput" type="file" accept=".sgy,.segy,application/octet-stream" hidden data-action="app.onSeismicFileSelected" data-on="change" data-pass-event="true">
+                        <select id="segyLineSelect" data-action="app.loadSeismicLine" data-on="change" data-args-value="true" style="min-width:220px"></select>
+                        <input id="segyHorizonName" placeholder="Horizon name" value="Horizon A" style="min-width:140px">
+                        <input id="segyHorizonColor" type="color" value="#f0883e" title="Horizon color">
+                        <button class="btn-sm" data-action="app.saveSeismicHorizon"><i data-lucide="save"></i> Save Horizon</button>
+                        <span id="segyStatus" class="toolbar-hint"></span>
+                    </div>
+                    <canvas id="segyCanvas" width="1000" height="380" style="width:100%;margin-top:10px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
+                    <div id="segyHorizonList" style="font-size:12px;color:#8b949e;margin-top:8px"></div>
+                </div>
             </div>
         </div>
 
@@ -1668,6 +1682,7 @@
     <script src="/static/js/app-data.js"></script>
     <script src="/static/js/app-petro.js"></script>
     <script src="/static/js/app-correlation.js"></script>
+    <script src="/static/js/app-segy.js"></script>
     <script src="/static/js/bootstrap.js"></script>
 </body>
 </html>

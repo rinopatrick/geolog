@@ -12,6 +12,8 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
+- **SEG-Y seismic.** IBM/IEEE float reader, project upload, decimated section
+  viewer, manual horizon picks and horizon persistence.
 - **Core rock typing.** Winland R35, RQI/FZI, Macro/Meso/Micro/Nanoport classes,
   plug assignment and a Core/SCAL workbench action.
 - **Source-rock screening.** Passey ΔlogR (sonic/density) and Schmoker TOC,

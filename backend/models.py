@@ -703,6 +703,44 @@ class SharedMetricWorker(Base):
     updated_at = Column(Float, nullable=False, default=0.0)
 
 
+class SeismicLine(Base):
+    """Uploaded SEG-Y line stored under the artifact directory."""
+
+    __tablename__ = "seismic_lines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    filename = Column(String(255), default="")
+    file_path = Column(String(500), nullable=False)
+    format_code = Column(Integer, default=5)
+    sample_interval_ms = Column(Float, default=0.0)
+    samples_per_trace = Column(Integer, default=0)
+    trace_count = Column(Integer, default=0)
+    inline_min = Column(Integer, nullable=True)
+    inline_max = Column(Integer, nullable=True)
+    crossline_min = Column(Integer, nullable=True)
+    crossline_max = Column(Integer, nullable=True)
+    amplitude_min = Column(Float, nullable=True)
+    amplitude_max = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    horizons = relationship("SeismicHorizon", back_populates="line", cascade="all, delete-orphan")
+
+
+class SeismicHorizon(Base):
+    __tablename__ = "seismic_horizons"
+
+    id = Column(Integer, primary_key=True, index=True)
+    line_id = Column(Integer, ForeignKey("seismic_lines.id"), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    color = Column(String(20), default="#f0883e")
+    picks_json = Column(Text, default="[]")
+    created_at = Column(DateTime, default=utcnow)
+
+    line = relationship("SeismicLine", back_populates="horizons")
+
+
 class SharedWellState(Base):
     """Opaque per-well state (locks, snapshots, template lock) shared by instances."""
 
