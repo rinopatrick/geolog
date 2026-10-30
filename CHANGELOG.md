@@ -8,6 +8,22 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-30
+
+### Added
+
+- **1D wedge screening.** Stateless `POST /api/seismic/wedge-model`:
+  two-reflector forward model swept over thickness and frequency, with
+  per-frequency tuning curves, P10/P50/P90 band, and tuning thickness per
+  frequency. Seismic panel renders the curves, a resolution table
+  (empirical tuning vs analytic λ/4), and CSV download.
+- **Statistical wavelet extraction.** Cepstral minimum-phase estimation
+  from a seismic trace; blind recovery on Hawkins/KGS fixtures within 25%
+  of the true frequency.
+- **Wedge misfit tie.** Lag-scan correlation between synthetic and observed
+  traces; Hawkins blind round-trip reaches 0.93 vs 0.99 true-wavelet
+  control. Synthetic recovery on public LAS, not a field well tie.
+
 ## [0.20.0] - 2026-10-30
 
 ### Fixed
