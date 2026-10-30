@@ -85,3 +85,22 @@ prospect-specific dependency, pass symmetric positive-semidefinite
 take precedence over the scalar correlations. The result
 includes both unrisked and risked P90/P50/P10/mean BOE. Prospects are ranked by
 EMV. Saved portfolios can be listed, read, exported as CSV and deleted.
+
+## Per-cell posterior maps
+
+`POST /api/projects/{pid}/prospect-maps` takes a depth-converted surface
+(plus optional base surface, contact, triangular poro/Sw/NTG inputs,
+iterations and seed) and returns P10/P50/P90 hydrocarbon-column grids with
+a hydrocarbon-probability grid. Each cell runs the same triangular sampling
+as prospect Monte Carlo; the cell mean times cell count reconciles with
+prospect GRV math. Contact above the surface yields zero probability,
+not an error. Screening resolution: one value per grid cell, no lateral
+correlation between cells.
+
+## Production allocation
+
+`POST /api/projects/{pid}/production-allocation` splits a total rate
+across compartments proportional to kh transmissibility (single-phase
+steady-state, shared drawdown). The split conserves mass exactly;
+zero-kh compartments receive zero rate. Optional `surface_id` validates
+that stored compartments exist before allocating.

@@ -8,6 +8,22 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-30
+
+### Added
+
+- **Per-cell posterior maps.** `POST /api/projects/{pid}/prospect-maps`:
+  seeded Monte Carlo per grid cell over triangular porosity/Sw/NTG inputs,
+  returning P10/P50/P90 hydrocarbon-column maps plus a hydrocarbon
+  probability map. Cell means reconcile with `calculate_prospect` GRV math.
+- **Production allocation.** `POST /api/projects/{pid}/production-allocation`:
+  mass-conserving kh-proportional rate split across compartments. Zero-kh
+  compartments take zero rate; rounding residual goes to the largest kh
+  with a deterministic tie-break.
+- **Anomaly detection.** `POST /api/wells/{wid}/production/anomalies`:
+  train-half decline forecast with threshold flags on the test window and
+  CUSUM trend direction. Clean exponential decline produces zero flags.
+
 ## [0.21.0] - 2026-10-30
 
 ### Added
