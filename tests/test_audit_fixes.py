@@ -98,6 +98,17 @@ def test_decimate_helpers_stable():
     assert _decimate([1, 2, 3], 10) == [1, 2, 3]
 
 
+def test_kriging_rejects_unknown_variogram():
+    import numpy as np
+    import pytest
+
+    from backend.geostat import krige_grid
+
+    pts = np.array([[0.0, 0.0, 100.0], [10.0, 0.0, 110.0], [0.0, 10.0, 105.0]])
+    with pytest.raises(ValueError, match="variogram"):
+        krige_grid(pts, [0.0], [0.0], variogram_model="linear")
+
+
 def test_relative_coords_centered_and_spaced():
     axis = _relative_coords([100, 101, 102], 25.0)
     assert axis.tolist() == [-25.0, 0.0, 25.0]
