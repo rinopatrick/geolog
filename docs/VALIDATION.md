@@ -20,6 +20,9 @@ The script has no API or database dependency. It checks:
 | GRV contract | Trace labels never scale area; `[0, 25]` m and `[100, 101]` labels both give 625 m² cells |
 | Kriging | Exact at sample nodes with zero nugget; all three variogram models |
 | Kirchhoff | Per-voxel fold; aperture-cut and dead traces carry zero fold |
+| Wedge tuning | Narrowband recovers λ/4 exactly; Ricker 30 Hz pinned at 19 m |
+| Wavelet recovery | Blind extraction on Hawkins/KGS within 25% of true freq |
+| Wedge misfit | Blind round-trip 0.93 vs 0.99 true-wavelet control |
 
 The field checks validate units, TWT integration and finite synthetic traces.
 They are **not** a substitute for checkshot-calibrated field ties or reserves

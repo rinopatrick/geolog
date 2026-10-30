@@ -141,6 +141,29 @@ These are screening estimates from the seismic amplitudes. They do not include
 velocity/depth conversion, fault throw from well correlations, or a structural
 model.
 
+## 1D wedge screening
+
+`POST /api/seismic/wedge-model` is a stateless forward model: two
+reflectors (top/base from AI contrast) convolved with a Ricker wavelet on a
+uniform TWT grid, swept over bed thickness and frequency. Response includes
+per-frequency tuning curves, `tuning_thickness_per_freq`, and a P10/P50/P90
+band across the swept frequencies. The Seismic panel renders the curves, a
+resolution table (empirical tuning vs analytic λ/4), and CSV download.
+
+Honest limits, enforced by tests:
+
+- 1D vertical incidence only. No AVO/offset, no diffraction, no Q
+  attenuation, no multiples, no noise model.
+- Narrowband verification recovers Widess λ/4 exactly; the broadband Ricker
+  peak sits below λ/4 (pinned at 19 m for the 30 Hz reference case) — the
+  kernel is tested for this, not forced onto the analytic value.
+- `misfit_tie` scores synthetic-vs-observed correlation with lag scan.
+  The Hawkins blind round-trip (extract wavelet → rebuild → correlate)
+  reaches 0.93 vs 0.99 with the true wavelet. This is a synthetic recovery
+  test on public LAS fixtures, **not** a field well tie.
+- Polarity matters: opposite-sign top/base gives a tuning notch structure,
+  not a peak — the model reports amplitudes, the interpreter decides.
+
 ## Limits
 
 - No SEG-Y revision-2 extended headers, variable trace lengths, or compressed
