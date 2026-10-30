@@ -93,3 +93,24 @@ def test_opposite_polarity_wedge_notches():
     assert amps[0] == pytest.approx(0.0, abs=1e-6)
     # Mid wedge (near tuning) exceeds the isolated-reflector plateau.
     assert amps[len(amps) // 2] > amps[-1]
+
+def test_sweep_p10_p90_band_brackets_nominal():
+    from backend.wedge import sweep_frequencies
+    out = sweep_frequencies(
+        ai_top=6000.0*2300.0, ai_reservoir=8000.0*2600.0, ai_base=6000.0*2300.0,
+        velocity_m_s=3000.0, freqs_hz=[20.0, 30.0, 40.0],
+        thickness_m=np.linspace(0, 60, 31), dt_s=0.001)
+    assert out["freqs_hz"] == [20.0, 30.0, 40.0]
+    n = len(out["thickness_m"])
+    assert len(out["p10"]) == n and len(out["p90"]) == n and len(out["p50"]) == n
+    for lo, mid, hi in zip(out["p10"], out["p50"], out["p90"]):
+        assert lo <= mid <= hi
+    i = n // 2
+    f20, f30, f40 = (c[i] for c in out["curves"])
+    assert f20 != f30 != f40
+
+def test_sweep_rejects_single_freq():
+    from backend.wedge import sweep_frequencies
+    import pytest as _pt
+    with _pt.raises(ValueError, match="at least two"):
+        sweep_frequencies(1.0, 2.0, 1.0, 3000.0, [30.0], [0.0, 10.0])
