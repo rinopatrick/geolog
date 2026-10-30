@@ -426,6 +426,7 @@ Object.assign(GeoLogApp.prototype, {
         const m = parseFloat(document.getElementById('archM')?.value || '2');
         const n = parseFloat(document.getElementById('archN')?.value || '2');
         const rw = parseFloat(document.getElementById('archRw')?.value || '0.1');
+        const rsh = parseFloat(document.getElementById('archRsh')?.value || '4');
 
         const rtPack = this._getCurveByFamily('RT');
         const nphiPack = this._getCurveByFamily('NPHI');
@@ -476,7 +477,7 @@ Object.assign(GeoLogApp.prototype, {
             const phieVal = Math.max(0, phi * (1 - vshVal));
 
             // Multi-model saturation
-            const swVal = this._computeSaturation(satModel, rtVal, phieVal, vshVal, a, m, n, rw);
+            const swVal = this._computeSaturation(satModel, rtVal, phieVal, vshVal, a, m, n, rw, rsh);
 
             sw.push(swVal);
             vsh.push(vshVal);
@@ -801,20 +802,23 @@ Object.assign(GeoLogApp.prototype, {
     }
 ,
 
-    _computeSaturation(model, rt, phi, vsh, a, m, n, rw) {
+    _computeSaturation(model, rt, phi, vsh, a, m, n, rw, rsh = 4.0) {
         if (rt <= 0 || phi < 0.01) return 1.0;
+        const safePhi = Math.max(phi, 1e-6);
+        const safeRt = Math.max(rt, 1e-12);
+        const safeRsh = Math.max(rsh, 1e-6);
         let swVal = 1.0;
         if (model === 'simandoux') {
-            // Simandoux: Sw^n = (a*Rw)/(phi^m * Rt) - Vsh * Rw / (0.4 * phi)
-            const inner = (a * rw) / (Math.pow(phi, m) * rt) - vsh * rw / (0.4 * phi);
-            swVal = Math.sqrt(Math.max(0, inner));
+            // Simandoux: Sw^n = (a Rw / phi^m) (1/Rt - Vsh/Rsh)
+            const inner = (a * rw / Math.pow(safePhi, m)) * (1 / safeRt - vsh / safeRsh);
+            swVal = Math.pow(Math.max(0, inner), 1 / n);
         } else if (model === 'indonesian') {
-            // Indonesian: 1/Sw^n = sqrt(phi^m/(a*Rw)) + sqrt(Vsh)/sqrt(Rt)
-            const denom = Math.sqrt(Math.pow(phi, m) / (a * rw)) + Math.sqrt(Math.max(0, vsh)) / Math.sqrt(Math.max(rt, 0.01));
-            swVal = denom > 0 ? 1.0 / (Math.sqrt(Math.max(rt, 0.01)) * denom) : 1.0;
+            // Indonesian: Sw = [1/(sqrt(Rt)(sqrt(phi^m/(aRw)) + sqrt(Vsh/Rsh)))]^(2/n)
+            const denominator = Math.sqrt(Math.pow(safePhi, m) / (a * rw)) + Math.sqrt(vsh / safeRsh);
+            swVal = Math.pow(1 / (Math.sqrt(safeRt) * denominator), 2 / n);
         } else {
-            // Archie: Sw^n = a*Rw / (phi^m * Rt)
-            swVal = Math.pow(a / (Math.pow(phi, m) * rt / rw), 1 / n);
+            // Archie: Sw^n = a Rw / (phi^m Rt)
+            swVal = Math.pow(a * rw / (Math.pow(safePhi, m) * safeRt), 1 / n);
         }
         return Math.max(0, Math.min(1, swVal));
     }
@@ -890,7 +894,7 @@ Object.assign(GeoLogApp.prototype, {
             const result = await this._api(`/wells/${this.currentWell.id}/sensitivity`, {
                 method: 'POST',
                 body: JSON.stringify({
-                    a: getVal('archA'), m: getVal('archM'), n: getVal('archN'), rw: getVal('archRw'),
+                    a: getVal('archA'), m: getVal('archM'), n: getVal('archN'), rw: getVal('archRw'), rsh: getVal('archRsh'),
                     vsh_cutoff: getVal('cutVsh'), phie_cutoff: getVal('cutPhie'), sw_cutoff: getVal('cutSw'),
                     saturation_model: model,
                     iterations,
@@ -898,6 +902,7 @@ Object.assign(GeoLogApp.prototype, {
                     rw_variation_pct: rwPct,
                     m_variation_pct: mPct,
                     n_variation_pct: nPct,
+                    rsh_variation_pct: getVal('sensRshPct'),
                     vsh_cutoff_variation_pct: vshCutPct,
                     phie_cutoff_variation_pct: phieCutPct,
                     sw_cutoff_variation_pct: swCutPct,
@@ -963,6 +968,7 @@ Object.assign(GeoLogApp.prototype, {
                     m: getVal('archM'),
                     n: getVal('archN'),
                     rw: getVal('archRw'),
+                    rsh: getVal('archRsh'),
                     saturation_model: model,
                     iterations: Math.min(iterations, 500),
                     variation_pct: pct,

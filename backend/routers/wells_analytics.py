@@ -23,8 +23,10 @@ from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
 try:
+    from saturation import saturation
     from timeutils import utcnow
 except ImportError:
+    from backend.saturation import saturation
     from backend.timeutils import utcnow
 
 try:
@@ -422,6 +424,7 @@ def sensitivity_analysis(wid: int, data: dict, db: Session = Depends(get_db)):
     base_m = max(float(data.get("m", 2.0)), 1e-6)
     base_n = max(float(data.get("n", 2.0)), 1e-6)
     base_rw = max(float(data.get("rw", 0.1)), 1e-6)
+    base_rsh = max(float(data.get("rsh", 4.0)), 1e-6)
     base_vsh_cut = float(data.get("vsh_cutoff", 0.35))
     base_phie_cut = float(data.get("phie_cutoff", 0.10))
     base_sw_cut = float(data.get("sw_cutoff", 0.60))
@@ -430,6 +433,7 @@ def sensitivity_analysis(wid: int, data: dict, db: Session = Depends(get_db)):
     pct_common = max(0.0, min(float(data.get("variation_pct", 30)) / 100.0, 0.95))
 
     rw_pct = max(0.0, min(float(data.get("rw_variation_pct", pct_common * 100.0)) / 100.0, 0.95))
+    rsh_pct = max(0.0, min(float(data.get("rsh_variation_pct", pct_common * 100.0)) / 100.0, 0.95))
     m_pct = max(0.0, min(float(data.get("m_variation_pct", pct_common * 100.0)) / 100.0, 0.95))
     n_pct = max(0.0, min(float(data.get("n_variation_pct", pct_common * 100.0)) / 100.0, 0.95))
     vsh_cut_pct = max(0.0, min(float(data.get("vsh_cutoff_variation_pct", pct_common * 100.0)) / 100.0, 0.95))
@@ -473,6 +477,7 @@ def sensitivity_analysis(wid: int, data: dict, db: Session = Depends(get_db)):
 
     param_track = {
         "rw": np.zeros(n_iter, dtype=np.float64),
+        "rsh": np.zeros(n_iter, dtype=np.float64),
         "m": np.zeros(n_iter, dtype=np.float64),
         "n": np.zeros(n_iter, dtype=np.float64),
         "vsh_cutoff": np.zeros(n_iter, dtype=np.float64),
@@ -486,6 +491,7 @@ def sensitivity_analysis(wid: int, data: dict, db: Session = Depends(get_db)):
         m_v = _sample(base_m, m_pct, 0.2, 8.0)
         n_v = _sample(base_n, n_pct, 0.2, 8.0)
         rw_v = _sample(base_rw, rw_pct, 1e-6, 5.0)
+        rsh_v = _sample(base_rsh, rsh_pct, 1e-6, 50.0)
         vsh_cut = _sample(base_vsh_cut, vsh_cut_pct, 0.0, 1.0)
         phie_cut = _sample(base_phie_cut, phie_cut_pct, 0.0, 0.6)
         sw_cut = _sample(base_sw_cut, sw_cut_pct, 0.0, 1.0)
@@ -493,20 +499,23 @@ def sensitivity_analysis(wid: int, data: dict, db: Session = Depends(get_db)):
         phi = phi_base
         rt_safe = np.maximum(rt, 1e-6)
 
-        if model == "simandoux":
-            inner = (a_v * rw_v) / (np.power(phi, m_v) * rt_safe + 1e-10) - vsh * rw_v / (0.4 * np.maximum(phi, 1e-6))
-            sw = np.sqrt(np.maximum(0.0, inner))
-        elif model == "indonesian":
-            denom = np.sqrt(np.power(phi, m_v) / (a_v * rw_v + 1e-10)) + np.sqrt(np.maximum(0.0, vsh)) / np.sqrt(rt_safe)
-            sw = np.where(denom > 0, 1.0 / (np.sqrt(rt_safe) * denom), 1.0)
-        else:
-            sw = np.power(np.maximum((a_v * rw_v) / (np.power(phi, m_v) * rt_safe + 1e-10), 0.0), 1.0 / n_v)
-        sw = np.clip(sw, 0.0, 1.0)
+        sw = saturation(
+            model,
+            rt_safe,
+            phi,
+            vsh,
+            a=a_v,
+            m=m_v,
+            n=n_v,
+            rw=rw_v,
+            rsh=rsh_v,
+        )
 
         pay_mask = valid & (vsh < vsh_cut) & (phi > phie_cut) & (sw < sw_cut)
         net_pays[i] = float(np.sum(pay_mask) * step)
 
         param_track["rw"][i] = rw_v
+        param_track["rsh"][i] = rsh_v
         param_track["m"][i] = m_v
         param_track["n"][i] = n_v
         param_track["vsh_cutoff"][i] = vsh_cut
@@ -540,6 +549,7 @@ def sensitivity_analysis(wid: int, data: dict, db: Session = Depends(get_db)):
         "variation_pct": round(pct_common * 100, 1),
         "variation_profile": {
             "rw": round(rw_pct * 100, 1),
+            "rsh": round(rsh_pct * 100, 1),
             "m": round(m_pct * 100, 1),
             "n": round(n_pct * 100, 1),
             "vsh_cutoff": round(vsh_cut_pct * 100, 1),

@@ -47,6 +47,7 @@ try:
         update_job as _update_job,
     )
     from las_parser import LASParser
+    from saturation import saturation
     from semantics import apply_run_semantics
     from uploads import read_upload
     from models import (
@@ -104,6 +105,7 @@ except ImportError:
         update_job as _update_job,
     )
     from backend.las_parser import LASParser
+    from backend.saturation import saturation
     from backend.semantics import apply_run_semantics
     from backend.uploads import read_upload
     from backend.models import (
@@ -1197,33 +1199,19 @@ def compute_saturation(wid: int, data: dict, db: Session = Depends(get_db)):
         phi = max(phie_arr[i], 0.01)
         vsh_v = vsh_arr[i] if not np.isnan(vsh_arr[i]) else 0
 
-        if model == "simandoux":
-            # Simandoux (1963): 1/Rt = (phi^m / (a*Rw*Sw^2)) + (Vsh / (Rsh*Sw))
-            # Solved iteratively for Sw
+        if model in {"simandoux", "indonesian"}:
             rsh = float(data.get("rsh", 4.0))
-            sw_v = 1.0
-            for _ in range(20):
-                term1 = phi ** m_v / (a_v * rw)
-                term2 = vsh_v / rsh if rsh > 0 else 0
-                denom = term1 + term2
-                if denom <= 0:
-                    break
-                sw_new = np.sqrt(1.0 / (rt[i] * denom))
-                if abs(sw_new - sw_v) < 0.001:
-                    break
-                sw_v = sw_new
-
-        elif model == "indonesian":
-            # Indonesian (Poupon & Leveaux 1971):
-            # 1/sqrt(Rt) = (phi^m / (a*Rw))^0.5 * Sw^n/2 + (Vsh^(1-Vsh/2) / sqrt(Rsh)) * Sw^n/2
-            rsh = float(data.get("rsh", 4.0))
-            term1 = np.sqrt(phi ** m_v / (a_v * rw))
-            term2 = np.sqrt(vsh_v ** (1 - vsh_v / 2)) / np.sqrt(max(rsh, 0.01)) if rsh > 0 else 0
-            denom = term1 + term2
-            if denom > 0:
-                sw_v = (1.0 / (np.sqrt(max(rt[i], 0.01)) * denom)) ** (2.0 / n_v)
-            else:
-                sw_v = 1.0
+            sw_v = saturation(
+                model,
+                rt[i],
+                phi,
+                vsh_v,
+                a=a_v,
+                m=m_v,
+                n=n_v,
+                rw=rw,
+                rsh=rsh,
+            )
 
         elif model == "waxman_smits":
             # Waxman-Smits (1968): Sw^-n = (a*Rw / (phi^m * Rt)) * (1 + Rw*B*Qv/Sw)

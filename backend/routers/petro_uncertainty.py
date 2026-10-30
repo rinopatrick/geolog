@@ -11,10 +11,12 @@ try:
     from acl import require_well_access
     from database import get_db
     from models import CurveData, LogRun, Well
+    from saturation import saturation
 except ImportError:
     from backend.acl import require_well_access
     from backend.database import get_db
     from backend.models import CurveData, LogRun, Well
+    from backend.saturation import saturation
 
 router = APIRouter(prefix="/api/wells", tags=["petro-uncertainty"])
 
@@ -82,6 +84,7 @@ def petro_uncertainty(wid: int, data: dict, request: Request, db: Session = Depe
     m_base = max(float(data.get("m", 2.0)), 0.2)
     n_base = max(float(data.get("n", 2.0)), 0.2)
     rw_base = max(float(data.get("rw", 0.1)), 1e-6)
+    rsh_base = max(float(data.get("rsh", 4.0)), 1e-6)
     seed = data.get("seed")
     rng = np.random.default_rng(seed)
 
@@ -96,20 +99,22 @@ def petro_uncertainty(wid: int, data: dict, request: Request, db: Session = Depe
         m_v = sample(m_base, 0.2, 8.0)
         n_v = sample(n_base, 0.2, 8.0)
         rw_v = sample(rw_base, 1e-6, 5.0)
+        rsh_v = sample(rsh_base, 1e-6, 50.0)
         vsh_scale = sample(1.0, 0.4, 1.6)
         phie_scale = sample(1.0, 0.5, 1.5)
         vsh_i = np.clip(vsh * vsh_scale, 0.0, 1.0)
         phi_i = np.clip(phi_base * (1.0 - vsh_i) / np.maximum(1.0 - vsh, 1e-6) * phie_scale, 0.0, 0.6)
-        rt_safe = np.maximum(rt, 1e-6)
-        if model == "simandoux":
-            inner = (a_v * rw_v) / (np.power(phi_i, m_v) * rt_safe + 1e-10) - vsh_i * rw_v / (0.4 * np.maximum(phi_i, 1e-6))
-            sw = np.sqrt(np.maximum(0.0, inner))
-        elif model == "indonesian":
-            denom = np.sqrt(np.power(phi_i, m_v) / (a_v * rw_v + 1e-10)) + np.sqrt(np.maximum(0.0, vsh_i)) / np.sqrt(rt_safe)
-            sw = np.where(denom > 0, 1.0 / (np.sqrt(rt_safe) * denom), 1.0)
-        else:
-            sw = np.power(np.maximum((a_v * rw_v) / (np.power(phi_i, m_v) * rt_safe + 1e-10), 0.0), 1.0 / n_v)
-        sw_samples[index] = np.clip(sw, 0.0, 1.0)
+        sw_samples[index] = saturation(
+            model,
+            rt,
+            phi_i,
+            vsh_i,
+            a=a_v,
+            m=m_v,
+            n=n_v,
+            rw=rw_v,
+            rsh=rsh_v,
+        )
         phie_samples[index] = phi_i
         vsh_samples[index] = vsh_i
 
@@ -126,6 +131,7 @@ def petro_uncertainty(wid: int, data: dict, request: Request, db: Session = Depe
         "iterations": iterations,
         "variation_pct": round(variation * 100, 2),
         "saturation_model": model,
+        "rsh": rsh_base,
         "depth": [round(float(value), 3) for value in depth[::step]],
         "sw": {key: values[::step] for key, values in band(sw_samples).items()},
         "phie": {key: values[::step] for key, values in band(phie_samples).items()},
