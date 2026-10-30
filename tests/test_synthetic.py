@@ -61,3 +61,19 @@ def test_checkshot_twt_must_increase():
             2.0,
             [{"depth": 1000, "twt_ms": 100}, {"depth": 1100, "twt_ms": 50}],
         )
+
+
+def test_tie_time_origin_includes_delay_and_datum():
+    dt, rhob, depth = _curves()
+    synthetic = compute_synthetic_seismogram(dt, rhob, depth)
+    seismic = np.zeros(100)
+    result = build_tie(
+        synthetic,
+        seismic,
+        0.5,
+        checkshot=[],
+        max_shift_ms=2,
+        time_origin_ms=1.0,
+    )
+    assert result["twt_ms"][0] == pytest.approx(1.0)
+    assert result["time_origin_ms"] == pytest.approx(1.0)

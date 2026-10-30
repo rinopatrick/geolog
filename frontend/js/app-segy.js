@@ -308,6 +308,7 @@ Object.assign(GeoLogApp.prototype, {
         const inline = Number(document.getElementById('segyTieInline')?.value);
         const crossline = Number(document.getElementById('segyTieCrossline')?.value);
         const maxShift = Number(document.getElementById('segyTieMaxShift')?.value) || 40;
+        const datum = Number(document.getElementById('segyTieDatum')?.value) || 0;
         if (!inline || !crossline) return GeoToast.warn('Enter the tie inline and crossline.');
         GeoLoading.show('Tying well to seismic...');
         try {
@@ -318,6 +319,7 @@ Object.assign(GeoLogApp.prototype, {
                     inline,
                     crossline,
                     max_shift_ms: maxShift,
+                    datum_ms: datum,
                 }),
             });
             this._segyTie = tie;

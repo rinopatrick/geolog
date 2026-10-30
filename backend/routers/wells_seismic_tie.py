@@ -81,6 +81,7 @@ def create_seismic_tie(wid: int, data: dict, request: Request, db: Session = Dep
         checkshot = validate_checkshot(data.get("checkshot"))
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+    trace_delay_ms = 0.0
     try:
         with open(line.file_path, "rb") as handle:
             content = handle.read()
@@ -94,6 +95,9 @@ def create_seismic_tie(wid: int, data: dict, request: Request, db: Session = Dep
         ]
         if not positions:
             raise HTTPException(404, f"no trace at inline {inline}, crossline {crossline}")
+        delays = index.get("trace_delays") or []
+        if delays:
+            trace_delay_ms = float(delays[positions[0]])
         traces = read_indexed_traces(content, index, positions)
         seismic = np.mean(traces, axis=0)
     except HTTPException:
@@ -115,6 +119,7 @@ def create_seismic_tie(wid: int, data: dict, request: Request, db: Session = Dep
         db,
     )
     max_shift = max(1.0, min(float(data.get("max_shift_ms", 40) or 40), 500.0))
+    datum_ms = float(data.get("datum_ms", 0) or 0)
     try:
         result = build_tie(
             synthetic,
@@ -122,6 +127,7 @@ def create_seismic_tie(wid: int, data: dict, request: Request, db: Session = Dep
             float(index["sample_interval_ms"]),
             checkshot,
             max_shift_ms=max_shift,
+            time_origin_ms=trace_delay_ms + datum_ms,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
