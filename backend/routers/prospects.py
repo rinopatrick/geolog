@@ -102,6 +102,8 @@ def create_prospect_portfolio(pid: int, data: dict, request: Request, db: Sessio
             capex=data.get("capex", 0.0),
             dry_hole_cost=data.get("dry_hole_cost", 0.0),
             correlation=data.get("correlation", 0.0),
+            risk_correlation=data.get("risk_correlation", 0.0),
+            capex_timing=data.get("capex_timing", "success"),
             iterations=data.get("iterations", 2000),
             seed=data.get("seed"),
         )

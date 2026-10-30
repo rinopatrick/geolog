@@ -60,14 +60,17 @@ The Seismic panel has a compact prospect form and result list.
 - `correlation` between prospect volumes (0–1)
 - `iterations` and `seed`
 
-Each prospect gets a net revenue from its P50 recoverable BOE and an EMV:
+Each prospect gets a success-case net from its **mean recoverable BOE** and an
+EMV:
 
 ```
-net = (price_per_boe - opex_per_boe) * BOE_p50 - capex
-EMV = chance * net - (1 - chance) * dry_hole_cost
+success_net = (price_per_boe - opex_per_boe) * BOE_mean - capex_if_success
+dry_net = -(dry_hole_cost + capex_if_pre_drill)
+EMV = chance * success_net + (1 - chance) * dry_net
 ```
 
-Portfolio volumes are sampled with a Gaussian copula: a shared normal factor
-weighted by `correlation` plus an independent factor. P90/P50/P10 totals are
-reported. Prospects are ranked by EMV. Saved portfolios can be listed, read,
-exported as CSV and deleted.
+`capex_timing` is `success` or `pre_drill`. Portfolio volumes use a Gaussian
+copula with `correlation`; success events use a second copula with
+`risk_correlation`, so risking can be independent or correlated. The result
+includes both unrisked and risked P90/P50/P10/mean BOE. Prospects are ranked by
+EMV. Saved portfolios can be listed, read, exported as CSV and deleted.

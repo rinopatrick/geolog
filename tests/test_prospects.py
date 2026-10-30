@@ -308,3 +308,62 @@ def test_grv_uses_base_surface_and_contact_whichever_is_shallower():
     above_base = grv_from_depth_grid(top, 2020, base_depth_grid=base, **common)
     assert above_base["grv_m3"] == 50000.0
     assert above_base["max_column_m"] == 20.0
+
+
+def test_portfolio_capex_timing_and_correlated_risk():
+    pid = _project_id()
+    _, surface = _depth_surface(pid)
+    prospects = []
+    for name, porosity in (("Risk A", 0.18), ("Risk B", 0.26)):
+        created = client.post(
+            f"/api/projects/{pid}/prospects",
+            json={
+                "name": name,
+                "surface_id": surface["id"],
+                "contact_depth_m": 1000,
+                "porosity": porosity,
+                "water_saturation": 0.3,
+                "recovery_factor": 0.4,
+                "risk": 0.5,
+                "iterations": 100,
+                "seed": 2,
+            },
+            headers=ADMIN,
+        )
+        assert created.status_code == 201, created.text
+        prospects.append(created.json())
+
+    base = {
+        "name": "Risk timing",
+        "prospect_ids": [item["id"] for item in prospects],
+        "price_per_boe": 60,
+        "opex_per_boe": 10,
+        "capex": 1_000_000,
+        "dry_hole_cost": 0,
+        "correlation": 1,
+        "risk_correlation": 1,
+        "iterations": 500,
+        "seed": 12,
+    }
+    success = client.post(
+        f"/api/projects/{pid}/prospect-portfolios",
+        json={**base, "capex_timing": "success"},
+        headers=ADMIN,
+    )
+    assert success.status_code == 201, success.text
+    pre_drill = client.post(
+        f"/api/projects/{pid}/prospect-portfolios",
+        json={**base, "name": "Risk timing pre", "capex_timing": "pre_drill"},
+        headers=ADMIN,
+    )
+    assert pre_drill.status_code == 201, pre_drill.text
+    success_result = success.json()["result"]
+    pre_result = pre_drill.json()["result"]
+    assert success_result["portfolio"]["total_emv"] == pre_result["portfolio"]["total_emv"]
+    assert pre_result["prospects"][0]["dry_net"] < success_result["prospects"][0]["dry_net"]
+    assert pre_result["prospects"][0]["success_net"] > success_result["prospects"][0]["success_net"]
+
+    risked = success_result["portfolio"]
+    assert risked["risked_boe_p90"] == 0
+    assert risked["risked_boe_p10"] > 0
+    assert risked["risked_boe_mean"] < risked["mean_boe"]

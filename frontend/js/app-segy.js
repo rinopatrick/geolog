@@ -147,6 +147,8 @@ Object.assign(GeoLogApp.prototype, {
         const opex = Number(document.getElementById('portfolioOpex')?.value) || 0;
         const capex = Number(document.getElementById('portfolioCapex')?.value) || 0;
         const correlation = Number(document.getElementById('portfolioCorrelation')?.value) || 0;
+        const riskCorrelation = Number(document.getElementById('portfolioRiskCorrelation')?.value) || 0;
+        const capexTiming = document.getElementById('portfolioCapexTiming')?.value || 'success';
         GeoLoading.show('Building portfolio...');
         try {
             const portfolio = await this._api(`/projects/${projectId}/prospect-portfolios`, {
@@ -158,6 +160,8 @@ Object.assign(GeoLogApp.prototype, {
                     opex_per_boe: opex,
                     capex,
                     correlation,
+                    risk_correlation: riskCorrelation,
+                    capex_timing: capexTiming,
                     iterations: 2000,
                     seed: 42,
                 }),
@@ -167,7 +171,7 @@ Object.assign(GeoLogApp.prototype, {
             const result = portfolio.result?.portfolio || {};
             const status = document.getElementById('portfolioStatus');
             if (status) {
-                status.textContent = `EMV ${Math.round(result.total_emv || 0).toLocaleString()} · P50 ${Math.round(result.total_boe_p50 || 0).toLocaleString()} BOE`;
+                status.textContent = `EMV ${Math.round(result.total_emv || 0).toLocaleString()} · P50 ${Math.round(result.total_boe_p50 || 0).toLocaleString()} BOE · risked ${Math.round(result.risked_boe_p50 || 0).toLocaleString()} BOE`;
             }
             GeoToast.success('Portfolio built');
         } catch (e) {
@@ -188,7 +192,7 @@ Object.assign(GeoLogApp.prototype, {
                 const top = (result.prospects || []).slice(0, 3).map(item =>
                     `${escapeHtml(item.name)} (${Math.round(item.emv).toLocaleString()})`
                 ).join(', ');
-                return `<div style="padding:2px 0"><strong>${escapeHtml(portfolio.name)}</strong> · EMV ${Math.round(summary.total_emv || 0).toLocaleString()} · BOE P90/P50/P10 ${Math.round(summary.total_boe_p90 || 0).toLocaleString()} / ${Math.round(summary.total_boe_p50 || 0).toLocaleString()} / ${Math.round(summary.total_boe_p10 || 0).toLocaleString()} · top: ${top || '—'}</div>`;
+                return `<div style="padding:2px 0"><strong>${escapeHtml(portfolio.name)}</strong> · EMV ${Math.round(summary.total_emv || 0).toLocaleString()} · BOE P90/P50/P10 ${Math.round(summary.total_boe_p90 || 0).toLocaleString()} / ${Math.round(summary.total_boe_p50 || 0).toLocaleString()} / ${Math.round(summary.total_boe_p10 || 0).toLocaleString()} · risked P50 ${Math.round(summary.risked_boe_p50 || 0).toLocaleString()} · top: ${top || '—'}</div>`;
             }).join('')
             : 'No portfolios built yet.';
     },
