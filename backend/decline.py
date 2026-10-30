@@ -62,6 +62,11 @@ def fit_hyperbolic(t, q):
 
 
 def compute_eur(best_fit, days_to_limit=3650.0, q_limit=1.0):
+    """Integrate the fitted rate over time, truncated at the economic limit.
+
+    Only samples with q >= q_limit contribute; units follow the input rates
+    (bbl/d gives bbl). Returns None for a missing fit.
+    """
     if not best_fit:
         return None
     t = np.linspace(0, days_to_limit, 2500)
