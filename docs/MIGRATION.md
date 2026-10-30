@@ -45,3 +45,7 @@ narrowing the aperture does not dilute the image toward zero. This preserves
 relative amplitude balance for screening, but there is no spherical-spreading
 (`1/r`) correction, no anti-alias filter, and no wavelet shaping — do not use
 the amplitudes for AVO or quantitative inversion.
+
+The output grid inherits the decimated cube's inline/crossline labels, and
+physical coordinates are measured relative to the grid centroid so large
+absolute line numbers cannot degrade float32 precision in the kernel.
