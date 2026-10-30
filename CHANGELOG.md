@@ -8,6 +8,23 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-30
+
+### Added
+
+- **Petrophysics calibration.** `POST /api/wells/{wid}/petro-calibration`
+  fits GR endpoints and shale porosity against reference curves, with
+  optional save to `PetroParams` (new `gr_clean`, `gr_shale`, `phi_sh`
+  columns). Validated on the Volve F-1 professional-interpretation
+  fixture: VSH MAE 0.25 → 0.07, PHIE MAE 0.063 → 0.006 vs defaults.
+  Test fixture ships with Equinor licence notice; consistency check,
+  not core-lab validation.
+
+### CI
+
+- Coverage floor 80% for the new physics engines (`cell_maps`,
+  `allocation`, `anomaly`, `petro_calibration`, `wedge`, `wavelet`).
+
 ## [0.22.0] - 2026-10-30
 
 ### Added
