@@ -65,3 +65,26 @@ def test_petro_uncertainty_validation(make_well):
         headers=ADMIN,
     )
     assert empty.status_code == 400
+
+
+def test_uncertainty_uses_density_neutron_when_rhob_available(make_well):
+    length = 120
+    depth = np.arange(1000.0, 1000.0 + length)
+    curves = {
+        "DEPT": depth,
+        "GR": 30.0 + 20.0 * np.sin(np.arange(length) / 9.0),
+        "NPHI": np.full(length, 0.25),
+        "RHOB": np.full(length, 2.50),
+        "RT": 8.0 + 6.0 * (1.0 + np.sin(np.arange(length) / 13.0)),
+    }
+    wid = make_well("Uncertainty-RHOB", curves)
+    response = client.post(
+        f"/api/wells/{wid}/petro-uncertainty",
+        json={"iterations": 20, "variation_pct": 0, "seed": 1},
+        headers=ADMIN,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    # Density porosity is ~0.09; average with 0.25 is ~0.17 before clay correction.
+    assert 0.02 < body["summary"]["phie_p50_mean"] < 0.22
+    assert len(body["phie"]["p50"]) == len(body["depth"])

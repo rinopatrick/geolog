@@ -44,12 +44,14 @@ def petro_uncertainty(wid: int, data: dict, request: Request, db: Session = Depe
     if rt is None or nphi is None:
         raise HTTPException(400, "Need RT and NPHI curves")
     gr = _curve(db, run.id, ["GR", "SGR", "CGR"])
+    rhob = _curve(db, run.id, ["RHOB", "RHOZ", "DEN"])
     depth = _curve(db, run.id, ["DEPT", "DEPTH"])
     if depth is None:
         depth = np.arange(len(rt), dtype=float)
     length = min(len(rt), len(nphi), len(depth))
     rt, nphi, depth = rt[:length], nphi[:length], depth[:length]
     gr = gr[:length] if gr is not None else np.zeros(length)
+    rhob = rhob[:length] if rhob is not None and len(rhob) >= length else None
     start = data.get("start_depth")
     stop = data.get("stop_depth")
     mask = np.isfinite(rt) & np.isfinite(nphi) & (rt > 0) & (nphi >= 0)
@@ -65,6 +67,7 @@ def petro_uncertainty(wid: int, data: dict, request: Request, db: Session = Depe
     rt = rt[indices]
     nphi = nphi[indices]
     gr = gr[indices]
+    rhob = rhob[indices] if rhob is not None else None
     depth = depth[indices]
 
     gr_valid = gr[np.isfinite(gr)]
@@ -73,7 +76,19 @@ def petro_uncertainty(wid: int, data: dict, request: Request, db: Session = Depe
     if gr_max <= gr_min:
         gr_max = gr_min + 1.0
     vsh = np.clip((gr - gr_min) / (gr_max - gr_min), 0.0, 1.0)
-    phi_base = np.maximum(0.0, nphi * (1.0 - vsh))
+    rho_ma = float(data.get("rho_ma", 2.65))
+    rho_f = float(data.get("rho_f", 1.0))
+    phi_sh = float(data.get("phi_sh", 0.30))
+    if rhob is not None:
+        phi_d = np.clip((rho_ma - rhob) / max(1e-9, rho_ma - rho_f), -0.15, 0.60)
+        phi_raw = np.where(
+            np.isfinite(phi_d) & np.isfinite(nphi),
+            np.where(nphi < phi_d - 0.03, phi_d, (phi_d + nphi) / 2.0),
+            np.where(np.isfinite(phi_d), phi_d, nphi),
+        )
+    else:
+        phi_raw = nphi
+    phi_base = np.maximum(0.0, phi_raw - vsh * phi_sh)
 
     model = str(data.get("saturation_model", "archie")).lower()
     if model not in {"archie", "simandoux", "indonesian"}:
@@ -103,7 +118,7 @@ def petro_uncertainty(wid: int, data: dict, request: Request, db: Session = Depe
         vsh_scale = sample(1.0, 0.4, 1.6)
         phie_scale = sample(1.0, 0.5, 1.5)
         vsh_i = np.clip(vsh * vsh_scale, 0.0, 1.0)
-        phi_i = np.clip(phi_base * (1.0 - vsh_i) / np.maximum(1.0 - vsh, 1e-6) * phie_scale, 0.0, 0.6)
+        phi_i = np.clip((phi_base + vsh * phi_sh - vsh_i * phi_sh) * phie_scale, 0.0, 0.6)
         sw_samples[index] = saturation(
             model,
             rt,

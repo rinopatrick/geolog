@@ -412,12 +412,14 @@ def sensitivity_analysis(wid: int, data: dict, db: Session = Depends(get_db)):
 
     rt_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["RT", "RESD", "RILD", "ILD"])).first()
     nphi_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["NPHI", "NPHI_LS"])).first()
+    rhob_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["RHOB", "RHOZ", "DEN"])).first()
     gr_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["GR", "SGR", "CGR"])).first()
     if not rt_cd or not nphi_cd:
         raise HTTPException(400, "Need RT and NPHI curves")
 
     rt = np.frombuffer(rt_cd.data_binary, dtype=np.float64).copy()
     nphi = np.frombuffer(nphi_cd.data_binary, dtype=np.float64).copy()
+    rhob = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy() if rhob_cd else None
     gr = np.frombuffer(gr_cd.data_binary, dtype=np.float64).copy() if gr_cd else np.zeros_like(rt)
 
     base_a = max(float(data.get("a", 1.0)), 1e-6)
@@ -465,7 +467,19 @@ def sensitivity_analysis(wid: int, data: dict, db: Session = Depends(get_db)):
             depth_mask &= (depth_arr <= float(stop_depth))
 
     vsh = np.clip((gr - gr_min) / (gr_max - gr_min), 0.0, 1.0)
-    phi_base = np.maximum(0.0, nphi * (1.0 - vsh))
+    rho_ma = float(data.get("rho_ma", 2.65))
+    rho_f = float(data.get("rho_f", 1.0))
+    phi_sh = float(data.get("phi_sh", 0.30))
+    if rhob is not None and rhob.shape[0] == len(nphi):
+        phi_d = np.clip((rho_ma - rhob) / max(1e-9, rho_ma - rho_f), -0.15, 0.60)
+        phi_raw = np.where(
+            np.isfinite(phi_d) & np.isfinite(nphi),
+            np.where(nphi < phi_d - 0.03, phi_d, (phi_d + nphi) / 2.0),
+            np.where(np.isfinite(phi_d), phi_d, nphi),
+        )
+    else:
+        phi_raw = nphi
+    phi_base = np.maximum(0.0, phi_raw - vsh * phi_sh)
     valid = depth_mask & np.isfinite(rt) & np.isfinite(phi_base) & (rt > 0) & (phi_base >= 0.01)
 
     rng = np.random.default_rng(seed if seed is not None else None)
