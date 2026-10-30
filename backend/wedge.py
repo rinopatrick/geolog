@@ -121,3 +121,36 @@ def sweep_frequencies(ai_top, ai_reservoir, ai_base, velocity_m_s, freqs_hz, thi
         "p90": [round(float(v), 6) for v in np.percentile(arr, 90, axis=0)],
         "dt_s": float(dt_s),
     }
+
+
+def misfit_tie(synthetic, observed, max_lag: int = 40) -> dict:
+    """Lag-scan normalized correlation between synthetic and observed trace."""
+    a = np.asarray(synthetic, dtype=float)
+    b = np.asarray(observed, dtype=float)
+    if len(a) < 16 or len(b) < 16:
+        raise ValueError("traces too short for misfit")
+    if max_lag < 0:
+        raise ValueError("max_lag must be non-negative")
+    n = min(len(a), len(b))
+    a, b = a[:n], b[:n]
+    a = a - float(np.mean(a))
+    b = b - float(np.mean(b))
+    na, nb = float(np.linalg.norm(a)), float(np.linalg.norm(b))
+    if na <= 1e-12 or nb <= 1e-12:
+        raise ValueError("trace has no energy")
+    best_score, best_lag = -2.0, 0
+    for lag in range(-int(max_lag), int(max_lag) + 1):
+        if lag < 0:
+            score = float(np.dot(a[: lag or None], b[-lag:]) / (na * nb))
+        elif lag > 0:
+            score = float(np.dot(a[lag:], b[: n - lag]) / (na * nb))
+        else:
+            score = float(np.dot(a, b) / (na * nb))
+        if score > best_score:
+            best_score, best_lag = score, lag
+    return {
+        "correlation": round(float(best_score), 6),
+        "shift_samples": int(best_lag),
+        "samples": n,
+        "max_lag": int(max_lag),
+    }
