@@ -29,3 +29,13 @@ sample; P90 is the conservative low case.
 - No inflation, mid-year discounting, abandonment cost, or fiscal regimes.
 - `capex` is treated as net-to-working-interest at month zero.
 - The model is a screening tool, not a reserves audit.
+
+## Anomaly detection
+
+`POST /api/wells/{wid}/production/anomalies` fits decline on the first
+half of oil-rate history, forecasts the second half, and flags points
+deviating beyond `threshold_pct`. A CUSUM on test-window residuals reports
+`declining`, `growing`, or `stable` trend. A clean exponential decline
+produces zero flags — verified by test. Needs at least 12 positive rate
+points. Screening: single-well, oil-rate only, no operating-event context
+(workovers, chokes, downtime explain real flags).
