@@ -320,6 +320,9 @@ class PetroParams(Base):
     phie_cutoff = Column(Float, default=0.10)
     sw_cutoff = Column(Float, default=0.60)
     template = Column(String(50), default="custom")  # sandstone / carbonate / shaly_sand / custom
+    gr_clean = Column(Float, nullable=True)
+    gr_shale = Column(Float, nullable=True)
+    phi_sh = Column(Float, nullable=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
