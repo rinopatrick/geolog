@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import SessionLocal, app
@@ -367,3 +368,73 @@ def test_portfolio_capex_timing_and_correlated_risk():
     assert risked["risked_boe_p90"] == 0
     assert risked["risked_boe_p10"] > 0
     assert risked["risked_boe_mean"] < risked["mean_boe"]
+
+
+def test_portfolio_full_correlation_matrix_and_validation():
+    pid = _project_id()
+    _, surface = _depth_surface(pid)
+    prospects = []
+    for name, porosity in (("Matrix A", 0.17), ("Matrix B", 0.25)):
+        created = client.post(
+            f"/api/projects/{pid}/prospects",
+            json={
+                "name": name,
+                "surface_id": surface["id"],
+                "contact_depth_m": 1000,
+                "porosity": porosity,
+                "water_saturation": 0.3,
+                "recovery_factor": 0.4,
+                "iterations": 100,
+                "seed": 8,
+            },
+            headers=ADMIN,
+        )
+        assert created.status_code == 201, created.text
+        prospects.append(created.json())
+
+    matrix = [[1, 1], [1, 1]]
+    response = client.post(
+        f"/api/projects/{pid}/prospect-portfolios",
+        json={
+            "name": "Full matrix",
+            "prospect_ids": [item["id"] for item in prospects],
+            "price_per_boe": 60,
+            "opex_per_boe": 10,
+            "correlation_matrix": matrix,
+            "risk_correlation_matrix": matrix,
+            "iterations": 500,
+            "seed": 4,
+        },
+        headers=ADMIN,
+    )
+    assert response.status_code == 201, response.text
+    summary = response.json()["result"]["portfolio"]
+    expected_p90 = sum(item["result"]["recoverable_boe"]["p90_bbl"] for item in prospects)
+    expected_p50 = sum(item["result"]["recoverable_boe"]["p50_bbl"] for item in prospects)
+    expected_p10 = sum(item["result"]["recoverable_boe"]["p10_bbl"] for item in prospects)
+    assert summary["total_boe_p90"] == pytest.approx(expected_p90, rel=1e-9)
+    assert summary["total_boe_p50"] == pytest.approx(expected_p50, rel=1e-9)
+    assert summary["total_boe_p10"] == pytest.approx(expected_p10, rel=1e-9)
+    assert response.json()["result"]["inputs"]["correlation_matrix"] == matrix
+
+    bad = client.post(
+        f"/api/projects/{pid}/prospect-portfolios",
+        json={
+            "name": "Bad matrix",
+            "prospect_ids": [item["id"] for item in prospects],
+            "correlation_matrix": [[1, 2], [2, 1]],
+        },
+        headers=ADMIN,
+    )
+    assert bad.status_code == 400
+
+    wrong_size = client.post(
+        f"/api/projects/{pid}/prospect-portfolios",
+        json={
+            "name": "Wrong size",
+            "prospect_ids": [item["id"] for item in prospects],
+            "correlation_matrix": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        },
+        headers=ADMIN,
+    )
+    assert wrong_size.status_code == 400

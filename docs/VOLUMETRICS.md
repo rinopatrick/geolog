@@ -71,6 +71,9 @@ EMV = chance * success_net + (1 - chance) * dry_net
 
 `capex_timing` is `success` or `pre_drill`. Portfolio volumes use a Gaussian
 copula with `correlation`; success events use a second copula with
-`risk_correlation`, so risking can be independent or correlated. The result
+`risk_correlation`, so risking can be independent or correlated. For
+prospect-specific dependency, pass symmetric positive-semidefinite
+`correlation_matrix` and/or `risk_correlation_matrix` (N×N, diagonal 1); these
+take precedence over the scalar correlations. The result
 includes both unrisked and risked P90/P50/P10/mean BOE. Prospects are ranked by
 EMV. Saved portfolios can be listed, read, exported as CSV and deleted.
