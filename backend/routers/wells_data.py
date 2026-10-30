@@ -155,6 +155,7 @@ _trapezoid = getattr(np, "trapezoid", None) or getattr(np, "trapz")
 
 
 try:
+    from anomaly import detect_anomalies
     from production_economics import evaluate as evaluate_production_economics
     from routers.wells import (
         _to_float_or_none, _extract_las_coordinates, _build_petro_summary,
@@ -164,6 +165,7 @@ try:
         _require_well_admin,
     )
 except ImportError:
+    from backend.anomaly import detect_anomalies
     from backend.production_economics import evaluate as evaluate_production_economics
     from backend.routers.wells import (
         _to_float_or_none, _extract_las_coordinates, _build_petro_summary,
@@ -661,6 +663,44 @@ def production_economics(wid: int, data: dict, db: Session = Depends(get_db)):
             [d for d, _ in valid],
             [q for _, q in valid],
             data or {},
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"well_id": wid, **result}
+
+@router.post("/{wid}/production/anomalies")
+def production_anomalies(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Forecast-vs-actual anomaly flags with CUSUM trend."""
+    rows = (
+        db.query(ProductionData)
+        .filter(ProductionData.well_id == wid)
+        .order_by(ProductionData.date.asc(), ProductionData.id.asc())
+        .all()
+    )
+    valid = [
+        (r.date, float(r.oil_rate))
+        for r in rows
+        if r.date is not None and r.oil_rate is not None and r.oil_rate > 0
+    ]
+    if len(valid) < 12:
+        raise HTTPException(400, "Need at least 12 positive oil-rate data points")
+    data = data or {}
+    try:
+        threshold = float(data.get("threshold_pct", 20.0))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "threshold_pct must be a number")
+    seed = data.get("seed")
+    if seed is not None:
+        try:
+            seed = int(seed)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "seed must be an integer")
+    try:
+        result = detect_anomalies(
+            [d for d, _ in valid],
+            [q for _, q in valid],
+            threshold_pct=threshold,
+            seed=seed,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
