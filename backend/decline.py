@@ -79,9 +79,11 @@ def compute_eur(best_fit, days_to_limit=3650.0, q_limit=1.0):
         )
     q = np.clip(q, 0.0, None)
     mask = q >= q_limit
-    if np.any(mask):
-        t = t[mask]
-        q = q[mask]
+    # No samples above the economic limit: nothing recoverable.
+    if not np.any(mask):
+        return 0.0
+    t = t[mask]
+    q = q[mask]
     return float(_trapezoid(q, t))
 
 
