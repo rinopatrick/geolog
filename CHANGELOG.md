@@ -8,6 +8,33 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-30
+
+### Fixed
+
+- **GRV cell area.** Trace labels no longer scale the area; one grid node
+  covers exactly `inline_spacing_m * crossline_spacing_m`, shared by
+  prospects and compartments via `_cell_area_m2`.
+- **Ordinary kriging.** The system now solves pairwise sample covariance with
+  a node-sample target, so estimates are exact at sample locations with zero
+  nugget (all three variogram models).
+- **Kirchhoff migration.** Per-voxel fold normalization; aperture-cut and
+  dead/NaN traces carry zero weight and zero fold. Coordinates are
+  centroid-relative for float32 safety.
+- **SEG-Y headers.** Inline/crossline words read as signed int32; negative
+  or unassigned coordinates parse correctly.
+- **Geomechanics elastic moduli.** Removed a double ft-to-m conversion that
+  underestimated `E`, `G`, `K` by ~10.75x; carbonate E now tens of GPa.
+- **Breakout SHmax inversion.** Single-`Pw` form mirroring the forward hoop
+  model; synthetic-breakout round-trip recovers SHmax within 10%.
+- **SAND_CDP.** Redefined as drawdown capacity (`Pp - Pw_crit`) bounded by
+  reservoir pressure, consistent with the `MW_MIN` shear criterion.
+- **Decline curves.** Hyperbolic `b` capped at [0, 1]; `b -> 0` uses the
+  exponential branch; EUR returns 0 when nothing clears the economic limit.
+- **Saturation-height.** Brooks-Corey rejects non-monotonic Pc/Sw input
+  instead of returning a clamped lambda.
+- **Time-depth.** Negative and non-finite TWT inputs are rejected.
+
 ## [0.19.0] - 2026-10-30
 
 ### Added
