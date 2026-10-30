@@ -13,12 +13,14 @@ try:
     from models import Project, Prospect, ProspectPortfolio, SeismicLine, SeismicSurface
     from portfolio import build_portfolio
     from volumetrics import calculate_prospect
+    from cell_maps import cell_posterior_maps
 except ImportError:
     from backend.acl import require_project_access
     from backend.database import get_db
     from backend.models import Project, Prospect, ProspectPortfolio, SeismicLine, SeismicSurface
     from backend.portfolio import build_portfolio
     from backend.volumetrics import calculate_prospect
+    from backend.cell_maps import cell_posterior_maps
 
 router = APIRouter(prefix="/api", tags=["prospects"])
 
@@ -321,3 +323,79 @@ def delete_prospect(pid: int, prospect_id: int, request: Request, db: Session = 
         raise HTTPException(404, "Prospect not found")
     db.delete(item)
     db.commit()
+    return Response(status_code=204)
+
+@router.post("/projects/{pid}/prospect-maps", status_code=200)
+def prospect_maps(pid: int, data: dict, request: Request, db: Session = Depends(get_db)):
+    """Per-cell P10/P50/P90 hydrocarbon column + probability for a surface."""
+    if not db.query(Project.id).filter(Project.id == pid).first():
+        raise HTTPException(404, "Project not found")
+    require_project_access(db, request, pid)
+    try:
+        surface_id = int(data.get("surface_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "surface_id is required")
+    surface = (
+        db.query(SeismicSurface)
+        .join(SeismicLine, SeismicLine.id == SeismicSurface.line_id)
+        .filter(SeismicSurface.id == surface_id, SeismicLine.project_id == pid)
+        .first()
+    )
+    if not surface:
+        raise HTTPException(404, "Surface not found in this project")
+    if not surface.depth_grid_json or surface.depth_grid_json == "[]":
+        raise HTTPException(400, "surface must be depth-converted first")
+    if not surface.inline_spacing_m or not surface.crossline_spacing_m:
+        raise HTTPException(400, "surface needs inline/crossline spacing")
+    base_surface = None
+    if data.get("base_surface_id") is not None:
+        try:
+            base_id = int(data["base_surface_id"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "base_surface_id must be an integer")
+        base_surface = (
+            db.query(SeismicSurface)
+            .filter(SeismicSurface.id == base_id, SeismicSurface.line_id == surface.line_id)
+            .first()
+        )
+        if not base_surface:
+            raise HTTPException(404, "Base surface not found on this line")
+        if not base_surface.depth_grid_json or base_surface.depth_grid_json == "[]":
+            raise HTTPException(400, "base surface must be depth-converted first")
+    try:
+        contact = float(data.get("contact_depth_m"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "contact_depth_m is required")
+    iterations = data.get("iterations", 1000)
+    try:
+        iterations = int(iterations)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "iterations must be an integer")
+    seed = data.get("seed")
+    if seed is not None:
+        try:
+            seed = int(seed)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "seed must be an integer")
+    try:
+        maps = cell_posterior_maps(
+            depth_grid=json.loads(surface.depth_grid_json),
+            contact_depth_m=contact,
+            inline_spacing_m=surface.inline_spacing_m,
+            crossline_spacing_m=surface.crossline_spacing_m,
+            porosity=data.get("porosity", 0.2),
+            water_saturation=data.get("water_saturation", 0.3),
+            net_to_gross=data.get("net_to_gross", 1.0),
+            base_depth_grid=json.loads(base_surface.depth_grid_json) if base_surface else None,
+            iterations=iterations,
+            seed=seed,
+        )
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(400, str(exc))
+    return {
+        "surface_id": surface.id,
+        "base_surface_id": base_surface.id if base_surface else None,
+        "inlines": json.loads(surface.inlines_json or "[]"),
+        "crosslines": json.loads(surface.crosslines_json or "[]"),
+        **maps,
+    }
