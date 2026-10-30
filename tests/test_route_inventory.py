@@ -214,6 +214,7 @@ EXPECTED_ROUTES = [
     "POST /api/projects/{pid}/batch-petro",
     "POST /api/projects/{pid}/batch-petro-async",
     "POST /api/projects/{pid}/members",
+    "POST /api/projects/{pid}/prospect-maps",
     "POST /api/projects/{pid}/prospect-portfolios",
     "POST /api/projects/{pid}/prospects",
     "POST /api/projects/{pid}/seismic",
