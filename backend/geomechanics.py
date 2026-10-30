@@ -176,6 +176,9 @@ def compute(
     unit_system = (sem.get("metadata", {}).get("unit_system") or "field").lower()
     depth = np.asarray(sem["depth"], dtype=np.float64)
     tvd = np.asarray(sem.get("tvd", depth), dtype=np.float64)
+    # The semantics layer delivers SI curves (m, us/m, kg/m3); convert to
+    # field-equivalent (ft, us/ft, g/cc) once so the correlations below —
+    # Eaton, Castagna, overburden gradient — see the units they expect.
     if unit_system == "si":
         depth_ft = depth * FT_PER_M
         tvd_ft = tvd * FT_PER_M
