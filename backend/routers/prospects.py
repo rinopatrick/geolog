@@ -14,6 +14,7 @@ try:
     from portfolio import build_portfolio
     from volumetrics import calculate_prospect
     from cell_maps import cell_posterior_maps
+    from allocation import allocate_production
 except ImportError:
     from backend.acl import require_project_access
     from backend.database import get_db
@@ -21,6 +22,7 @@ except ImportError:
     from backend.portfolio import build_portfolio
     from backend.volumetrics import calculate_prospect
     from backend.cell_maps import cell_posterior_maps
+    from backend.allocation import allocate_production
 
 router = APIRouter(prefix="/api", tags=["prospects"])
 
@@ -399,3 +401,45 @@ def prospect_maps(pid: int, data: dict, request: Request, db: Session = Depends(
         "crosslines": json.loads(surface.crosslines_json or "[]"),
         **maps,
     }
+
+@router.post("/projects/{pid}/production-allocation", status_code=200)
+def production_allocation(pid: int, data: dict, request: Request, db: Session = Depends(get_db)):
+    """Split a total rate across compartments by kh transmissibility."""
+    if not db.query(Project.id).filter(Project.id == pid).first():
+        raise HTTPException(404, "Project not found")
+    require_project_access(db, request, pid)
+    try:
+        total = float(data.get("total_rate_bpd"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "total_rate_bpd is required")
+    compartments = data.get("compartments")
+    if not isinstance(compartments, list) or not compartments:
+        raise HTTPException(400, "compartments must be a non-empty list")
+    seed = data.get("seed")
+    if seed is not None:
+        try:
+            seed = int(seed)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "seed must be an integer")
+    # Optional: pull kh from a stored surface's compartments by key.
+    surface_id = data.get("surface_id")
+    if surface_id is not None:
+        try:
+            surface_id = int(surface_id)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "surface_id must be an integer")
+        surface = (
+            db.query(SeismicSurface)
+            .join(SeismicLine, SeismicLine.id == SeismicSurface.line_id)
+            .filter(SeismicSurface.id == surface_id, SeismicLine.project_id == pid)
+            .first()
+        )
+        if not surface:
+            raise HTTPException(404, "Surface not found in this project")
+        if not surface.compartments_json or surface.compartments_json == "{}":
+            raise HTTPException(400, "surface has no compartments; build them first")
+    try:
+        result = allocate_production(total, compartments, seed=seed)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    return result
