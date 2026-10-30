@@ -8,6 +8,17 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-30
+
+### Fixed
+
+- **Density-neutron PHIE.** Sensitivity and uncertainty now use RHOB+NPHI effective porosity when available, falling back to NPHI.
+- **Portfolio dependency matrices.** Full symmetric PSD volume/risk correlation matrices with validation and Cholesky sampling.
+- **Kriging surfaces.** Optional ordinary kriging with variogram models, anisotropy and azimuth for horizon and fault surfaces, with IDW fallback.
+- **SEG-Y delay/datum ties.** Index trace delay and add delay plus datum correction to the tie time origin.
+- **3D compartments and juxtaposition.** Base-surface compartment GRV and top/base fault juxtaposition counts.
+- **Horizon-based fault throw.** Estimate throw from depth-horizon offset across the fault trace and store it in link geometry.
+
 ## [0.17.0] - 2026-11-01
 
 ### Fixed
@@ -18,12 +29,6 @@ While the major version is `0`, the API is not yet stable.
 - **Shaly-sand saturation equations.** Shared dimensionally consistent Archie, Simandoux and Indonesian equations with explicit `Rsh` in deterministic, sensitivity and uncertainty paths.
 - **Physics benchmarks.** Analytic checks for IBM float, depth, fault geometry, GRV and saturation, plus field-LAS TWT invariants (`scripts/validate_physics.py`).
 - **Portfolio economics.** EMV uses mean BOE and explicit capex timing; risked volumes use correlated success events, not a scalar chance multiplier.
-- **Density-neutron PHIE.** Sensitivity and uncertainty now use RHOB+NPHI effective porosity when available, falling back to NPHI.
-- **Portfolio dependency matrices.** Full symmetric PSD volume/risk correlation matrices with validation and Cholesky sampling.
-- **Kriging surfaces.** Optional ordinary kriging with variogram models, anisotropy and azimuth for horizon and fault surfaces, with IDW fallback.
-- **SEG-Y delay/datum ties.** Index trace delay and add delay plus datum correction to the tie time origin.
-- **3D compartments and juxtaposition.** Base-surface compartment GRV and top/base fault juxtaposition counts.
-- **Horizon-based fault throw.** Estimate throw from depth-horizon offset across the fault trace and store it in link geometry.
 
 ## [0.16.0] - 2026-11-01
 
