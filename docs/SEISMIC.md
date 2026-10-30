@@ -92,7 +92,8 @@ the selected surface and toggle the map between time and depth.
 extracts the seismic trace at `inline`/`crossline`, resamples the synthetic onto
 the seismic time axis and searches a cross-correlation shift (`max_shift_ms`).
 DT units `US/F` and `US/M` and depth units `FT`/`M` are normalized to SI before
-TWT integration. Reflectivity is resampled to a uniform TWT grid before wavelet
+TWT integration. SEG-Y trace delay (bytes 109–110) is indexed and added to the
+tie time origin; `datum_ms` applies an additional project datum correction. Reflectivity is resampled to a uniform TWT grid before wavelet
 convolution; the result is then mapped back to log depth. Checkshot coverage is
 validated, and correlation excludes non-overlapping edges.
 

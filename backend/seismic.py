@@ -152,6 +152,7 @@ def index_segy(content: bytes, max_traces: int = 500000) -> dict[str, Any]:
     sample_counts: list[int] = []
     inlines: list[int] = []
     crosslines: list[int] = []
+    delays: list[int] = []
     while offset + TRACE_HEADER <= len(content) and len(offsets) < max_traces:
         header = content[offset:offset + TRACE_HEADER]
         trace_ns = int.from_bytes(header[114:116], "big") or binary_ns
@@ -164,6 +165,7 @@ def index_segy(content: bytes, max_traces: int = 500000) -> dict[str, Any]:
         sample_counts.append(int(trace_ns))
         inlines.append(int.from_bytes(header[188:192], "big"))
         crosslines.append(int.from_bytes(header[192:196], "big"))
+        delays.append(int.from_bytes(header[108:110], "big", signed=True))
         offset += TRACE_HEADER + nbytes
     if not offsets:
         raise ValueError("no traces could be read")
@@ -177,6 +179,7 @@ def index_segy(content: bytes, max_traces: int = 500000) -> dict[str, Any]:
         "trace_sample_counts": sample_counts,
         "trace_inlines": inlines,
         "trace_crosslines": crosslines,
+        "trace_delays": delays,
         "inline_min": int(min(inlines)),
         "inline_max": int(max(inlines)),
         "crossline_min": int(min(crosslines)),

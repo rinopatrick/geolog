@@ -615,3 +615,12 @@ def test_surface_kriging_endpoint():
     assert body["stats"]["kriging"]["reader"] == "ordinary_kriging"
     assert len(body["grid"]) == 3
     assert all(np.isfinite(value) for row in body["grid"] for value in row)
+
+def test_index_reads_trace_delay_ms():
+    from backend.seismic import index_segy
+
+    content = bytearray(_segy_bytes())
+    first_trace_header = 3200 + 400
+    content[first_trace_header + 108:first_trace_header + 110] = (100).to_bytes(2, "big", signed=True)
+    index = index_segy(bytes(content))
+    assert index["trace_delays"][0] == 100

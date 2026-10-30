@@ -49,6 +49,7 @@ def build_tie(
     checkshot: list[dict[str, float]],
     max_shift_ms: float = 40.0,
     max_points: int = 2000,
+    time_origin_ms: float = 0.0,
 ) -> dict[str, Any]:
     checkshot = validate_checkshot(checkshot)
     depths = np.asarray(synthetic.get("depth") or [], dtype=float)
@@ -71,7 +72,7 @@ def build_tie(
     ns = len(seismic)
     if ns < 3:
         raise ValueError("seismic trace has too few samples")
-    seismic_times = np.arange(ns, dtype=float) * float(sample_interval_ms)
+    seismic_times = np.arange(ns, dtype=float) * float(sample_interval_ms) + float(time_origin_ms)
     max_lag = int(round(float(max_shift_ms) / max(1e-9, float(sample_interval_ms))))
     best_score = -2.0
     best_lag = 0
@@ -102,4 +103,5 @@ def build_tie(
         "check_samples": len(checkshot),
         "samples": int(ns),
         "search_ms": float(max_shift_ms),
+        "time_origin_ms": float(time_origin_ms),
     }
