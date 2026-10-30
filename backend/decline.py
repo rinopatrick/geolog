@@ -73,10 +73,14 @@ def compute_eur(best_fit, days_to_limit=3650.0, q_limit=1.0):
     if best_fit["model"] == "exponential":
         q = best_fit["qi"] * np.exp(-best_fit["d"] * t)
     else:
-        q = best_fit["qi"] * np.power(
-            np.clip(1.0 + best_fit["b"] * best_fit["di"] * t, 1e-9, None),
-            -1.0 / max(best_fit["b"], 1e-6),
-        )
+        # Mirrors fit_hyperbolic: b <= 1e-9 is the exponential limit.
+        if best_fit["b"] <= 1e-9:
+            q = best_fit["qi"] * np.exp(-best_fit["di"] * t)
+        else:
+            q = best_fit["qi"] * np.power(
+                np.clip(1.0 + best_fit["b"] * best_fit["di"] * t, 1e-9, None),
+                -1.0 / max(best_fit["b"], 1e-6),
+            )
     q = np.clip(q, 0.0, None)
     mask = q >= q_limit
     # No samples above the economic limit: nothing recoverable.
