@@ -814,7 +814,8 @@ def save_petro_params(wid: int, data: dict, db: Session = Depends(get_db)):
     values = pick_typed(
         data,
         strings=("saturation_model", "template"),
-        floats=("a", "m", "n", "rw", "vsh_cutoff", "phie_cutoff", "sw_cutoff"),
+        floats=("a", "m", "n", "rw", "vsh_cutoff", "phie_cutoff", "sw_cutoff",
+                "gr_clean", "gr_shale", "phi_sh"),
     )
     if existing:
         for field, value in values.items():
@@ -826,6 +827,56 @@ def save_petro_params(wid: int, data: dict, db: Session = Depends(get_db)):
     _log_audit(db, "save_petro_params", "well", entity_id=wid, well_id=wid,
                details=f"template={data.get('template','custom')};sig={signature_after[:12]}")
     return {"status": "ok", "signature": signature_after}
+
+@router.post("/{wid}/petro-calibration")
+def calibrate_petro_params(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Fit gr_clean/gr_shale/phi_sh against reference curves.
+
+    Body: {gr: [...], vsh_ref: [...], phi_raw: [...], phi_ref: [...], save: bool}.
+    phi_raw is the interpreter's density-neutron blend before shale correction;
+    see backend/petro_calibration.py. Returns fitted params + MAE vs defaults.
+    """
+    import numpy as _np
+    try:
+        from petro_calibration import calibrate_phi_sh, calibrate_vsh
+    except ImportError:
+        from backend.petro_calibration import calibrate_phi_sh, calibrate_vsh
+    tlock = _get_template_lock(wid)
+    if tlock.get("locked"):
+        raise HTTPException(423, "Template is locked; unlock required before edits")
+    if not db.query(Well.id).filter(Well.id == wid).first():
+        raise HTTPException(404, "Well not found")
+    try:
+        gr = _np.asarray(data.get("gr", []), dtype=float)
+        vsh_ref = _np.asarray(data.get("vsh_ref", []), dtype=float)
+        phi_raw = _np.asarray(data.get("phi_raw", []), dtype=float)
+        phi_ref = _np.asarray(data.get("phi_ref", []), dtype=float)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "gr/vsh_ref/phi_raw/phi_ref must be numeric arrays")
+    try:
+        vsh_fit = calibrate_vsh(gr, vsh_ref)
+        phi_fit = calibrate_phi_sh(phi_raw, vsh_ref, phi_ref)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    saved = False
+    if bool(data.get("save")):
+        existing = db.query(PetroParams).filter(PetroParams.well_id == wid).first()
+        values = {
+            "gr_clean": vsh_fit["gr_clean"],
+            "gr_shale": vsh_fit["gr_shale"],
+            "phi_sh": phi_fit["phi_sh"],
+        }
+        if existing:
+            for field, value in values.items():
+                setattr(existing, field, value)
+        else:
+            db.add(PetroParams(well_id=wid, **values))
+        db.commit()
+        saved = True
+        _, signature_after = _snapshot_template_signature(db, wid)
+        _log_audit(db, "calibrate_petro_params", "well", entity_id=wid, well_id=wid,
+                   details=f"gr_clean={values['gr_clean']};gr_shale={values['gr_shale']};phi_sh={values['phi_sh']}")
+    return {"vsh": vsh_fit, "phi_sh": phi_fit, "saved": saved}
 
 
 

@@ -22,3 +22,18 @@ forms. The Sensitivity view has a **Curve uncertainty** action that draws the
 three bands. The existing **Run Sensitivity** action remains the net-pay Monte
 Carlo with driver ranking. The deterministic multimineral solver remains
 available from the Petrophysics toolbar.
+
+## Calibration against reference interpretation
+
+`POST /api/wells/{wid}/petro-calibration` fits GR endpoints and shale
+porosity against reference curves: body `{gr, vsh_ref, phi_raw, phi_ref,
+save}` where `phi_raw` is the interpreter's density-neutron blend before
+shale correction. Returns fitted `{gr_clean, gr_shale, phi_sh}` with MAE.
+With `save: true` the params persist to `PetroParams`.
+
+Reference: Volve F-1 professional interpretation subset
+(`test_data/volve_f1/`, see `NOTICE.md` for Equinor licence terms).
+On that fixture, calibration cuts VSH MAE 0.25 → 0.07 and PHIE MAE
+0.063 → 0.006 vs the min-max/0.3 defaults. KLOGH is log-derived,
+not core — this validates consistency with a professional interpretation,
+not with laboratory measurements.
