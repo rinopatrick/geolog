@@ -8,6 +8,8 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-30
+
 ### Added
 
 - **Post-stack 3D depth migration.** Constant-velocity Kirchhoff migration over
