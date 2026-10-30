@@ -33,7 +33,9 @@ labelled `assumption`.
 - Pore pressure: Eaton (`Pp = Sv - (Sv - Phyd) * (DTn/DT)^n`), Bowers, or
   hydrostatic. The normal trend is fitted to shale `DT` when enough points
   exist; otherwise a deterministic fallback is used.
-- Elastic: dynamic `E`, `nu`, `G`, `K` from `Vp`, `Vs`, `RHOB`.
+- Elastic: dynamic `E`, `nu`, `G`, `K` from `Vp`, `Vs`, `RHOB`. `Vp`/`Vs`
+  curves are m/s (`304800/DT` with DT in us/ft equals one foot per microsecond
+  in m/s), so no further unit conversion applies before the moduli.
 - Stresses: far-field tensor from `Sv`, `Shmin`, `Shmax` and azimuth. The
   borehole hoop stress uses a generalized-Kirsch screening approximation from
   the transformed tensor; it is not a full inclined-well solution.
