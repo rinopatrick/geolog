@@ -28,6 +28,8 @@ def validate_checkshot(raw: Any) -> list[dict[str, float]]:
     for previous, current in zip(points, points[1:]):
         if current["depth"] <= previous["depth"]:
             raise ValueError("checkshot depths must be strictly increasing")
+        if current["twt_ms"] <= previous["twt_ms"]:
+            raise ValueError("checkshot TWT must be strictly increasing")
     return points
 
 
@@ -48,6 +50,7 @@ def build_tie(
     max_shift_ms: float = 40.0,
     max_points: int = 2000,
 ) -> dict[str, Any]:
+    checkshot = validate_checkshot(checkshot)
     depths = np.asarray(synthetic.get("depth") or [], dtype=float)
     times = np.asarray(synthetic.get("twt") or [], dtype=float) * 1000.0
     amplitudes = np.asarray(synthetic.get("synthetic") or [], dtype=float)
@@ -56,6 +59,8 @@ def build_tie(
     if checkshot:
         check_depth = np.asarray([point["depth"] for point in checkshot], dtype=float)
         check_time = np.asarray([point["twt_ms"] for point in checkshot], dtype=float)
+        if depths.min() < check_depth.min() - 1e-6 or depths.max() > check_depth.max() + 1e-6:
+            raise ValueError("checkshot does not cover the log depth range")
         times = np.interp(depths, check_depth, check_time)
     order = np.argsort(times)
     times = times[order]
@@ -71,11 +76,17 @@ def build_tie(
     best_score = -2.0
     best_lag = 0
     for lag in range(-max_lag, max_lag + 1):
-        shifted = np.interp(seismic_times - lag * sample_interval_ms, times, amplitudes, left=0.0, right=0.0)
-        score = _correlation(seismic, shifted)
+        shifted_times = seismic_times - lag * sample_interval_ms
+        overlap = (shifted_times >= times[0]) & (shifted_times <= times[-1])
+        if int(overlap.sum()) < max(10, ns // 10):
+            continue
+        shifted = np.interp(shifted_times, times, amplitudes, left=0.0, right=0.0)
+        score = _correlation(seismic[overlap], shifted[overlap])
         if score > best_score:
             best_score = score
             best_lag = lag
+    if best_score <= -1.5:
+        raise ValueError("synthetic and seismic traces do not overlap")
     shift_ms = best_lag * float(sample_interval_ms)
     shifted = np.interp(seismic_times - shift_ms, times, amplitudes, left=0.0, right=0.0)
     step = max(1, ns // max(1, int(max_points)))

@@ -89,6 +89,10 @@ the selected surface and toggle the map between time and depth.
 `POST /api/wells/{wid}/seismic-ties` builds a synthetic trace from DT/RHOB,
 extracts the seismic trace at `inline`/`crossline`, resamples the synthetic onto
 the seismic time axis and searches a cross-correlation shift (`max_shift_ms`).
+DT units `US/F` and `US/M` and depth units `FT`/`M` are normalized to SI before
+TWT integration. Reflectivity is resampled to a uniform TWT grid before wavelet
+convolution; the result is then mapped back to log depth. Checkshot coverage is
+validated, and correlation excludes non-overlapping edges.
 
 An optional `checkshot` list of `{depth, twt_ms}` replaces the DT-derived
 time-depth mapping. The response stores the seismic/synthetic traces, `shift_ms`

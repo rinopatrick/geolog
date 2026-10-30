@@ -11,7 +11,10 @@ While the major version is `0`, the API is not yet stable.
 ### Fixed
 
 - **Depth-domain fault geometry.** Fault dip is calculated only after time-to-depth conversion; throw is reported in metres when a velocity model is supplied.
-- **GRV base surface.** Prospects can use a base-reservoir surface, so the column stops at `min(base, contact)`.## [0.16.0] - 2026-11-01
+- **GRV base surface.** Prospects can use a base-reservoir surface, so the column stops at `min(base, contact)`.
+- **Synthetic seismogram physics.** Unit-aware DT/depth conversion, uniform-TWT reflectivity resampling, checkshot coverage validation and edge-safe tie correlation.
+
+## [0.16.0] - 2026-11-01
 
 ### Added
 

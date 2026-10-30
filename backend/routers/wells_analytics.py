@@ -195,103 +195,42 @@ router = APIRouter(prefix="/api/wells", tags=["wells"])
 
 
 def _compute_synthetic_seismogram(wid: int, data: dict, db: Session):
+    """Generate a synthetic trace on a uniform TWT grid from DT and RHOB."""
     lr_id = data.get("log_run_id")
-    lr = db.query(LogRun).filter(LogRun.id == lr_id).first() if lr_id else \
-         db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
+    lr = db.query(LogRun).filter(LogRun.id == lr_id).first() if lr_id else          db.query(LogRun).filter(LogRun.well_id == wid).order_by(LogRun.num_points.desc()).first()
     if not lr:
         raise HTTPException(404, "No log run")
+    well = db.query(Well).filter(Well.id == wid).first()
+    if not well:
+        raise HTTPException(404, "Well not found")
 
     dt_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DT", "DTC", "DTCO"])).first()
     rhob_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["RHOB", "RHOZ", "DEN"])).first()
     dept_cd = db.query(CurveData).filter(CurveData.log_run_id == lr.id, CurveData.mnemonic.in_(["DEPT", "DEPTH"])).first()
-
     if not dt_cd or not rhob_cd:
         raise HTTPException(400, "Need DT and RHOB curves for synthetic seismogram")
 
     dt = np.frombuffer(dt_cd.data_binary, dtype=np.float64).copy()
     rhob = np.frombuffer(rhob_cd.data_binary, dtype=np.float64).copy()
     dept = np.frombuffer(dept_cd.data_binary, dtype=np.float64).copy() if dept_cd else np.arange(len(dt)) * 0.5
-
-    valid = ~np.isnan(dt) & ~np.isnan(rhob) & (dt > 0) & (rhob > 1.5) & (rhob < 3.5)
-    dt_v = dt[valid]
-    rhob_v = rhob[valid]
-    dept_v = dept[valid]
-
-    if len(dt_v) < 10:
-        raise HTTPException(400, "Not enough valid DT/RHOB data")
-
-    velocity = 1e6 / dt_v  # ft/s when DT is us/ft
-    ai = rhob_v * velocity
-
-    rc = np.zeros(len(ai), dtype=np.float64)
-    ai_sum = ai[1:] + ai[:-1]
-    safe = np.abs(ai_sum) > 1e-12
-    rc_vals = np.zeros(len(ai) - 1, dtype=np.float64)
-    rc_vals[safe] = (ai[1:][safe] - ai[:-1][safe]) / ai_sum[safe]
-    rc[1:] = rc_vals
-
-    wavelet_freq = float(data.get("wavelet_freq", data.get("frequency", 30)))
-    wavelet_freq = float(np.clip(wavelet_freq, 10.0, 80.0))
-    polarity = str(data.get("polarity", "normal")).lower()
-    phase = int(float(data.get("phase", 0)))
-    phase = 90 if phase == 90 else 0
-
-    # Time-depth relationship: TWT = 2 * cumsum(DT * dD) / 1e6
-    d_depth = np.diff(dept_v)
-    if len(d_depth) == 0:
-        raise HTTPException(400, "Not enough depth samples")
-    median_dd = float(np.nanmedian(np.abs(d_depth[d_depth != 0]))) if np.any(d_depth != 0) else 0.5
-    d_depth_safe = np.where(np.abs(d_depth) > 0, np.abs(d_depth), median_dd if median_dd > 0 else 0.5)
-    twt = np.zeros(len(dept_v), dtype=np.float64)
-    twt[1:] = 2.0 * np.cumsum(dt_v[:-1] * d_depth_safe) / 1e6
-
-    dt_time = float(np.nanmedian(np.diff(twt))) if len(twt) > 2 else 0.0005
-    if not np.isfinite(dt_time) or dt_time <= 0:
-        dt_time = 0.0005
-
-    half_len_s = 0.064
-    t_wav = np.arange(-half_len_s, half_len_s + dt_time, dt_time)
-    wav = (1 - 2 * (np.pi ** 2) * (wavelet_freq ** 2) * (t_wav ** 2)) * np.exp(-(np.pi ** 2) * (wavelet_freq ** 2) * (t_wav ** 2))
-    max_w = float(np.max(np.abs(wav))) if len(wav) else 0.0
-    if max_w > 0:
-        wav = wav / max_w
-
-    synthetic = np.convolve(rc, wav, mode="full")[len(wav) // 2:len(wav) // 2 + len(rc)]
-    if phase == 90:
-        synthetic = _hilbert_transform(synthetic)
-    if polarity == "reversed":
-        synthetic = -synthetic
-
-    step = max(1, len(dept_v) // 2000)
-
-    return {
-        "depth": dept_v[::step].tolist(),
-        "twt": twt[::step].tolist(),
-        "ai": ai[::step].tolist(),
-        "rc": rc[::step].tolist(),
-        "synthetic": synthetic[::step].tolist(),
-        "wavelet": {
-            "time": t_wav.tolist(),
-            "amplitude": wav.tolist(),
-        },
-        "params": {
-            "wavelet_freq": wavelet_freq,
-            "polarity": polarity,
-            "phase": phase,
-            "time_sample_s": dt_time,
-            "n_points": len(dept_v)
-        },
-        "stats": {
-            "ai_min": round(float(np.min(ai)), 1),
-            "ai_max": round(float(np.max(ai)), 1),
-            "ai_mean": round(float(np.mean(ai)), 1),
-            "rc_min": round(float(np.min(rc)), 4),
-            "rc_max": round(float(np.max(rc)), 4),
-            "twt_min_s": round(float(np.min(twt)), 4),
-            "twt_max_s": round(float(np.max(twt)), 4),
-        }
-    }
-
+    try:
+        try:
+            from synthetic import compute_synthetic_seismogram as _synth
+        except ImportError:
+            from backend.synthetic import compute_synthetic_seismogram as _synth
+        return _synth(
+            dt,
+            rhob,
+            dept,
+            dt_unit=dt_cd.unit or "US/F",
+            depth_unit=well.depth_unit or "FT",
+            wavelet_freq=float(data.get("wavelet_freq", data.get("frequency", 30))),
+            polarity=str(data.get("polarity", "normal")),
+            phase=int(float(data.get("phase", 0))),
+            max_points=2000,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 @router.post("/{wid}/rw-estimation")
 def estimate_rw(wid: int, data: dict, db: Session = Depends(get_db)):
