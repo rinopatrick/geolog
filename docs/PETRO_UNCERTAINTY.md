@@ -1,7 +1,10 @@
 # Petrophysics uncertainty
 
 `POST /api/wells/{wid}/petro-uncertainty` runs a per-depth Monte Carlo over
-Archie, Simandoux or Indonesian saturation:
+Archie, Simandoux or Indonesian saturation. When RHOB is present it uses a
+density-neutron effective porosity (`phi_D` from RHOB, gas-crossover heuristic,
+average with NPHI); otherwise it falls back to NPHI. `rho_ma`, `rho_f` and
+`phi_sh` are configurable.
 
 - samples `a`, `m`, `n`, `Rw`, `Rsh`, Vsh scale and PHIE scale by `variation_pct`
 - returns P90/P50/P10 bands for Sw, PHIE and Vsh at each depth
