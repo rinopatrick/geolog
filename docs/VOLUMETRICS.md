@@ -12,6 +12,9 @@ arbitrary offset such as 100, or be coordinates in metres); they never scale
 the area. Grid nodes are adjacent cells, so one node covers exactly one bin:
 `inline_spacing_m * crossline_spacing_m`.
 
+Example: a 2×2 grid with 25 m spacing has `cell_area = 625 m²`, regardless of
+whether the labels read `[0, 25]` or `[100, 101]`.
+
 The surface must have `depth_grid`, `inline_spacing_m` and
 `crossline_spacing_m`. Time-only surfaces are rejected. Supply
 `base_surface_id` to use a base-reservoir surface: the column is then
