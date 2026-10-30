@@ -70,6 +70,10 @@ def krige_grid(
         sill = float(np.var(z_values))
     sill = max(float(sill), 1e-9)
     nugget = max(0.0, min(float(nugget), sill * 0.99))
+    # Local neighborhood: each node solves ordinary kriging against its
+    # nearest samples only, so sparse far-field picks cannot distort the
+    # local estimate. Distances are measured in the anisotropy-transformed
+    # frame, matching the covariance model below.
     neighbors = max(1, min(int(max_neighbors), len(values)))
     node_coordinates = np.asarray(
         [[inline, crossline] for inline in grid_inlines for crossline in grid_crosslines],
