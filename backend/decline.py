@@ -1,4 +1,10 @@
-"""Decline-curve fitting shared by the API and economics workflows."""
+"""Decline-curve fitting shared by the API and economics workflows.
+
+Arps hyperbolic exponent b is capped at [0, 1] (boundary-dominated flow).
+Steeper transient declines are outside this screening model. A growing rate
+series is not a decline: the fitters clamp to a flat (zero-rate) shape, and
+callers should check fit quality before forecasting.
+"""
 
 from __future__ import annotations
 
