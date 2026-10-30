@@ -8,6 +8,8 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-01
+
 ### Fixed
 
 - **Depth-domain fault geometry.** Fault dip is calculated only after time-to-depth conversion; throw is reported in metres when a velocity model is supplied.
