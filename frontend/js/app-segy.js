@@ -535,12 +535,14 @@ Object.assign(GeoLogApp.prototype, {
         const surface = this._segySurface;
         if (!line || !surface) return GeoToast.warn('Build or load a depth surface first.');
         const contact = Number(document.getElementById('segyCompartmentContact')?.value);
+        const baseId = Number(document.getElementById('segyCompartmentBase')?.value) || null;
         if (!(contact > 0)) return GeoToast.warn('Enter a contact depth in metres.');
         try {
             const result = await this._api(`/seismic/${line.id}/surfaces/${surface.id}/compartments`, {
                 method: 'POST',
                 body: JSON.stringify({
                     contact_depth_m: contact,
+                    base_surface_id: baseId,
                     fault_link_ids: (this._segyFaultLinks || []).map(link => link.id),
                 }),
             });
@@ -548,7 +550,9 @@ Object.assign(GeoLogApp.prototype, {
             this._renderCompartmentList();
             const status = document.getElementById('segyCompartmentStatus');
             if (status) {
-                status.textContent = `${result.compartments.length} compartments · GRV ${Math.round(result.total_grv_m3).toLocaleString()} m³`;
+                const juxtaposition = result.juxtaposition || {};
+                const juxText = juxtaposition.faults ? ` · juxtaposition ${juxtaposition.reservoir_reservoir_samples} RR / ${juxtaposition.seal_samples} seal` : '';
+                status.textContent = `${result.compartments.length} compartments · GRV ${Math.round(result.total_grv_m3).toLocaleString()} m³${juxText}`;
             }
             GeoToast.success('Compartments built');
         } catch (e) {
@@ -596,12 +600,14 @@ Object.assign(GeoLogApp.prototype, {
         const select = document.getElementById('segySurfaceSelect');
         const prospectSelect = document.getElementById('prospectSurface');
         const baseSelect = document.getElementById('prospectBaseSurface');
+        const compartmentBase = document.getElementById('segyCompartmentBase');
         const options = this._segySurfaces.map(surface =>
             `<option value="${surface.id}">${escapeHtml(surface.name)} · ${surface.stats?.point_count || 0} pts</option>`
         ).join('');
         if (select) select.innerHTML = options;
         if (prospectSelect) prospectSelect.innerHTML = options;
         if (baseSelect) baseSelect.innerHTML = '<option value="">No base</option>' + options;
+        if (compartmentBase) compartmentBase.innerHTML = '<option value="">No base</option>' + options;
         if (this._segySurfaces.length) {
             const current = select?.value || this._segySurfaces[0].id;
             await this.loadSeismicSurface(current);
@@ -658,10 +664,12 @@ Object.assign(GeoLogApp.prototype, {
             const select = document.getElementById('segySurfaceSelect');
             const prospectSelect = document.getElementById('prospectSurface');
             const baseSelect = document.getElementById('prospectBaseSurface');
+            const compartmentBase = document.getElementById('segyCompartmentBase');
             const options = this._segySurfaces.map(surface =>
                 `<option value="${surface.id}">${escapeHtml(surface.name)} · ${surface.stats?.point_count || 0} pts</option>`
             ).join('');
             if (baseSelect) baseSelect.innerHTML = '<option value="">No base</option>' + options;
+            if (compartmentBase) compartmentBase.innerHTML = '<option value="">No base</option>' + options;
             if (select) {
                 select.innerHTML = options;
                 if (selectId) select.value = String(selectId);

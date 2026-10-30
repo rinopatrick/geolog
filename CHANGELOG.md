@@ -22,6 +22,7 @@ While the major version is `0`, the API is not yet stable.
 - **Portfolio dependency matrices.** Full symmetric PSD volume/risk correlation matrices with validation and Cholesky sampling.
 - **Kriging surfaces.** Optional ordinary kriging with variogram models, anisotropy and azimuth for horizon and fault surfaces, with IDW fallback.
 - **SEG-Y delay/datum ties.** Index trace delay and add delay plus datum correction to the tie time origin.
+- **3D compartments and juxtaposition.** Base-surface compartment GRV and top/base fault juxtaposition counts.
 
 ## [0.16.0] - 2026-11-01
 
