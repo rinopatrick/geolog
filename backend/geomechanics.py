@@ -306,7 +306,12 @@ def compute(
     dp_q = 6.0 * cohesion * np.cos(phi) / (np.sqrt(3.0) * (3.0 - np.sin(phi)))
     dp_fail = np.sqrt(np.maximum(j2, 0.0)) > (dp_q + dp_m * p_eff)
 
-    cdp = np.maximum(3.0 * shmax - shmin - pp - ucs, 0.0)
+    # Critical drawdown for sanding: reservoir pressure minus the critical
+    # flowing bottomhole pressure. Pw_crit comes from the same vertical-well
+    # shear criterion as MW_MIN: Pw = (3*SHmax - SHmin - alpha*Pp - UCS)/2.
+    # Zero means no drawdown capacity before shear failure at the sandface.
+    pw_crit = (3.0 * shmax - shmin - alpha * pp - ucs) / 2.0
+    cdp = np.maximum(pp - pw_crit, 0.0)
     planes = cal.get("fracture_planes")
     slip = _plane_slip(tensor, planes, pp, float(p.get("fracture_mu") or 0.6), float(p.get("fracture_cohesion") or 0.0))
     if planes and slip is None:

@@ -210,7 +210,10 @@ def breakout_calibration(wid: int, data: dict, db: Session = Depends(get_db)):
         denom = 1.0 + 2.0 * math.cos(w)
         if abs(denom) < 1e-6:
             continue
-        shmax = (ucs + 2.0 * pw + alpha * pp - shmin * (1.0 - 2.0 * math.cos(w))) / denom
+        # Vertical-well Kirsch at the breakout edge: hoop effective stress
+        # (SHmax+SHmin) + 2(SHmax-SHmin)cos(w) - Pw - alpha*Pp equals UCS.
+        # This mirrors the forward model (base_max - Pw - alpha*Pp = UCS).
+        shmax = (ucs + pw + alpha * pp - shmin * (1.0 - 2.0 * math.cos(w))) / denom
         if not math.isfinite(shmax) or shmax <= 0:
             continue
         points.append({
