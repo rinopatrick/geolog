@@ -98,3 +98,26 @@ def wedge_gather(
         "wavelet_freq_hz": float(wavelet_freq_hz),
         "dt_s": float(dt_s),
     }
+
+
+def sweep_frequencies(ai_top, ai_reservoir, ai_base, velocity_m_s, freqs_hz, thickness_m, dt_s=0.001):
+    """Run wedge_gather per frequency; return curves + P10/P50/P90 band."""
+    freqs = [float(f) for f in freqs_hz]
+    if len(freqs) < 2:
+        raise ValueError("sweep needs at least two frequencies")
+    if any(not f > 0 for f in freqs):
+        raise ValueError("frequencies must be positive")
+    curves = []
+    for f in freqs:
+        r = wedge_gather(ai_top, ai_reservoir, ai_base, velocity_m_s, f, thickness_m, dt_s)
+        curves.append(r["peak_amplitude"])
+    arr = np.asarray(curves, dtype=float)
+    return {
+        "freqs_hz": freqs,
+        "thickness_m": [round(float(v), 3) for v in np.asarray(thickness_m, dtype=float)],
+        "curves": curves,
+        "p10": [round(float(v), 6) for v in np.percentile(arr, 10, axis=0)],
+        "p50": [round(float(v), 6) for v in np.percentile(arr, 50, axis=0)],
+        "p90": [round(float(v), 6) for v in np.percentile(arr, 90, axis=0)],
+        "dt_s": float(dt_s),
+    }
