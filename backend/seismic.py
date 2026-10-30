@@ -17,6 +17,11 @@ try:
 except ImportError:
     from backend.velocity import time_to_depth_ms
 
+try:
+    from geostat import krige_grid
+except ImportError:
+    from backend.geostat import krige_grid
+
 TEXT_HEADER = 3200
 BINARY_HEADER = 400
 TRACE_HEADER = 240
@@ -284,6 +289,10 @@ def surface_from_horizons(
     max_grid: int = 96,
     inline_spacing_m: float | None = None,
     crossline_spacing_m: float | None = None,
+    method: str = "idw",
+    variogram: dict[str, Any] | None = None,
+    anisotropy_ratio: float = 1.0,
+    azimuth_deg: float = 0.0,
 ) -> dict[str, Any]:
     """Grid inline/crossline horizon picks into a time surface with IDW."""
     points: list[tuple[float, float, float]] = []
@@ -345,15 +354,34 @@ def surface_from_horizons(
     point_inlines = points_array[:, 0]
     point_crosslines = points_array[:, 1]
     point_samples = points_array[:, 2]
-    grid: list[list[float]] = []
-    for inline in grid_inlines:
-        distance_sq = (
-            (inline - point_inlines) ** 2
-            + (np.asarray(grid_crosslines)[:, None] - point_crosslines[None, :]) ** 2
+    interpolation = str(method or "idw").lower()
+    variogram = variogram or {}
+    kriging_info: dict[str, Any] = {}
+    if interpolation == "kriging":
+        grid, kriging_info = krige_grid(
+            points_array,
+            grid_inlines,
+            grid_crosslines,
+            variogram_model=str(variogram.get("model", "spherical")),
+            range_m=variogram.get("range"),
+            sill=variogram.get("sill"),
+            nugget=float(variogram.get("nugget", 0.0) or 0.0),
+            anisotropy_ratio=float(anisotropy_ratio or 1.0),
+            azimuth_deg=float(azimuth_deg or 0.0),
+            max_neighbors=int(variogram.get("max_neighbors", 16) or 16),
         )
-        weights = 1.0 / (distance_sq + 1e-9)
-        values = (weights * point_samples[None, :]).sum(axis=1) / weights.sum(axis=1)
-        grid.append([round(float(value), 4) for value in values])
+    elif interpolation == "idw":
+        grid = []
+        for inline in grid_inlines:
+            distance_sq = (
+                (inline - point_inlines) ** 2
+                + (np.asarray(grid_crosslines)[:, None] - point_crosslines[None, :]) ** 2
+            )
+            weights = 1.0 / (distance_sq + 1e-9)
+            values = (weights * point_samples[None, :]).sum(axis=1) / weights.sum(axis=1)
+            grid.append([round(float(value), 4) for value in values])
+    else:
+        raise ValueError("surface method must be idw or kriging")
     flat = [value for row in grid for value in row]
     unique_cells = len({
         (int(round(inline)), int(round(crossline)))
@@ -367,6 +395,10 @@ def surface_from_horizons(
         "min_time_ms": round(float(np.min(flat)), 3),
         "max_time_ms": round(float(np.max(flat)), 3),
         "mean_time_ms": round(float(np.mean(flat)), 3),
+        "method": interpolation,
+        "anisotropy_ratio": float(anisotropy_ratio or 1.0),
+        "azimuth_deg": float(azimuth_deg or 0.0),
+        **({"kriging": kriging_info} if kriging_info else {}),
     }
     return {
         "grid": grid,

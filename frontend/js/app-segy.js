@@ -618,6 +618,9 @@ Object.assign(GeoLogApp.prototype, {
         const horizonName = document.getElementById('segySurfaceHorizon')?.value?.trim() || null;
         const inlineSpacing = Number(document.getElementById('segyInlineSpacing')?.value);
         const crosslineSpacing = Number(document.getElementById('segyCrosslineSpacing')?.value);
+        const method = document.getElementById('segySurfaceMethod')?.value || 'idw';
+        const anisotropy = Number(document.getElementById('segyKrigeAniso')?.value) || 1;
+        const azimuth = Number(document.getElementById('segyKrigeAzimuth')?.value) || 0;
         GeoLoading.show('Building 3D surface...');
         try {
             const surface = await this._api(`/seismic/${line.id}/surfaces`, {
@@ -626,6 +629,10 @@ Object.assign(GeoLogApp.prototype, {
                     name,
                     horizon_name: horizonName,
                     max_grid: 96,
+                    method,
+                    variogram: { model: 'spherical' },
+                    anisotropy_ratio: anisotropy,
+                    azimuth_deg: azimuth,
                     inline_spacing_m: inlineSpacing > 0 ? inlineSpacing : null,
                     crossline_spacing_m: crosslineSpacing > 0 ? crosslineSpacing : null,
                 }),
