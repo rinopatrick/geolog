@@ -1482,6 +1482,14 @@
                     </div>
                     <canvas id="segyFenceCanvas" width="1000" height="380" style="width:100%;margin-top:10px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+                        <input id="segyMigrationVelocity" type="number" min="500" max="8000" value="2000" title="Migration velocity (m/s)" style="width:110px">
+                        <input id="segyMigrationInline" type="number" min="2" max="32" value="24" title="Max inlines" style="width:90px">
+                        <input id="segyMigrationCrossline" type="number" min="2" max="32" value="24" title="Max crosslines" style="width:90px">
+                        <button class="btn-sm" data-action="app.run3dMigration"><i data-lucide="box"></i> Migrate 3D</button>
+                        <span id="segyMigrationStatus" class="toolbar-hint"></span>
+                    </div>
+                    <canvas id="segyMigrationCanvas" width="1000" height="360" style="width:100%;margin-top:10px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
                         <input id="portfolioName" placeholder="Portfolio" value="Portfolio A" style="min-width:130px">
                         <input id="portfolioPrice" type="number" value="60" title="Price per BOE" style="width:90px">
                         <input id="portfolioOpex" type="number" value="10" title="Opex per BOE" style="width:90px">

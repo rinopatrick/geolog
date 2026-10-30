@@ -116,6 +116,11 @@ function buildVolume() {
       document.getElementById('segyCompartmentContact').value = '1000';
       await app.buildCompartments();
       const compartmentsOk = (app._segyCompartments || []).length > 0;
+      document.getElementById('segyMigrationVelocity').value = '2000';
+      document.getElementById('segyMigrationInline').value = '12';
+      document.getElementById('segyMigrationCrossline').value = '12';
+      await app.run3dMigration();
+      const migrationOk = (app._segyMigrationSection?.data || []).length > 0;
       document.getElementById('fenceStart').value = '100,200';
       document.getElementById('fenceEnd').value = '100,247';
       await app.addFenceSegment();
@@ -167,6 +172,8 @@ function buildVolume() {
         portfolioOk,
         compartmentsOk,
         compartmentCount: (app._segyCompartments || []).length,
+        migrationOk,
+        migrationDepthSamples: (app._segyMigrationSection?.depths_m || []).length,
         uncertaintyOk,
         fenceOk,
         mapOk,

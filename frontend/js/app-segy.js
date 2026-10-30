@@ -440,6 +440,98 @@ Object.assign(GeoLogApp.prototype, {
         }
     },
 
+    async run3dMigration() {
+        const line = this._segyLine;
+        if (!line) return GeoToast.warn('Load a SEG-Y line first.');
+        const velocity = Number(document.getElementById('segyMigrationVelocity')?.value) || 2000;
+        const maxInlines = Number(document.getElementById('segyMigrationInline')?.value) || 24;
+        const maxCrosslines = Number(document.getElementById('segyMigrationCrossline')?.value) || 24;
+        const inlineSpacing = Number(document.getElementById('segyInlineSpacing')?.value) || 25;
+        const crosslineSpacing = Number(document.getElementById('segyCrosslineSpacing')?.value) || 25;
+        GeoLoading.show('Running 3D Kirchhoff migration...');
+        try {
+            const migration = await this._api(`/seismic/${line.id}/migrate-3d`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: `Migration ${Math.round(velocity)} m/s`,
+                    velocity_m_s: velocity,
+                    inline_spacing_m: inlineSpacing,
+                    crossline_spacing_m: crosslineSpacing,
+                    max_inlines: maxInlines,
+                    max_crosslines: maxCrosslines,
+                    max_samples: 160,
+                    max_depth_samples: 128,
+                }),
+            });
+            const section = await this._api(`/seismic/${line.id}/migrations/${migration.id}/section`);
+            this._segyMigration = migration;
+            this._segyMigrationSection = section;
+            this._drawMigratedSection();
+            const status = document.getElementById('segyMigrationStatus');
+            if (status) {
+                status.textContent = `${migration.stats.inline_count}×${migration.stats.crossline_count}×${migration.stats.depth_count} · velocity ${migration.velocity_m_s} m/s`;
+            }
+            GeoToast.success('3D migration complete');
+        } catch (e) {
+            GeoToast.error('3D migration failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    },
+
+    _drawMigratedSection() {
+        const canvas = document.getElementById('segyMigrationCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, w, h);
+        const section = this._segyMigrationSection;
+        if (!section?.data?.length) {
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '13px sans-serif';
+            ctx.fillText('Run 3D migration to view a depth section', 18, 28);
+            return;
+        }
+        const rows = section.data.length;
+        const cols = section.data[0]?.length || 0;
+        const left = 56;
+        const right = w - 18;
+        const top = 22;
+        const bottom = h - 30;
+        const plotW = right - left;
+        const plotH = bottom - top;
+        const values = section.data.flat().filter(value => Number.isFinite(Number(value)));
+        const maxAbs = Math.max(...values.map(value => Math.abs(Number(value))), 1e-9);
+        for (let y = 0; y < rows; y += 1) {
+            for (let x = 0; x < cols; x += 1) {
+                const norm = Math.max(-1, Math.min(1, Number(section.data[y][x]) / maxAbs));
+                const red = norm >= 0 ? 255 : Math.round(60 * (1 + norm));
+                const green = Math.round(120 * (1 - Math.abs(norm)));
+                const blue = norm < 0 ? 255 : Math.round(60 * (1 - norm));
+                ctx.fillStyle = `rgb(${red},${green},${blue})`;
+                ctx.fillRect(
+                    left + (x / cols) * plotW,
+                    top + (y / rows) * plotH,
+                    Math.ceil(plotW / cols) + 1,
+                    Math.ceil(plotH / rows) + 1
+                );
+            }
+        }
+        ctx.strokeStyle = '#30363d';
+        ctx.strokeRect(left, top, plotW, plotH);
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '11px sans-serif';
+        const depths = section.depths_m || [];
+        for (let index = 0; index <= 4; index += 1) {
+            const depth = depths[Math.round((index / 4) * Math.max(0, depths.length - 1))] ?? 0;
+            const py = top + (index / 4) * plotH;
+            ctx.fillText(`${depth} m`, 4, py + 4);
+        }
+        ctx.fillText(`${section.mode} ${section.value}`, left + 4, h - 10);
+    },
+
     async addFenceSegment() {
         const line = this._segyLine;
         if (!line) return GeoToast.warn('Load a SEG-Y line first.');
