@@ -114,12 +114,14 @@ read with `GET /api/seismic/{line_id}/fault-links` or deleted individually.
 
 Each link also stores a geometry summary and a map polygon:
 
-- `throw_ms`: median cross-correlation lag across the fault plane, in ms.
+- `throw_ms`: median cross-correlation lag across the fault plane, in ms TWT.
 - `vertical_extent_ms` and `throw_range_ms`: fault cut and per-section range.
 - `dip_inline_ms_per_line`, `dip_crossline_ms_per_line` and `plane_rms_ms`:
   least-squares fault plane fit in time units.
-- `dip_angle_deg`: set when `inline_spacing_m` and `crossline_spacing_m` are
-  supplied; this is a time-dip angle, not a depth-converted structural dip.
+- With `velocity_model_id`, geometry is also converted to depth: `domain` is
+  `depth`, `throw_m`, `dip_inline_m_per_line`, `dip_crossline_m_per_line` and
+  `plane_rms_m` are populated. `dip_angle_deg` is only calculated in the depth
+  domain with inline/crossline spacing.
 - `polygon`: convex hull of `{inline, crossline}` points, buffered for a
   collinear fault trace.
 

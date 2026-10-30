@@ -78,9 +78,16 @@ function buildVolume() {
       const crosslineOk = app._segySection?.mode === 'crossline' && app._segySection.labels.length === 6;
       document.getElementById('segyInlineSpacing').value = '25';
       document.getElementById('segyCrosslineSpacing').value = '25';
+      const geometryVelocity = await app._api(`/projects/${line.project_id}/velocity-models`, {
+        method: 'POST',
+        body: JSON.stringify({ name: 'E2E Geometry 2500', kind: 'constant', velocity_m_s: 2500 }),
+      });
+      app._segyVelocityModels = [geometryVelocity];
+      app._populateVelocityModels([geometryVelocity]);
+      document.getElementById('segyVelocityModel').value = String(geometryVelocity.id);
       await app.linkSeismicFaults3D();
       const geometry = app._segyFaultLinks?.[0]?.geometry || {};
-      const geometryOk = geometry.throw_ms > 0 && geometry.dip_angle_deg != null;
+      const geometryOk = geometry.throw_m > 0 && geometry.dip_angle_deg != null;
       for (const inline of [100, 101]) {
         await app._api(`/seismic/${line.id}/horizons`, {
           method: 'POST',
@@ -167,6 +174,7 @@ function buildVolume() {
         prospectP50: app._segyProspects?.[0]?.result?.stoiip?.p50_m3 ?? null,
         surfaceName: app._segySurface?.name || '',
         throwMs: geometry.throw_ms,
+        throwM: geometry.throw_m,
         dipAngle: geometry.dip_angle_deg,
         polygonPoints: (app._segyFaultLinks?.[0]?.polygon || []).length,
         links: (app._segyFaultLinks || []).length,

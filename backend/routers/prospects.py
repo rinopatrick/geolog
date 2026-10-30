@@ -29,6 +29,7 @@ def _serialized(row: Prospect, include_result: bool = True) -> dict:
         "project_id": row.project_id,
         "line_id": row.line_id,
         "surface_id": row.surface_id,
+        "base_surface_id": row.base_surface_id,
         "name": row.name,
         "fluid_type": row.fluid_type or "oil",
         "contact_depth_m": row.contact_depth_m,
@@ -226,6 +227,21 @@ def create_prospect(pid: int, data: dict, request: Request, db: Session = Depend
         raise HTTPException(400, "surface must be depth-converted first")
     if not surface.inline_spacing_m or not surface.crossline_spacing_m:
         raise HTTPException(400, "surface needs inline/crossline spacing")
+    base_surface = None
+    if data.get("base_surface_id") is not None:
+        try:
+            base_id = int(data["base_surface_id"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "base_surface_id must be an integer")
+        base_surface = (
+            db.query(SeismicSurface)
+            .filter(SeismicSurface.id == base_id, SeismicSurface.line_id == surface.line_id)
+            .first()
+        )
+        if not base_surface:
+            raise HTTPException(404, "Base surface not found on this line")
+        if not base_surface.depth_grid_json or base_surface.depth_grid_json == "[]":
+            raise HTTPException(400, "base surface must be depth-converted first")
     try:
         contact = float(data.get("contact_depth_m"))
     except (TypeError, ValueError):
@@ -238,6 +254,7 @@ def create_prospect(pid: int, data: dict, request: Request, db: Session = Depend
             crossline_spacing_m=surface.crossline_spacing_m,
             inlines=json.loads(surface.inlines_json or "[]"),
             crosslines=json.loads(surface.crosslines_json or "[]"),
+            base_depth_grid=json.loads(base_surface.depth_grid_json) if base_surface else None,
             porosity=data.get("porosity", 0.2),
             water_saturation=data.get("water_saturation", 0.3),
             recovery_factor=data.get("recovery_factor", 0.35),
@@ -257,6 +274,7 @@ def create_prospect(pid: int, data: dict, request: Request, db: Session = Depend
         project_id=pid,
         line_id=surface.line_id,
         surface_id=surface.id,
+        base_surface_id=base_surface.id if base_surface else None,
         name=name,
         fluid_type=result["fluid_type"],
         contact_depth_m=contact,

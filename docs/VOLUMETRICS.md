@@ -8,7 +8,10 @@ cell_area = inline_spacing_m * crossline_spacing_m * inline_step * crossline_ste
 ```
 
 The surface must have `depth_grid`, `inline_spacing_m` and
-`crossline_spacing_m`. Time-only surfaces are rejected.
+`crossline_spacing_m`. Time-only surfaces are rejected. Supply
+`base_surface_id` to use a base-reservoir surface: the column is then
+`min(base, contact) - top`, so a contact below the base does not overestimate
+GRV. The base grid must match the top grid dimensions.
 
 ## Monte Carlo
 

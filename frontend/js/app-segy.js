@@ -214,6 +214,7 @@ Object.assign(GeoLogApp.prototype, {
         if (!projectId) return GeoToast.warn('Load a seismic line first.');
         const name = document.getElementById('prospectName')?.value?.trim() || 'Prospect';
         const surfaceId = Number(document.getElementById('prospectSurface')?.value);
+        const baseSurfaceId = Number(document.getElementById('prospectBaseSurface')?.value) || null;
         const contact = Number(document.getElementById('prospectContact')?.value);
         if (!surfaceId) return GeoToast.warn('Build a surface first.');
         if (!(contact > 0)) return GeoToast.warn('Enter a contact depth in metres.');
@@ -231,6 +232,7 @@ Object.assign(GeoLogApp.prototype, {
                 body: JSON.stringify({
                     name,
                     surface_id: surfaceId,
+                    base_surface_id: baseSurfaceId,
                     contact_depth_m: contact,
                     porosity,
                     water_saturation: sw,
@@ -587,11 +589,13 @@ Object.assign(GeoLogApp.prototype, {
         this._segySurfaces = surfaces || [];
         const select = document.getElementById('segySurfaceSelect');
         const prospectSelect = document.getElementById('prospectSurface');
+        const baseSelect = document.getElementById('prospectBaseSurface');
         const options = this._segySurfaces.map(surface =>
             `<option value="${surface.id}">${escapeHtml(surface.name)} · ${surface.stats?.point_count || 0} pts</option>`
         ).join('');
         if (select) select.innerHTML = options;
         if (prospectSelect) prospectSelect.innerHTML = options;
+        if (baseSelect) baseSelect.innerHTML = '<option value="">No base</option>' + options;
         if (this._segySurfaces.length) {
             const current = select?.value || this._segySurfaces[0].id;
             await this.loadSeismicSurface(current);
@@ -640,9 +644,11 @@ Object.assign(GeoLogApp.prototype, {
             this._segySurfaces = surfaces || [];
             const select = document.getElementById('segySurfaceSelect');
             const prospectSelect = document.getElementById('prospectSurface');
+            const baseSelect = document.getElementById('prospectBaseSurface');
             const options = this._segySurfaces.map(surface =>
                 `<option value="${surface.id}">${escapeHtml(surface.name)} · ${surface.stats?.point_count || 0} pts</option>`
             ).join('');
+            if (baseSelect) baseSelect.innerHTML = '<option value="">No base</option>' + options;
             if (select) {
                 select.innerHTML = options;
                 if (selectId) select.value = String(selectId);
@@ -809,6 +815,7 @@ Object.assign(GeoLogApp.prototype, {
         GeoLoading.show('Linking faults across inline sections...');
         const inlineSpacing = Number(document.getElementById('segyInlineSpacing')?.value);
         const crosslineSpacing = Number(document.getElementById('segyCrosslineSpacing')?.value);
+        const velocityModelId = Number(document.getElementById('segyVelocityModel')?.value);
         try {
             const result = await this._api(`/seismic/${line.id}/faults/link-3d`, {
                 method: 'POST',
@@ -820,6 +827,7 @@ Object.assign(GeoLogApp.prototype, {
                     sample_tolerance: 16,
                     inline_spacing_m: inlineSpacing > 0 ? inlineSpacing : null,
                     crossline_spacing_m: crosslineSpacing > 0 ? crosslineSpacing : null,
+                    velocity_model_id: velocityModelId > 0 ? velocityModelId : null,
                 }),
             });
             this._segyFaultLinks = result.links || [];
@@ -1094,10 +1102,12 @@ Object.assign(GeoLogApp.prototype, {
         const linksHtml = links.length
             ? links.map(link => {
                 const geometry = link.geometry || {};
-                const throwText = geometry.throw_ms != null ? ` · throw ±${geometry.throw_ms} ms` : '';
+                const throwText = geometry.throw_m != null
+                    ? ` · throw ±${geometry.throw_m} m`
+                    : (geometry.throw_ms != null ? ` · throw ±${geometry.throw_ms} ms TWT` : '');
                 const dipText = geometry.dip_angle_deg != null
                     ? ` · dip ${geometry.dip_angle_deg}°`
-                    : (geometry.dip_inline_ms_per_line != null ? ` · dip ${geometry.dip_inline_ms_per_line}/${geometry.dip_crossline_ms_per_line} ms/line` : '');
+                    : (geometry.dip_inline_ms_per_line != null ? ` · time dip ${geometry.dip_inline_ms_per_line}/${geometry.dip_crossline_ms_per_line} ms/line` : '');
                 return `<span style="margin-right:12px;color:#ff7b72">${escapeHtml(link.name)} · inline ${link.inline_start}-${link.inline_end} · ${(link.points || []).length} pts${throwText}${dipText}</span>`;
             }).join('')
             : 'No 3D fault links.';
