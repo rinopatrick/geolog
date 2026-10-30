@@ -41,3 +41,18 @@ def test_juxtaposition_reservoir_overlap():
     assert result["faults"][0]["reservoir_reservoir"] > 0
     assert result["faults"][0]["mean_overlap_m"] == pytest.approx(50.0)
     assert result["reservoir_reservoir_samples"] > 0
+
+
+def test_fault_throw_from_horizon_offset():
+    from backend.structure import fault_throw_from_surface
+
+    top = [[2000.0, 2010.0, 2020.0] for _ in range(3)]
+    points = [
+        {"inline": 0, "crossline": 1},
+        {"inline": 1, "crossline": 1},
+        {"inline": 2, "crossline": 1},
+    ]
+    result = fault_throw_from_surface(top, [0, 1, 2], [0, 1, 2], points)
+    assert result["samples"] == 3
+    assert result["throw_median_m"] == pytest.approx(20.0)
+    assert result["throw_max_m"] == pytest.approx(20.0)

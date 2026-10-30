@@ -624,3 +624,66 @@ def test_index_reads_trace_delay_ms():
     content[first_trace_header + 108:first_trace_header + 110] = (100).to_bytes(2, "big", signed=True)
     index = index_segy(bytes(content))
     assert index["trace_delays"][0] == 100
+
+def test_fault_throw_from_horizon_endpoint():
+    pid = _project_id()
+    upload = client.post(
+        f"/api/projects/{pid}/seismic",
+        files={"file": ("throw.sgy", _segy_volume(), "application/octet-stream")},
+        data={"name": "Throw Volume"},
+        headers=ADMIN,
+    )
+    assert upload.status_code == 201, upload.text
+    line_id = upload.json()["id"]
+    for index, inline in enumerate([100, 101, 102]):
+        created = client.post(
+            f"/api/seismic/{line_id}/horizons",
+            json={
+                "name": "Throw Top",
+                "mode": "inline",
+                "section_value": inline,
+                "picks": [
+                    {"trace": 2, "sample": 10 + index},
+                    {"trace": 20, "sample": 14 + index},
+                    {"trace": 30, "sample": 14 + index},
+                ],
+            },
+            headers=ADMIN,
+        )
+        assert created.status_code == 201, created.text
+    surface = client.post(
+        f"/api/seismic/{line_id}/surfaces",
+        json={"name": "Throw Surface", "horizon_name": "Throw Top", "max_grid": 24, "inline_spacing_m": 25, "crossline_spacing_m": 25},
+        headers=ADMIN,
+    )
+    assert surface.status_code == 201, surface.text
+    surface_id = surface.json()["id"]
+    model = client.post(
+        f"/api/projects/{pid}/velocity-models",
+        json={"name": "Throw 2500", "kind": "constant", "velocity_m_s": 2500},
+        headers=ADMIN,
+    )
+    assert model.status_code == 201, model.text
+    converted = client.post(
+        f"/api/seismic/{line_id}/surfaces/{surface_id}/depth",
+        json={"velocity_model_id": model.json()["id"]},
+        headers=ADMIN,
+    )
+    assert converted.status_code == 200, converted.text
+    linked = client.post(
+        f"/api/seismic/{line_id}/faults/link-3d",
+        json={"threshold": 0.5, "min_points": 4, "max_sections": 6, "sample_tolerance": 8},
+        headers=ADMIN,
+    )
+    assert linked.status_code == 201, linked.text
+    link_id = linked.json()["links"][0]["id"]
+    throw = client.post(
+        f"/api/seismic/{line_id}/fault-links/{link_id}/throw",
+        json={"surface_id": surface_id},
+        headers=ADMIN,
+    )
+    assert throw.status_code == 200, throw.text
+    geometry = throw.json()["geometry"]
+    assert geometry["throw_source"] == "horizon_offset"
+    assert geometry["horizon_throw_samples"] > 0
+    assert geometry["throw_m"] >= 0
