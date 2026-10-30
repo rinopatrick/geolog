@@ -14,6 +14,7 @@ While the major version is `0`, the API is not yet stable.
 - **GRV base surface.** Prospects can use a base-reservoir surface, so the column stops at `min(base, contact)`.
 - **Synthetic seismogram physics.** Unit-aware DT/depth conversion, uniform-TWT reflectivity resampling, checkshot coverage validation and edge-safe tie correlation.
 - **Shaly-sand saturation equations.** Shared dimensionally consistent Archie, Simandoux and Indonesian equations with explicit `Rsh` in deterministic, sensitivity and uncertainty paths.
+- **Physics benchmarks.** Analytic checks for IBM float, depth, fault geometry, GRV and saturation, plus field-LAS TWT invariants (`scripts/validate_physics.py`).
 - **Portfolio economics.** EMV uses mean BOE and explicit capex timing; risked volumes use correlated success events, not a scalar chance multiplier.
 
 ## [0.16.0] - 2026-11-01
