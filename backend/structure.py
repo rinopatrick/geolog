@@ -131,6 +131,7 @@ def build_compartments(
     inline_spacing_m: float,
     crossline_spacing_m: float,
     faults: list[dict[str, Any]],
+    base_depth_grid: list[list[float]] | None = None,
 ) -> dict[str, Any]:
     grid = np.asarray(depth_grid, dtype=float)
     if grid.ndim != 2 or grid.size == 0:
@@ -140,7 +141,14 @@ def build_compartments(
     inline_step = float(np.median(np.diff(np.asarray(inlines, dtype=float)))) if len(inlines) > 1 else 1.0
     crossline_step = float(np.median(np.diff(np.asarray(crosslines, dtype=float)))) if len(crosslines) > 1 else 1.0
     cell_area = float(inline_spacing_m) * float(crossline_spacing_m) * max(1.0, inline_step) * max(1.0, crossline_step)
-    columns = np.nan_to_num(np.clip(float(contact_depth_m) - grid, 0.0, None), nan=0.0)
+    base = None
+    if base_depth_grid is not None:
+        base = np.asarray(base_depth_grid, dtype=float)
+        if base.shape != grid.shape:
+            raise ValueError("base surface grid must match the top surface grid")
+    bottom = np.minimum(base, float(contact_depth_m)) if base is not None else np.full_like(grid, float(contact_depth_m))
+    columns = np.nan_to_num(np.clip(bottom - grid, 0.0, None), nan=0.0)
+    thickness = np.nan_to_num(np.clip(base - grid, 0.0, None), nan=0.0) if base is not None else None
     groups: dict[str, dict[str, float]] = {}
     for row, inline in enumerate(inlines):
         for column, crossline in enumerate(crosslines):
@@ -169,4 +177,69 @@ def build_compartments(
         "fault_count": len(faults),
         "compartments": compartments,
         "total_grv_m3": round(sum(item["grv_m3"] for item in compartments), 3),
+        "base_used": base is not None,
+        "mean_reservoir_thickness_m": round(float(np.mean(thickness[thickness > 0])), 3)
+        if thickness is not None and np.any(thickness > 0)
+        else None,
+    }
+
+
+def juxtaposition(
+    top_grid: list[list[float]],
+    base_grid: list[list[float]],
+    inlines: list[float],
+    crosslines: list[float],
+    faults: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Sample top/base intervals on opposite sides of each fault trace."""
+    top = np.asarray(top_grid, dtype=float)
+    base = np.asarray(base_grid, dtype=float)
+    if top.shape != base.shape:
+        raise ValueError("top and base grids must match")
+    inline_values = np.asarray(inlines, dtype=float)
+    crossline_values = np.asarray(crosslines, dtype=float)
+    results = []
+    for fault in faults:
+        points = fault.get("points") or []
+        if len(points) < 2:
+            continue
+        inline_span = max(float(point["inline"]) for point in points) - min(float(point["inline"]) for point in points)
+        crossline_span = max(float(point["crossline"]) for point in points) - min(float(point["crossline"]) for point in points)
+        along_crossline = crossline_span >= inline_span
+        overlaps = []
+        reservoir_reservoir = 0
+        seal = 0
+        for point in points:
+            row = int(np.argmin(np.abs(inline_values - float(point["inline"]))))
+            column = int(np.argmin(np.abs(crossline_values - float(point["crossline"]))))
+            if along_crossline:
+                first, second = (row - 1, column), (row + 1, column)
+            else:
+                first, second = (row, column - 1), (row, column + 1)
+            if not ((0 <= first[0] < top.shape[0]) and (0 <= first[1] < top.shape[1])):
+                continue
+            if not ((0 <= second[0] < top.shape[0]) and (0 <= second[1] < top.shape[1])):
+                continue
+            top_a, base_a = top[first], base[first]
+            top_b, base_b = top[second], base[second]
+            if not np.all(np.isfinite([top_a, base_a, top_b, base_b])):
+                continue
+            overlap = max(0.0, min(base_a, base_b) - max(top_a, top_b))
+            overlaps.append(float(overlap))
+            if overlap > 0:
+                reservoir_reservoir += 1
+            else:
+                seal += 1
+        results.append({
+            "id": fault.get("id"),
+            "samples": len(overlaps),
+            "reservoir_reservoir": reservoir_reservoir,
+            "seal": seal,
+            "mean_overlap_m": round(float(np.mean(overlaps)), 3) if overlaps else 0.0,
+            "max_overlap_m": round(float(np.max(overlaps)), 3) if overlaps else 0.0,
+        })
+    return {
+        "faults": results,
+        "reservoir_reservoir_samples": sum(item["reservoir_reservoir"] for item in results),
+        "seal_samples": sum(item["seal"] for item in results),
     }

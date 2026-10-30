@@ -10,9 +10,12 @@ endpoints are under `/api/seismic/{line_id}/fault-surfaces`.
 ## Compartments
 
 `POST /api/seismic/{line_id}/surfaces/{surface_id}/compartments` requires a
-depth-converted surface with inline/crossline spacing. Each grid node is assigned
-a side for every selected fault link by signed distance to the fault polyline;
-the side bits form a compartment key. The endpoint aggregates:
+depth-converted surface with inline/crossline spacing. Pass `base_surface_id`
+to use `min(base, contact) - top` for 3D compartment GRV. Each grid node is
+assigned a side for every selected fault link by signed distance to the fault
+polyline; the side bits form a compartment key. With a base surface, the
+response also includes fault juxtaposition: top/base interval overlap sampled
+on opposite sides of each fault trace (`reservoir_reservoir` vs `seal`). The endpoint aggregates:
 
 - `cells`, `area_m2`, `grv_m3`, `mean_column_m` per compartment
 - total GRV and cell area

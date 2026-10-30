@@ -19,7 +19,7 @@ try:
         VelocityModel,
     )
     from seismic import index_segy
-    from structure import build_compartments, build_fault_surface
+    from structure import build_compartments, build_fault_surface, juxtaposition
 except ImportError:
     from backend.acl import require_project_access
     from backend.database import get_db
@@ -31,7 +31,7 @@ except ImportError:
         VelocityModel,
     )
     from backend.seismic import index_segy
-    from backend.structure import build_compartments, build_fault_surface
+    from backend.structure import build_compartments, build_fault_surface, juxtaposition
 
 router = APIRouter(prefix="/api", tags=["structure"])
 
@@ -220,6 +220,21 @@ def create_surface_compartments(
         contact = float(data.get("contact_depth_m"))
     except (TypeError, ValueError):
         raise HTTPException(400, "contact_depth_m is required")
+    base_surface = None
+    if data.get("base_surface_id") is not None:
+        try:
+            base_id = int(data["base_surface_id"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "base_surface_id must be an integer")
+        base_surface = (
+            db.query(SeismicSurface)
+            .filter(SeismicSurface.id == base_id, SeismicSurface.line_id == line_id)
+            .first()
+        )
+        if not base_surface:
+            raise HTTPException(404, "Base surface not found on this line")
+        if not base_surface.depth_grid_json or base_surface.depth_grid_json == "[]":
+            raise HTTPException(400, "base surface must be depth-converted first")
     query = db.query(SeismicFaultLink).filter(SeismicFaultLink.line_id == line_id)
     if data.get("fault_link_ids"):
         try:
@@ -236,15 +251,22 @@ def create_surface_compartments(
         if points:
             faults.append({"id": link.id, "points": points})
     try:
+        top_grid = json.loads(item.depth_grid_json)
+        inlines = json.loads(item.inlines_json or "[]")
+        crosslines = json.loads(item.crosslines_json or "[]")
+        base_grid = json.loads(base_surface.depth_grid_json) if base_surface else None
         built = build_compartments(
-            json.loads(item.depth_grid_json),
-            json.loads(item.inlines_json or "[]"),
-            json.loads(item.crosslines_json or "[]"),
+            top_grid,
+            inlines,
+            crosslines,
             contact,
             item.inline_spacing_m,
             item.crossline_spacing_m,
             faults,
+            base_depth_grid=base_grid,
         )
+        if base_grid is not None:
+            built["juxtaposition"] = juxtaposition(top_grid, base_grid, inlines, crosslines, faults)
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(400, f"could not build compartments: {exc}")
     item.compartments_json = json.dumps(built)
