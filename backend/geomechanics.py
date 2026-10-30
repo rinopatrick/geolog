@@ -104,9 +104,10 @@ def _interp_points(points: Any, depth: np.ndarray) -> np.ndarray | None:
     return np.interp(depth, np.array(xs)[order], np.array(ys)[order])
 
 def _elastic(vp: np.ndarray, vs: np.ndarray, rhob: np.ndarray) -> dict[str, np.ndarray]:
+    # VP/VS arrive in m/s (304800/DT); density in g/cc. No further conversion.
     rho = rhob * 1000.0
-    vp_m = vp * 0.3048
-    vs_m = vs * 0.3048
+    vp_m = np.asarray(vp, dtype=np.float64)
+    vs_m = np.asarray(vs, dtype=np.float64)
     mu = rho * vs_m ** 2
     lam = rho * vp_m ** 2 - 2.0 * mu
     nu = (vp ** 2 - 2.0 * vs ** 2) / (2.0 * (vp ** 2 - vs ** 2))
@@ -201,12 +202,19 @@ def compute(
         dts = np.asarray(dts, dtype=np.float64)
         dts = np.where(np.isfinite(dts), np.clip(dts, 20.0, 600.0), np.nan)
     vp = 304800.0 / dt
+    # VP/VS curves are m/s (304800/DT(us/ft) = 1 ft/us in m/s). Castagna's
+    # mudrock line is SI, so it applies directly. Below the line's range it
+    # goes unphysical, so fall back to Vp/Vs = 2.0 (Poisson ~0.33).
+    vs_mps = (vp - 1360.0) / 1.16
+    slow = ~np.isfinite(vs_mps) | (vs_mps <= 0.0)
+    vs_mps = np.where(slow, vp / 2.0, vs_mps)
+    castagna_dts = 304800.0 / np.maximum(vs_mps, 1.0)
     if dts is None or not np.any(np.isfinite(dts)):
-        dts = (vp - 1360.0) / 1.16
+        dts = castagna_dts
         warnings.append("DTS missing; Vs estimated with Castagna")
     else:
         missing = ~np.isfinite(dts)
-        dts = np.where(missing, (vp - 1360.0) / 1.16, dts)
+        dts = np.where(missing, castagna_dts, dts)
         if np.any(missing):
             warnings.append("DTS gaps filled with Castagna")
     vs = 304800.0 / dts
@@ -298,7 +306,12 @@ def compute(
     dp_q = 6.0 * cohesion * np.cos(phi) / (np.sqrt(3.0) * (3.0 - np.sin(phi)))
     dp_fail = np.sqrt(np.maximum(j2, 0.0)) > (dp_q + dp_m * p_eff)
 
-    cdp = np.maximum(3.0 * shmax - shmin - pp - ucs, 0.0)
+    # Critical drawdown for sanding: reservoir pressure minus the critical
+    # flowing bottomhole pressure. Pw_crit comes from the same vertical-well
+    # shear criterion as MW_MIN: Pw = (3*SHmax - SHmin - alpha*Pp - UCS)/2.
+    # Zero means no drawdown capacity before shear failure at the sandface.
+    pw_crit = (3.0 * shmax - shmin - alpha * pp - ucs) / 2.0
+    cdp = np.maximum(pp - pw_crit, 0.0)
     planes = cal.get("fracture_planes")
     slip = _plane_slip(tensor, planes, pp, float(p.get("fracture_mu") or 0.6), float(p.get("fracture_cohesion") or 0.0))
     if planes and slip is None:

@@ -41,7 +41,9 @@ labelled `assumption`.
   `MW` is the requested mud weight (`ppg`).
 - Failure indicators: Mohr-Coulomb, Hoek-Brown and Drucker-Prager at the
   far-field effective principal stresses, plus `SAND_CDP` and optional
-  fracture-plane slip.
+  fracture-plane slip. `SAND_CDP` is drawdown capacity (reservoir pressure
+  minus critical flowing bottomhole pressure from the same shear criterion
+  as `MW_MIN`); zero means no drawdown room before shear at the sandface.
 - Breakout (`BO`) is true where the current mud weight is below `MW_MIN`.
 
 ## API
@@ -63,7 +65,10 @@ Approved models are immutable; edit by creating a new version.
 
 `breakout-calibration` accepts `{model_id, breakouts: [{depth, width_deg, mud_weight?}], save}`.
 It inverts SHmax from the vertical-well Kirsch hoop stress at the breakout edge
-using the model Pp/Shmin, Biot coefficient and UCS. Saving writes the points to
+using the model Pp/Shmin, Biot coefficient and UCS:
+`SHmax = (UCS + Pw + alpha*Pp - SHmin*(1-2cos w)) / (1+2cos w)` where `w` is the
+full breakout width in degrees. This mirrors the forward model
+(`base_max - Pw - alpha*Pp = UCS`) — one `Pw` term, not two. Saving writes the points to
 the draft model calibration as `shmax` with `shmax_source=breakout_inversion`.
 This is a review aid based on manually entered widths, not image processing.
 

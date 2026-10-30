@@ -37,3 +37,11 @@ pre-stack, VTI/TTI anisotropic, RTM, or a velocity-model-building workflow. The
 grid is capped at 32×32 lateral and 192 depth samples; larger volumes need an
 external migration engine. The result is a screening depth image, not a
 certified migrated volume.
+
+Amplitudes are fold-normalized **per voxel**: each output point is divided by
+the sum of obliquity weights that actually contributed to it. Traces outside
+`aperture_m` (and dead/NaN traces) contribute zero weight and zero fold, so
+narrowing the aperture does not dilute the image toward zero. This preserves
+relative amplitude balance for screening, but there is no spherical-spreading
+(`1/r`) correction, no anti-alias filter, and no wavelet shaping — do not use
+the amplitudes for AVO or quantitative inversion.

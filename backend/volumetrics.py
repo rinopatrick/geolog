@@ -36,6 +36,21 @@ def normalize_range(
     return low, mode, high
 
 
+def _cell_area_m2(
+    inline_spacing_m: float,
+    crossline_spacing_m: float,
+) -> float:
+    """Cell area from survey bin spacing only.
+
+    ``inlines``/``crosslines`` carry trace labels (numbers that may start at an
+    arbitrary offset such as 100 or be real coordinates in metres); they must
+    never scale the area. Grid nodes are adjacent cells, so one node covers
+    exactly ``inline_spacing_m * crossline_spacing_m``.
+    """
+    if not inline_spacing_m or not crossline_spacing_m:
+        raise ValueError("surface needs inline_spacing_m and crossline_spacing_m")
+    return float(inline_spacing_m) * float(crossline_spacing_m)
+
 def grv_from_depth_grid(
     depth_grid: list[list[float]],
     contact_depth_m: float,
@@ -48,11 +63,7 @@ def grv_from_depth_grid(
     grid = np.asarray(depth_grid, dtype=float)
     if grid.ndim != 2 or grid.size == 0 or not np.any(np.isfinite(grid)):
         raise ValueError("surface has no depth grid")
-    if not inline_spacing_m or not crossline_spacing_m:
-        raise ValueError("surface needs inline_spacing_m and crossline_spacing_m")
-    inline_step = float(np.median(np.diff(np.asarray(inlines, dtype=float)))) if len(inlines) > 1 else 1.0
-    crossline_step = float(np.median(np.diff(np.asarray(crosslines, dtype=float)))) if len(crosslines) > 1 else 1.0
-    cell_area = float(inline_spacing_m) * float(crossline_spacing_m) * max(1.0, inline_step) * max(1.0, crossline_step)
+    cell_area = _cell_area_m2(inline_spacing_m, crossline_spacing_m)
     base = None
     if base_depth_grid is not None:
         base = np.asarray(base_depth_grid, dtype=float)
