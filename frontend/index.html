@@ -1482,6 +1482,8 @@
                         <input id="portfolioOpex" type="number" value="10" title="Opex per BOE" style="width:90px">
                         <input id="portfolioCapex" type="number" value="0" title="Capex" style="width:110px">
                         <input id="portfolioCorrelation" type="number" min="0" max="1" step="0.05" value="0.5" title="Volume correlation" style="width:80px">
+                        <input id="portfolioRiskCorrelation" type="number" min="0" max="1" step="0.05" value="0" title="Risk correlation" style="width:80px">
+                        <select id="portfolioCapexTiming"><option value="success">Capex on success</option><option value="pre_drill">Capex pre-drill</option></select>
                         <button class="btn-sm" data-action="app.buildProspectPortfolio"><i data-lucide="briefcase"></i> Build portfolio</button>
                         <span id="portfolioStatus" class="toolbar-hint"></span>
                     </div>
