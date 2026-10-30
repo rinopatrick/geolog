@@ -18,7 +18,10 @@ lag when a reliable horizon exists.
 ## Compartments
 
 `POST /api/seismic/{line_id}/surfaces/{surface_id}/compartments` requires a
-depth-converted surface with inline/crossline spacing. Pass `base_surface_id`
+depth-converted surface with inline/crossline spacing. Cell area is
+`inline_spacing_m * crossline_spacing_m` per grid node — the `inlines` and
+`crosslines` arrays are trace labels (they may start at an arbitrary offset
+or hold metre coordinates) and never scale the area. Pass `base_surface_id`
 to use `min(base, contact) - top` for 3D compartment GRV. Each grid node is
 assigned a side for every selected fault link by signed distance to the fault
 polyline; the side bits form a compartment key. With a base surface, the
