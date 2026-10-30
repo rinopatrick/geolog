@@ -99,3 +99,10 @@ def test_brooks_corey_rejects_inverted_data():
 def test_time_to_depth_rejects_negative_times():
     with pytest.raises(ValueError, match="non-negative"):
         time_to_depth_ms([-100, 0, 500], "constant", 2000, [])
+
+
+def test_time_to_depth_rejects_nonfinite_times():
+    with pytest.raises(ValueError, match="finite"):
+        time_to_depth_ms([0, float("nan"), 500], "constant", 2000, [])
+    with pytest.raises(ValueError, match="finite"):
+        time_to_depth_ms([0, float("inf"), 500], "constant", 2000, [])
