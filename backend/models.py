@@ -786,6 +786,25 @@ class Prospect(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
+class SeismicMigration(Base):
+    """A post-stack 3D Kirchhoff depth-migration result."""
+
+    __tablename__ = "seismic_migrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    line_id = Column(Integer, ForeignKey("seismic_lines.id"), nullable=False, index=True)
+    name = Column(String(160), nullable=False)
+    velocity_m_s = Column(Float, nullable=False)
+    inline_spacing_m = Column(Float, nullable=False)
+    crossline_spacing_m = Column(Float, nullable=False)
+    file_path = Column(String(500), nullable=False)
+    inlines_json = Column(Text, default="[]")
+    crosslines_json = Column(Text, default="[]")
+    depths_json = Column(Text, default="[]")
+    stats_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=utcnow)
+
+
 class ProspectPortfolio(Base):
     """A saved portfolio calculation over multiple prospects."""
 

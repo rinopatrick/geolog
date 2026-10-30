@@ -8,6 +8,12 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+### Added
+
+- **Post-stack 3D depth migration.** Constant-velocity Kirchhoff migration over
+  decimated SEG-Y cubes, stored as NPZ with depth-section endpoints and a
+  Seismic-panel viewer.
+
 ## [0.18.0] - 2026-10-30
 
 ### Fixed

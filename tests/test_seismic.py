@@ -687,3 +687,51 @@ def test_fault_throw_from_horizon_endpoint():
     assert geometry["throw_source"] == "horizon_offset"
     assert geometry["horizon_throw_samples"] > 0
     assert geometry["throw_m"] >= 0
+
+def test_3d_migration_endpoint():
+    pid = _project_id()
+    upload = client.post(
+        f"/api/projects/{pid}/seismic",
+        files={"file": ("migration.sgy", _segy_volume(), "application/octet-stream")},
+        data={"name": "Migration Volume"},
+        headers=ADMIN,
+    )
+    assert upload.status_code == 201, upload.text
+    line_id = upload.json()["id"]
+    migrated = client.post(
+        f"/api/seismic/{line_id}/migrate-3d",
+        json={
+            "name": "Test migration",
+            "velocity_m_s": 2000,
+            "inline_spacing_m": 25,
+            "crossline_spacing_m": 25,
+            "max_inlines": 8,
+            "max_crosslines": 8,
+            "max_samples": 40,
+            "max_depth_samples": 32,
+        },
+        headers=ADMIN,
+    )
+    assert migrated.status_code == 201, migrated.text
+    body = migrated.json()
+    assert body["velocity_m_s"] == 2000
+    assert body["stats"]["inline_count"] == 6
+    assert body["depths_m"]
+
+    section = client.get(
+        f"/api/seismic/{line_id}/migrations/{body['id']}/section",
+        headers=ADMIN,
+    )
+    assert section.status_code == 200, section.text
+    assert section.json()["data"]
+    assert len(section.json()["data"]) == len(body["depths_m"])
+
+    listed = client.get(f"/api/seismic/{line_id}/migrations", headers=ADMIN)
+    assert listed.status_code == 200
+    assert body["id"] in {item["id"] for item in listed.json()}
+
+    deleted = client.delete(
+        f"/api/seismic/{line_id}/migrations/{body['id']}",
+        headers=ADMIN,
+    )
+    assert deleted.status_code == 204

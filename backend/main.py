@@ -74,6 +74,7 @@ try:
     from routers.structure import router as structure_router
     from routers.fence import router as fence_router
     from routers.map import router as map_router
+    from routers.migration import router as migration_router
     from routers.seismic import router as seismic_router
     from routers.report_templates import router as report_templates_router
     from routers.velocity import router as velocity_router
@@ -123,6 +124,7 @@ except ImportError:
     from backend.routers.structure import router as structure_router
     from backend.routers.fence import router as fence_router
     from backend.routers.map import router as map_router
+    from backend.routers.migration import router as migration_router
     from backend.routers.seismic import router as seismic_router
     from backend.routers.report_templates import router as report_templates_router
     from backend.routers.velocity import router as velocity_router
@@ -268,6 +270,7 @@ app.include_router(prospects_router)
 app.include_router(structure_router)
 app.include_router(fence_router)
 app.include_router(map_router)
+app.include_router(migration_router)
 app.include_router(seismic_router)
 app.include_router(report_templates_router)
 app.include_router(velocity_router)
