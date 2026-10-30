@@ -12,6 +12,11 @@ from typing import Any
 
 import numpy as np
 
+try:
+    from velocity import time_to_depth_ms
+except ImportError:
+    from backend.velocity import time_to_depth_ms
+
 TEXT_HEADER = 3200
 BINARY_HEADER = 400
 TRACE_HEADER = 240
@@ -476,6 +481,9 @@ def _link_geometry(
     sample_interval_ms: float,
     inline_spacing_m: float | None,
     crossline_spacing_m: float | None,
+    velocity_m_s: float | None = None,
+    layers: list[dict[str, float]] | None = None,
+    velocity_model_id: int | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, int]]]:
     inline_values = np.asarray([point["inline"] for point in points], dtype=float)
     crossline_values = np.asarray([point["crossline"] for point in points], dtype=float)
@@ -489,6 +497,26 @@ def _link_geometry(
         for segment in segments
         if segment.get("throw") is not None
     ]
+    def convert(values: np.ndarray) -> np.ndarray:
+        if velocity_m_s is not None:
+            return time_to_depth_ms(values, "constant", velocity_m_s, [])
+        if layers:
+            return time_to_depth_ms(values, "layers", None, layers)
+        return values
+
+    depth_values = convert(sample_values)
+    depth_coefficients, *_ = np.linalg.lstsq(design, depth_values, rcond=None)
+    depth_prediction = design @ depth_coefficients
+    depth_rms = float(np.sqrt(np.mean((depth_prediction - depth_values) ** 2)))
+    depth_throws: list[float] = []
+    if velocity_m_s is not None or layers:
+        for segment in segments:
+            throw = segment.get("throw") or {}
+            lag = throw.get("lag_ms")
+            if lag is None:
+                continue
+            center = float(segment["sample"])
+            depth_throws.append(abs(float(convert(np.asarray([center + lag]))[0]) - float(convert(np.asarray([center]))[0])))
     geometry: dict[str, Any] = {
         "point_count": len(points),
         "inline_span": int(inline_values.max() - inline_values.min()),
@@ -504,14 +532,31 @@ def _link_geometry(
         "dip_angle_deg": None,
         "inline_spacing_m": inline_spacing_m,
         "crossline_spacing_m": crossline_spacing_m,
+        "domain": "time",
+        "velocity_model_id": velocity_model_id,
+        "throw_m": None,
+        "throw_range_m": [],
+        "dip_inline_m_per_line": None,
+        "dip_crossline_m_per_line": None,
+        "plane_rms_m": None,
     }
-    if inline_spacing_m and crossline_spacing_m:
-        gradient_inline = float(coefficients[0]) * sample_interval_ms / float(inline_spacing_m)
-        gradient_crossline = float(coefficients[1]) * sample_interval_ms / float(crossline_spacing_m)
-        geometry["dip_angle_deg"] = round(
-            float(np.degrees(np.arctan(np.hypot(gradient_inline, gradient_crossline)))),
-            3,
-        )
+    if velocity_m_s is not None or layers:
+        geometry.update({
+            "domain": "depth",
+            "dip_basis": "depth",
+            "throw_m": round(float(np.median(depth_throws)), 3) if depth_throws else None,
+            "throw_range_m": [round(min(depth_throws), 3), round(max(depth_throws), 3)] if depth_throws else [],
+            "dip_inline_m_per_line": round(float(depth_coefficients[0]), 4),
+            "dip_crossline_m_per_line": round(float(depth_coefficients[1]), 4),
+            "plane_rms_m": round(depth_rms, 3),
+        })
+        if inline_spacing_m and crossline_spacing_m:
+            gradient_inline = float(depth_coefficients[0]) / float(inline_spacing_m)
+            gradient_crossline = float(depth_coefficients[1]) / float(crossline_spacing_m)
+            geometry["dip_angle_deg"] = round(
+                float(np.degrees(np.arctan(np.hypot(gradient_inline, gradient_crossline)))),
+                3,
+            )
     return geometry, _convex_hull(points)
 
 def link_faults_3d(
@@ -525,6 +570,9 @@ def link_faults_3d(
     sample_tolerance: float = 16.0,
     inline_spacing_m: float | None = None,
     crossline_spacing_m: float | None = None,
+    velocity_m_s: float | None = None,
+    layers: list[dict[str, float]] | None = None,
+    velocity_model_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """Detect faults on sampled inline sections and link them across inlines."""
     inlines = index.get("trace_inlines", [])
@@ -622,6 +670,9 @@ def link_faults_3d(
             float(index["sample_interval_ms"]),
             inline_spacing_m,
             crossline_spacing_m,
+            velocity_m_s=velocity_m_s,
+            layers=layers,
+            velocity_model_id=velocity_model_id,
         )
         results.append({
             "name": "3D Fault",

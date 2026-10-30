@@ -288,3 +288,23 @@ def test_prospect_portfolio_emv_and_ranking():
 
     deleted = client.delete(f"/api/projects/{pid}/prospect-portfolios/{body['id']}", headers=ADMIN)
     assert deleted.status_code == 204
+
+def test_grv_uses_base_surface_and_contact_whichever_is_shallower():
+    from backend.volumetrics import grv_from_depth_grid
+
+    top = [[2000.0, 2000.0], [2000.0, 2000.0]]
+    base = [[2050.0, 2050.0], [2050.0, 2050.0]]
+    common = {
+        "inline_spacing_m": 25,
+        "crossline_spacing_m": 25,
+        "inlines": [100, 101],
+        "crosslines": [200, 201],
+    }
+    below_base = grv_from_depth_grid(top, 2100, base_depth_grid=base, **common)
+    assert below_base["grv_m3"] == 125000.0
+    assert below_base["mean_reservoir_thickness_m"] == 50.0
+    assert below_base["base_used"] is True
+
+    above_base = grv_from_depth_grid(top, 2020, base_depth_grid=base, **common)
+    assert above_base["grv_m3"] == 50000.0
+    assert above_base["max_column_m"] == 20.0

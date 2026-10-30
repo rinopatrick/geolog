@@ -43,6 +43,7 @@ def grv_from_depth_grid(
     crossline_spacing_m: float,
     inlines: list[float],
     crosslines: list[float],
+    base_depth_grid: list[list[float]] | None = None,
 ) -> dict[str, float]:
     grid = np.asarray(depth_grid, dtype=float)
     if grid.ndim != 2 or grid.size == 0 or not np.any(np.isfinite(grid)):
@@ -52,18 +53,27 @@ def grv_from_depth_grid(
     inline_step = float(np.median(np.diff(np.asarray(inlines, dtype=float)))) if len(inlines) > 1 else 1.0
     crossline_step = float(np.median(np.diff(np.asarray(crosslines, dtype=float)))) if len(crosslines) > 1 else 1.0
     cell_area = float(inline_spacing_m) * float(crossline_spacing_m) * max(1.0, inline_step) * max(1.0, crossline_step)
-    columns = np.clip(float(contact_depth_m) - grid, 0.0, None)
+    base = None
+    if base_depth_grid is not None:
+        base = np.asarray(base_depth_grid, dtype=float)
+        if base.shape != grid.shape:
+            raise ValueError("base surface grid must match the top surface grid")
+    bottom = np.minimum(base, float(contact_depth_m)) if base is not None else np.full_like(grid, float(contact_depth_m))
+    columns = np.clip(bottom - grid, 0.0, None)
     columns = np.nan_to_num(columns, nan=0.0)
     grv = float(np.sum(columns) * cell_area)
     area = float(np.count_nonzero(columns > 0) * cell_area)
     if grv <= 0:
         raise ValueError("contact is above the entire surface; no hydrocarbon column")
+    thickness = np.nan_to_num(np.clip(base - grid, 0.0, None), nan=0.0) if base is not None else None
     return {
         "grv_m3": round(grv, 3),
         "area_m2": round(area, 3),
         "cell_area_m2": round(cell_area, 3),
         "mean_column_m": round(float(np.mean(columns[columns > 0])), 3),
         "max_column_m": round(float(np.max(columns)), 3),
+        "base_used": base is not None,
+        "mean_reservoir_thickness_m": round(float(np.mean(thickness[thickness > 0])), 3) if thickness is not None and np.any(thickness > 0) else None,
     }
 
 
@@ -105,6 +115,7 @@ def calculate_prospect(
     bo: float = 1.2,
     risk: float = 1.0,
     risks: dict[str, float] | None = None,
+    base_depth_grid: list[list[float]] | None = None,
     iterations: int = 1000,
     seed: int | None = None,
     fluid_type: str = "oil",
@@ -118,6 +129,7 @@ def calculate_prospect(
         crossline_spacing_m,
         inlines,
         crosslines,
+        base_depth_grid=base_depth_grid,
     )
     porosity_range = normalize_range(porosity, "porosity", 0.2, 0.001, 0.6)
     sw_range = normalize_range(water_saturation, "water_saturation", 0.3)

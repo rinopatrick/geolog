@@ -429,6 +429,19 @@ def link_seismic_faults_3d(line_id: int, data: dict, request: Request, db: Sessi
     crossline_spacing = data.get("crossline_spacing_m")
     inline_spacing = max(1.0, float(inline_spacing)) if inline_spacing else None
     crossline_spacing = max(1.0, float(crossline_spacing)) if crossline_spacing else None
+    velocity_model = None
+    if data.get("velocity_model_id") is not None:
+        try:
+            model_id = int(data["velocity_model_id"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "velocity_model_id must be an integer")
+        velocity_model = (
+            db.query(VelocityModel)
+            .filter(VelocityModel.id == model_id, VelocityModel.project_id == row.project_id)
+            .first()
+        )
+        if not velocity_model:
+            raise HTTPException(404, "Velocity model not found for this project")
     try:
         with open(row.file_path, "rb") as handle:
             content = handle.read()
@@ -444,6 +457,9 @@ def link_seismic_faults_3d(line_id: int, data: dict, request: Request, db: Sessi
             sample_tolerance=sample_tolerance,
             inline_spacing_m=inline_spacing,
             crossline_spacing_m=crossline_spacing,
+            velocity_m_s=velocity_model.velocity_m_s if velocity_model and (velocity_model.kind or "constant") == "constant" else None,
+            layers=json.loads(velocity_model.layers_json or "[]") if velocity_model and velocity_model.kind == "layers" else None,
+            velocity_model_id=velocity_model.id if velocity_model else None,
         )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(400, f"could not link faults: {exc}")

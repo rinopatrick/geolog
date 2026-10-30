@@ -219,6 +219,12 @@ def test_seismic_volume_sections_and_fault_links():
     missing = client.get(f"/api/seismic/{line_id}/inline/999/section", headers=ADMIN)
     assert missing.status_code == 400
 
+    velocity = client.post(
+        f"/api/projects/{pid}/velocity-models",
+        json={"name": "Fault 2000", "kind": "constant", "velocity_m_s": 2000},
+        headers=ADMIN,
+    )
+    assert velocity.status_code == 201, velocity.text
     linked = client.post(
         f"/api/seismic/{line_id}/faults/link-3d",
         json={
@@ -228,6 +234,7 @@ def test_seismic_volume_sections_and_fault_links():
             "sample_tolerance": 8,
             "inline_spacing_m": 25,
             "crossline_spacing_m": 25,
+            "velocity_model_id": velocity.json()["id"],
         },
         headers=ADMIN,
     )
@@ -242,6 +249,8 @@ def test_seismic_volume_sections_and_fault_links():
     assert geometry["vertical_extent_ms"] > 0
     assert geometry["throw_ms"] is not None and geometry["throw_ms"] > 0
     assert geometry["throw_sections"] >= 2
+    assert geometry["domain"] == "depth"
+    assert geometry["throw_m"] == 8.0
     assert geometry["dip_angle_deg"] is not None
     assert len(links[0]["polygon"]) >= 3
 

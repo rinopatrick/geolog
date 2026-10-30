@@ -776,6 +776,7 @@ class Prospect(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
     line_id = Column(Integer, ForeignKey("seismic_lines.id"), nullable=True)
     surface_id = Column(Integer, ForeignKey("seismic_surfaces.id"), nullable=True)
+    base_surface_id = Column(Integer, ForeignKey("seismic_surfaces.id"), nullable=True)
     name = Column(String(160), nullable=False)
     fluid_type = Column(String(20), default="oil")
     contact_depth_m = Column(Float, nullable=True)
