@@ -1490,6 +1490,19 @@
                     </div>
                     <canvas id="segyMigrationCanvas" width="1000" height="360" style="width:100%;margin-top:10px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+                        <label class="toolbar-hint">Wedge 1D</label>
+                        <input id="wedgeAiTop" type="number" value="13800000" title="Top AI (kg/m2s)" style="width:110px">
+                        <input id="wedgeAiRes" type="number" value="20800000" title="Reservoir AI (kg/m2s)" style="width:110px">
+                        <input id="wedgeAiBase" type="number" value="13800000" title="Base AI (kg/m2s)" style="width:110px">
+                        <input id="wedgeVelocity" type="number" min="500" max="8000" value="3000" title="Velocity (m/s)" style="width:90px">
+                        <input id="wedgeFreqs" value="20,30,40" title="Frequencies Hz (comma-separated)" style="width:110px">
+                        <button class="btn-sm" data-action="app.runWedgeModel"><i data-lucide="activity"></i> Wedge model</button>
+                        <button class="btn-sm" data-action="app.downloadWedgeCsv"><i data-lucide="download"></i> CSV</button>
+                        <span id="wedgeStatus" class="toolbar-hint"></span>
+                    </div>
+                    <canvas id="wedgeCanvas" width="1000" height="300" style="width:100%;margin-top:10px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
+                    <div id="wedgeTable" style="font-size:12px;color:#8b949e;margin-top:6px"></div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
                         <input id="portfolioName" placeholder="Portfolio" value="Portfolio A" style="min-width:130px">
                         <input id="portfolioPrice" type="number" value="60" title="Price per BOE" style="width:90px">
                         <input id="portfolioOpex" type="number" value="10" title="Opex per BOE" style="width:90px">

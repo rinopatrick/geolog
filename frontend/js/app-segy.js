@@ -440,6 +440,127 @@ Object.assign(GeoLogApp.prototype, {
         }
     },
 
+    async runWedgeModel() {
+        const aiTop = Number(document.getElementById('wedgeAiTop')?.value);
+        const aiRes = Number(document.getElementById('wedgeAiRes')?.value);
+        const aiBase = Number(document.getElementById('wedgeAiBase')?.value);
+        const velocity = Number(document.getElementById('wedgeVelocity')?.value) || 3000;
+        const freqs = (document.getElementById('wedgeFreqs')?.value || '20,30,40')
+            .split(',').map(s => Number(s.trim())).filter(f => f >= 5 && f <= 120);
+        if (!freqs.length) return GeoToast.warn('Enter 1-9 frequencies between 5 and 120 Hz.');
+        GeoLoading.show('Running wedge model...');
+        try {
+            const thickness = [];
+            for (let t = 0; t <= 60; t += 1) thickness.push(t);
+            const result = await this._api('/seismic/wedge-model', {
+                method: 'POST',
+                body: JSON.stringify({
+                    ai_top: aiTop, ai_reservoir: aiRes, ai_base: aiBase,
+                    velocity_m_s: velocity, freqs_hz: freqs.slice(0, 9), thickness_m: thickness,
+                }),
+            });
+            this._wedgeResult = result;
+            this._drawWedge();
+            const status = document.getElementById('wedgeStatus');
+            if (status) {
+                const entries = Object.entries(result.tuning_thickness_per_freq || {})
+                    .map(([f, t]) => `${f}Hz→${t}m`).join(' · ');
+                status.textContent = `tuning: ${entries} (1D screening)`;
+            }
+            GeoToast.success('Wedge model complete');
+        } catch (e) {
+            GeoToast.error('Wedge model failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    },
+
+    _drawWedge() {
+        const canvas = document.getElementById('wedgeCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, w, h);
+        const result = this._wedgeResult;
+        if (!result?.thickness_m?.length) {
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '13px sans-serif';
+            ctx.fillText('Run wedge model to view tuning curves', 18, 28);
+            return;
+        }
+        const left = 56, right = w - 18, top = 22, bottom = h - 30;
+        const plotW = right - left, plotH = bottom - top;
+        const xs = result.thickness_m;
+        const all = result.curves ? Object.values(result.curves).flatMap(c => c.peak_amplitude) : [];
+        const maxA = Math.max(...all.map(Number).filter(Number.isFinite), 1e-9);
+        const xMax = Math.max(...xs, 1);
+        const colors = ['#58a6ff', '#3fb950', '#f778ba', '#d29922', '#a371f7'];
+        // P10-P90 band
+        if (result.p10?.length) {
+            ctx.beginPath();
+            result.thickness_m.forEach((t, i) => {
+                const x = left + (t / xMax) * plotW;
+                const y = bottom - (result.p90[i] / maxA) * plotH;
+                i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+            });
+            [...result.thickness_m.keys()].reverse().forEach(i => {
+                const x = left + (result.thickness_m[i] / xMax) * plotW;
+                const y = bottom - (result.p10[i] / maxA) * plotH;
+                ctx.lineTo(x, y);
+            });
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(88,166,255,0.15)';
+            ctx.fill();
+        }
+        let ci = 0;
+        for (const [freq, curve] of Object.entries(result.curves || {})) {
+            ctx.strokeStyle = colors[ci++ % colors.length];
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            curve.peak_amplitude.forEach((a, i) => {
+                const x = left + (xs[i] / xMax) * plotW;
+                const y = bottom - (Number(a) / maxA) * plotH;
+                i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+            });
+            ctx.stroke();
+            ctx.fillStyle = ctx.strokeStyle;
+            ctx.fillText(`${freq} Hz`, right - 52, top + 14 + (ci - 1) * 14);
+        }
+        ctx.strokeStyle = '#30363d';
+        ctx.strokeRect(left, top, plotW, plotH);
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '11px sans-serif';
+        ctx.fillText('0 m', left, h - 10);
+        ctx.fillText(`${xMax} m`, right - 40, h - 10);
+        const table = document.getElementById('wedgeTable');
+        if (table) {
+            const rows = Object.entries(result.curves || {}).map(([freq, curve]) => {
+                const analytic = curve.analytic_tuning_m;
+                return `<tr><td>${freq} Hz</td><td>${curve.tuning_thickness_m} m</td><td>${analytic} m (λ/4)</td></tr>`;
+            }).join('');
+            table.innerHTML = `<table class="px-table"><tr><th>Freq</th><th>Tuning</th><th>Analytic λ/4</th></tr>${rows}</table>`;
+        }
+    },
+
+    downloadWedgeCsv() {
+        const result = this._wedgeResult;
+        if (!result?.thickness_m?.length) return GeoToast.warn('Run wedge model first.');
+        const freqs = result.freqs_hz || [];
+        const header = ['thickness_m', ...freqs.map(f => `${f}Hz`), 'p10', 'p50', 'p90'].join(',');
+        const lines = result.thickness_m.map((t, i) => {
+            const amps = freqs.map(f => result.curves[String(f)]?.peak_amplitude[i] ?? '');
+            return [t, ...amps, result.p10[i], result.p50[i], result.p90[i]].join(',');
+        });
+        const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'wedge-tuning.csv';
+        link.click();
+        URL.revokeObjectURL(link.href);
+    },
+
     async run3dMigration() {
         const line = this._segyLine;
         if (!line) return GeoToast.warn('Load a SEG-Y line first.');
