@@ -13,7 +13,9 @@ endpoints are under `/api/seismic/{line_id}/fault-surfaces`.
 depth-converted horizon on opposite sides of the fault trace and stores
 `throw_source = horizon_offset`, median/mean/max throw in metres, and the
 surface id in the link geometry. This is preferred over the cross-correlation
-lag when a reliable horizon exists.
+lag when a reliable horizon exists. The throw feeds depth-domain fault
+linkage (`throw_m`, `dip_inline_m_per_line`) when spacing and velocity are
+supplied.
 
 ## Compartments
 
