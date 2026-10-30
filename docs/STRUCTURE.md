@@ -7,6 +7,14 @@ fault points with inverse-distance weighting. Supply `velocity_model_id` to
 store a depth surface; otherwise the grid is two-way time. `GET`/`DELETE`
 endpoints are under `/api/seismic/{line_id}/fault-surfaces`.
 
+## Horizon-based throw
+
+`POST /api/seismic/{line_id}/fault-links/{link_id}/throw` samples a
+depth-converted horizon on opposite sides of the fault trace and stores
+`throw_source = horizon_offset`, median/mean/max throw in metres, and the
+surface id in the link geometry. This is preferred over the cross-correlation
+lag when a reliable horizon exists.
+
 ## Compartments
 
 `POST /api/seismic/{line_id}/surfaces/{surface_id}/compartments` requires a

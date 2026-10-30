@@ -243,3 +243,43 @@ def juxtaposition(
         "reservoir_reservoir_samples": sum(item["reservoir_reservoir"] for item in results),
         "seal_samples": sum(item["seal"] for item in results),
     }
+
+
+def fault_throw_from_surface(
+    top_grid: list[list[float]],
+    inlines: list[float],
+    crosslines: list[float],
+    fault_points: list[dict[str, float]],
+) -> dict[str, Any]:
+    """Estimate throw from horizon depth offset across a fault trace."""
+    top = np.asarray(top_grid, dtype=float)
+    inline_values = np.asarray(inlines, dtype=float)
+    crossline_values = np.asarray(crosslines, dtype=float)
+    if len(fault_points) < 2:
+        raise ValueError("fault needs at least two points")
+    inline_span = max(float(point["inline"]) for point in fault_points) - min(float(point["inline"]) for point in fault_points)
+    crossline_span = max(float(point["crossline"]) for point in fault_points) - min(float(point["crossline"]) for point in fault_points)
+    along_crossline = crossline_span >= inline_span
+    throws = []
+    for point in fault_points:
+        row = int(np.argmin(np.abs(inline_values - float(point["inline"]))))
+        column = int(np.argmin(np.abs(crossline_values - float(point["crossline"]))))
+        if along_crossline:
+            first, second = (row - 1, column), (row + 1, column)
+        else:
+            first, second = (row, column - 1), (row, column + 1)
+        if not ((0 <= first[0] < top.shape[0]) and (0 <= first[1] < top.shape[1])):
+            continue
+        if not ((0 <= second[0] < top.shape[0]) and (0 <= second[1] < top.shape[1])):
+            continue
+        a, b = top[first], top[second]
+        if np.isfinite(a) and np.isfinite(b):
+            throws.append(abs(float(a) - float(b)))
+    if not throws:
+        raise ValueError("no valid horizon cells across the fault")
+    return {
+        "samples": len(throws),
+        "throw_median_m": round(float(np.median(throws)), 3),
+        "throw_mean_m": round(float(np.mean(throws)), 3),
+        "throw_max_m": round(float(np.max(throws)), 3),
+    }

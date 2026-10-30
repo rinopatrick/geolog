@@ -19,7 +19,7 @@ try:
         VelocityModel,
     )
     from seismic import index_segy
-    from structure import build_compartments, build_fault_surface, juxtaposition
+    from structure import build_compartments, build_fault_surface, fault_throw_from_surface, juxtaposition
 except ImportError:
     from backend.acl import require_project_access
     from backend.database import get_db
@@ -31,7 +31,7 @@ except ImportError:
         VelocityModel,
     )
     from backend.seismic import index_segy
-    from backend.structure import build_compartments, build_fault_surface, juxtaposition
+    from backend.structure import build_compartments, build_fault_surface, fault_throw_from_surface, juxtaposition
 
 router = APIRouter(prefix="/api", tags=["structure"])
 
@@ -151,6 +151,60 @@ def create_fault_surface(line_id: int, link_id: int, data: dict, request: Reques
     db.commit()
     db.refresh(item)
     return _fault_surface(item)
+
+
+@router.post("/seismic/{line_id}/fault-links/{link_id}/throw")
+def fault_throw_from_horizon(
+    line_id: int,
+    link_id: int,
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    row = _line(db, line_id)
+    require_project_access(db, request, row.project_id, write=True)
+    link = (
+        db.query(SeismicFaultLink)
+        .filter(SeismicFaultLink.id == link_id, SeismicFaultLink.line_id == line_id)
+        .first()
+    )
+    if not link:
+        raise HTTPException(404, "Fault link not found")
+    try:
+        surface_id = int(data.get("surface_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "surface_id is required")
+    surface = (
+        db.query(SeismicSurface)
+        .filter(SeismicSurface.id == surface_id, SeismicSurface.line_id == line_id)
+        .first()
+    )
+    if not surface:
+        raise HTTPException(404, "Surface not found on this line")
+    if not surface.depth_grid_json or surface.depth_grid_json == "[]":
+        raise HTTPException(400, "surface must be depth-converted first")
+    try:
+        points = json.loads(link.points_json or "[]")
+        geometry = json.loads(link.geometry_json or "{}")
+        estimate = fault_throw_from_surface(
+            json.loads(surface.depth_grid_json),
+            json.loads(surface.inlines_json or "[]"),
+            json.loads(surface.crosslines_json or "[]"),
+            points,
+        )
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(400, f"could not estimate horizon throw: {exc}")
+    geometry.update({
+        "throw_source": "horizon_offset",
+        "throw_m": estimate["throw_median_m"],
+        "throw_m_mean": estimate["throw_mean_m"],
+        "throw_m_max": estimate["throw_max_m"],
+        "horizon_throw_samples": estimate["samples"],
+        "horizon_surface_id": surface.id,
+    })
+    link.geometry_json = json.dumps(geometry)
+    db.commit()
+    return {"link_id": link.id, "geometry": geometry}
 
 
 @router.get("/seismic/{line_id}/fault-surfaces")
