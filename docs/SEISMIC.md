@@ -12,8 +12,10 @@
 
 Upload writes a JSON index sidecar next to the SEG-Y file. The index scans every
 trace header and stores byte offsets, sample counts, inlines and crosslines
-without decoding the amplitudes. Sections read only the traces they need, so a
-3D volume does not need to fit in memory.
+without decoding the amplitudes. Trace start delays (header bytes 109-110,
+signed) are indexed per trace and honored with datum correction in the seismic
+tie time origin, so delayed traces align at true record time. Sections read
+only the traces they need, so a 3D volume does not need to fit in memory.
 
 The sequential section endpoint decimates the whole indexed line to at most
 1,500 × 1,500 samples; the UI requests 600 × 600. It reports `line_trace_count`
