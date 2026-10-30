@@ -159,3 +159,27 @@ def test_misfit_on_reference_fixture_high():
     out = misfit_tie(a, trace[: len(a)])
     assert out["correlation"] > 0.9
     assert abs(out["shift_samples"]) <= 2
+
+def test_wedge_model_endpoint():
+    from fastapi.testclient import TestClient
+    from backend.main import app
+    client = TestClient(app)
+    head = {"X-User-Role": "admin"}
+    body = {
+        "ai_top": 6000.0*2300.0, "ai_reservoir": 8000.0*2600.0, "ai_base": 6000.0*2300.0,
+        "velocity_m_s": 3000.0, "freqs_hz": [20.0, 30.0, 40.0],
+        "thickness_m": [0.0, 10.0, 20.0, 30.0, 40.0, 50.0],
+    }
+    r = client.post("/api/seismic/wedge-model", headers=head, json=body)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["tuning_thickness_per_freq"]["30.0"] == data["curves"]["30.0"]["tuning_thickness_m"]
+    assert len(data["p50"]) == 6
+
+def test_wedge_model_endpoint_rejects_bad_input():
+    from fastapi.testclient import TestClient
+    from backend.main import app
+    client = TestClient(app)
+    head = {"X-User-Role": "admin"}
+    r = client.post("/api/seismic/wedge-model", headers=head, json={"ai_top": -1.0})
+    assert r.status_code in (400, 422)

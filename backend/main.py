@@ -76,6 +76,7 @@ try:
     from routers.map import router as map_router
     from routers.migration import router as migration_router
     from routers.seismic import router as seismic_router
+    from routers.wedge import router as wedge_router
     from routers.report_templates import router as report_templates_router
     from routers.velocity import router as velocity_router
     from routers.zonation import router as zonation_router
@@ -126,6 +127,7 @@ except ImportError:
     from backend.routers.map import router as map_router
     from backend.routers.migration import router as migration_router
     from backend.routers.seismic import router as seismic_router
+    from backend.routers.wedge import router as wedge_router
     from backend.routers.report_templates import router as report_templates_router
     from backend.routers.velocity import router as velocity_router
     from backend.routers.zonation import router as zonation_router
@@ -272,6 +274,7 @@ app.include_router(fence_router)
 app.include_router(map_router)
 app.include_router(migration_router)
 app.include_router(seismic_router)
+app.include_router(wedge_router)
 app.include_router(report_templates_router)
 app.include_router(velocity_router)
 
