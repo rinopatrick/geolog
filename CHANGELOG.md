@@ -19,6 +19,7 @@ While the major version is `0`, the API is not yet stable.
 - **Physics benchmarks.** Analytic checks for IBM float, depth, fault geometry, GRV and saturation, plus field-LAS TWT invariants (`scripts/validate_physics.py`).
 - **Portfolio economics.** EMV uses mean BOE and explicit capex timing; risked volumes use correlated success events, not a scalar chance multiplier.
 - **Density-neutron PHIE.** Sensitivity and uncertainty now use RHOB+NPHI effective porosity when available, falling back to NPHI.
+- **Portfolio dependency matrices.** Full symmetric PSD volume/risk correlation matrices with validation and Cholesky sampling.
 
 ## [0.16.0] - 2026-11-01
 
