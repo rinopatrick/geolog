@@ -530,6 +530,14 @@ def create_seismic_surface(line_id: int, data: dict, request: Request, db: Sessi
     inline_spacing = max(1.0, float(inline_spacing)) if inline_spacing else None
     crossline_spacing = max(1.0, float(crossline_spacing)) if crossline_spacing else None
     max_grid = max(8, min(int(data.get("max_grid", 96) or 96), 200))
+    method = str(data.get("method", "idw") or "idw").lower()
+    if method not in {"idw", "kriging"}:
+        raise HTTPException(400, "method must be idw or kriging")
+    variogram = data.get("variogram") or {}
+    if not isinstance(variogram, dict):
+        raise HTTPException(400, "variogram must be an object")
+    anisotropy_ratio = max(0.05, min(float(data.get("anisotropy_ratio", 1.0) or 1.0), 20.0))
+    azimuth_deg = float(data.get("azimuth_deg", 0.0) or 0.0)
     payloads = [
         {
             "mode": horizon.mode,
@@ -548,6 +556,10 @@ def create_seismic_surface(line_id: int, data: dict, request: Request, db: Sessi
             max_grid=max_grid,
             inline_spacing_m=inline_spacing,
             crossline_spacing_m=crossline_spacing,
+            method=method,
+            variogram=variogram,
+            anisotropy_ratio=anisotropy_ratio,
+            azimuth_deg=azimuth_deg,
         )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(400, f"could not build surface: {exc}")

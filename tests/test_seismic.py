@@ -567,3 +567,51 @@ def test_arbitrary_lines_and_fences():
     assert fences.status_code == 200, fences.text
     assert len(fences.json()["fences"]) == 2
     assert all(fence["trace_count"] > 0 for fence in fences.json()["fences"])
+
+def test_surface_kriging_endpoint():
+    pid = _project_id()
+    upload = client.post(
+        f"/api/projects/{pid}/seismic",
+        files={"file": ("kriging.sgy", _segy_volume(), "application/octet-stream")},
+        data={"name": "Kriging Volume"},
+        headers=ADMIN,
+    )
+    assert upload.status_code == 201, upload.text
+    line_id = upload.json()["id"]
+    for index, inline in enumerate([100, 101, 102]):
+        created = client.post(
+            f"/api/seismic/{line_id}/horizons",
+            json={
+                "name": "Kriging Top",
+                "mode": "inline",
+                "section_value": inline,
+                "picks": [
+                    {"trace": 2, "sample": 10 + index},
+                    {"trace": 20, "sample": 14 + index},
+                    {"trace": 30, "sample": 14 + index},
+                ],
+            },
+            headers=ADMIN,
+        )
+        assert created.status_code == 201, created.text
+    surface = client.post(
+        f"/api/seismic/{line_id}/surfaces",
+        json={
+            "name": "Kriged Surface",
+            "horizon_name": "Kriging Top",
+            "max_grid": 24,
+            "method": "kriging",
+            "variogram": {"model": "spherical", "range": 20, "sill": 4},
+            "anisotropy_ratio": 1.5,
+            "azimuth_deg": 20,
+            "inline_spacing_m": 25,
+            "crossline_spacing_m": 25,
+        },
+        headers=ADMIN,
+    )
+    assert surface.status_code == 201, surface.text
+    body = surface.json()
+    assert body["stats"]["method"] == "kriging"
+    assert body["stats"]["kriging"]["reader"] == "ordinary_kriging"
+    assert len(body["grid"]) == 3
+    assert all(np.isfinite(value) for row in body["grid"] for value in row)

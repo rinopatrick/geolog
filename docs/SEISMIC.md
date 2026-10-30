@@ -59,8 +59,10 @@ Use `horizon_ids` for an explicit set, `horizon_name` to group horizons with the
 same name, or omit both to use every inline/crossline horizon. Only 3D
 (`inline`/`crossline`) horizons are used; `line` picks are ignored.
 
-The builder uses inverse-distance weighting on the picked inline/crossline
-points and caps the grid at 96 × 96 by default (`max_grid` up to 200). It returns
+The builder defaults to inverse-distance weighting. Pass `method: "kriging"` for
+ordinary kriging with spherical/exponential/Gaussian variograms, `range`, `sill`,
+`nugget`, `anisotropy_ratio` and `azimuth_deg`. The grid is capped at 96 × 96 by
+default (`max_grid` up to 200); kriging uses up to 16 nearest neighbours. It returns
 `inlines`, `crosslines`, `grid` (time in ms), `stats.point_count`,
 `stats.coverage` and time min/max/mean. Surfaces are stored as
 `SeismicSurface` rows. `GET .../surfaces/{id}/export.csv` writes

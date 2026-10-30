@@ -117,12 +117,22 @@ def create_fault_surface(line_id: int, link_id: int, data: dict, request: Reques
         if not model:
             raise HTTPException(404, "Velocity model not found for this project")
     try:
+        method = str(data.get("method", "idw") or "idw").lower()
+        if method not in {"idw", "kriging"}:
+            raise HTTPException(400, "method must be idw or kriging")
+        variogram = data.get("variogram") or {}
+        if not isinstance(variogram, dict):
+            raise HTTPException(400, "variogram must be an object")
         built = build_fault_surface(
             points,
             _index(row)["sample_interval_ms"],
             max_grid=max(4, min(int(data.get("max_grid", 64) or 64), 128)),
             velocity_m_s=model.velocity_m_s if model and (model.kind or "constant") == "constant" else None,
             layers=json.loads(model.layers_json or "[]") if model and model.kind == "layers" else None,
+            method=method,
+            variogram=variogram,
+            anisotropy_ratio=max(0.05, min(float(data.get("anisotropy_ratio", 1.0) or 1.0), 20.0)),
+            azimuth_deg=float(data.get("azimuth_deg", 0.0) or 0.0),
         )
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(400, f"could not build fault surface: {exc}")

@@ -11,6 +11,11 @@ try:
 except ImportError:
     from backend.velocity import time_to_depth_ms
 
+try:
+    from geostat import krige_grid
+except ImportError:
+    from backend.geostat import krige_grid
+
 
 def _axis(values: list[float], limit: int) -> list[float]:
     if len(values) <= limit:
@@ -25,6 +30,10 @@ def build_fault_surface(
     max_grid: int = 64,
     velocity_m_s: float | None = None,
     layers: list[dict[str, float]] | None = None,
+    method: str = "idw",
+    variogram: dict[str, Any] | None = None,
+    anisotropy_ratio: float = 1.0,
+    azimuth_deg: float = 0.0,
 ) -> dict[str, Any]:
     if len(points) < 2:
         raise ValueError("fault surface needs at least two picks")
@@ -37,13 +46,33 @@ def build_fault_surface(
         values = values[positions]
     inlines = _axis(sorted(set(float(value) for value in values[:, 0])), max(2, int(max_grid)))
     crosslines = _axis(sorted(set(float(value) for value in values[:, 1])), max(2, int(max_grid)))
-    grid = []
-    for inline in inlines:
-        distance = ((inline - values[:, 0]) ** 2)[:, None] + (np.asarray(crosslines)[None, :] - values[:, 1][:, None]) ** 2
-        weights = 1.0 / (distance + 1e-9)
-        samples = (weights * values[:, 2][None, :]).sum(axis=1) / weights.sum(axis=1)
-        grid.append(samples)
-    time_grid = np.asarray(grid, dtype=float) * float(sample_interval_ms)
+    interpolation = str(method or "idw").lower()
+    variogram = variogram or {}
+    kriging_info: dict[str, Any] = {}
+    if interpolation == "kriging":
+        grid, kriging_info = krige_grid(
+            values,
+            inlines,
+            crosslines,
+            variogram_model=str(variogram.get("model", "spherical")),
+            range_m=variogram.get("range"),
+            sill=variogram.get("sill"),
+            nugget=float(variogram.get("nugget", 0.0) or 0.0),
+            anisotropy_ratio=float(anisotropy_ratio or 1.0),
+            azimuth_deg=float(azimuth_deg or 0.0),
+            max_neighbors=int(variogram.get("max_neighbors", 16) or 16),
+        )
+        time_grid = np.asarray(grid, dtype=float) * float(sample_interval_ms)
+    elif interpolation == "idw":
+        grid = []
+        for inline in inlines:
+            distance = ((inline - values[:, 0]) ** 2)[:, None] + (np.asarray(crosslines)[None, :] - values[:, 1][:, None]) ** 2
+            weights = 1.0 / (distance + 1e-9)
+            samples = (weights * values[:, 2][None, :]).sum(axis=1) / weights.sum(axis=1)
+            grid.append(samples)
+        time_grid = np.asarray(grid, dtype=float) * float(sample_interval_ms)
+    else:
+        raise ValueError("fault surface method must be idw or kriging")
     domain = "time"
     if velocity_m_s is not None:
         time_grid = time_to_depth_ms(time_grid, "constant", velocity_m_s, [])
@@ -63,6 +92,10 @@ def build_fault_surface(
             "min": round(float(np.min(time_grid)), 3),
             "max": round(float(np.max(time_grid)), 3),
             "mean": round(float(np.mean(time_grid)), 3),
+            "method": interpolation,
+            "anisotropy_ratio": float(anisotropy_ratio or 1.0),
+            "azimuth_deg": float(azimuth_deg or 0.0),
+            **({"kriging": kriging_info} if kriging_info else {}),
         },
     }
 
