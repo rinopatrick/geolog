@@ -20,6 +20,15 @@ def _decimate(values: list[int], limit: int) -> list[int]:
     return [unique[int(position)] for position in sorted(set(positions.tolist()))]
 
 
+def _relative_coords(values: list[int], spacing_m: float) -> np.ndarray:
+    """Physical coordinates relative to the grid centroid.
+
+    Absolute inline numbers (often ~100+) times spacing overflow float32
+    precision in the distance kernel, so only relative offsets matter.
+    """
+    axis = np.asarray(values, dtype=float) * float(spacing_m)
+    return axis - axis.mean()
+
 def volume_cube(
     content: bytes,
     index: dict[str, Any],
@@ -86,13 +95,9 @@ def kirchhoff_migrate(
     depth_step = velocity * dt_ms / 2000.0
     depth_count = max(2, min(int(max_depth_samples), nt))
     depths = np.arange(depth_count, dtype=float) * depth_step
-    x = np.asarray(inlines, dtype=float) * inline_spacing
-    y = np.asarray(crosslines, dtype=float) * crossline_spacing
+    x = _relative_coords(inlines, inline_spacing)
+    y = _relative_coords(crosslines, crossline_spacing)
     grid_x, grid_y = np.meshgrid(x, y, indexing="ij")
-    grid_x = grid_x - grid_x.mean()
-    grid_y = grid_y - grid_y.mean()
-    x = x - x.mean()
-    y = y - y.mean()
     migrated = np.zeros((ni, nx, depth_count), dtype=np.float32)
     fold = np.zeros((ni, nx, depth_count), dtype=np.float64)
     aperture = float(aperture_m) if aperture_m is not None else None

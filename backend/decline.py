@@ -26,11 +26,16 @@ def fit_hyperbolic(t, q):
         return None
     qi0 = float(np.max(q))
     best = None
-    b_grid = np.linspace(0.1, 1.5, 57)
+    b_grid = np.linspace(0.0, 1.0, 41)
     di_grid = np.linspace(1e-4, 2.0, 200)
     for b in b_grid:
-        denom = 1.0 + (b * di_grid[:, None] * t[None, :])
-        model_unit = np.power(np.clip(denom, 1e-9, None), -1.0 / b)
+        if b <= 1e-9:
+            # b -> 0 is the exponential limit; the exponential fitter covers
+            # it, so reuse that shape instead of dividing by zero.
+            model_unit = np.exp(-np.outer(di_grid, t))
+        else:
+            denom = 1.0 + (b * di_grid[:, None] * t[None, :])
+            model_unit = np.power(np.clip(denom, 1e-9, None), -1.0 / b)
         num = np.sum(model_unit * q[None, :], axis=1)
         den = np.sum(model_unit * model_unit, axis=1)
         qi_vals = np.where(den > 0, num / den, qi0)
@@ -40,7 +45,10 @@ def fit_hyperbolic(t, q):
         sse = float(sse_all[idx])
         qi = float(max(qi_vals[idx], 1e-9))
         di = float(di_grid[idx])
-        qhat = qi * np.power(np.clip(1.0 + b * di * t, 1e-9, None), -1.0 / b)
+        if b <= 1e-9:
+            qhat = qi * np.exp(-di * t)
+        else:
+            qhat = qi * np.power(np.clip(1.0 + b * di * t, 1e-9, None), -1.0 / b)
         candidate = {"model": "hyperbolic", "qi": qi, "di": di, "b": float(b), "qhat": qhat, "sse": sse}
         if best is None or sse < best["sse"]:
             best = candidate

@@ -65,6 +65,10 @@ def time_to_depth_ms(
 ) -> np.ndarray:
     """Convert two-way time in ms to depth in metres."""
     values = np.asarray(times_ms, dtype=float)
+    if np.any(~np.isfinite(values)):
+        raise ValueError("times_ms must be finite")
+    if np.any(values < 0):
+        raise ValueError("times_ms must be non-negative")
     if kind == "constant":
         velocity = float(velocity_m_s or 0.0)
         return velocity * values / 2000.0

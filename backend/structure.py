@@ -13,8 +13,10 @@ except ImportError:
 
 try:
     from geostat import krige_grid
+    from volumetrics import _cell_area_m2
 except ImportError:
     from backend.geostat import krige_grid
+    from backend.volumetrics import _cell_area_m2
 
 
 def _axis(values: list[float], limit: int) -> list[float]:
@@ -136,10 +138,6 @@ def build_compartments(
     grid = np.asarray(depth_grid, dtype=float)
     if grid.ndim != 2 or grid.size == 0:
         raise ValueError("surface has no depth grid")
-    try:
-        from volumetrics import _cell_area_m2
-    except ImportError:
-        from backend.volumetrics import _cell_area_m2
     cell_area = _cell_area_m2(inline_spacing_m, crossline_spacing_m)
     base = None
     if base_depth_grid is not None:

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from backend.geostat import krige_grid
-from backend.migration3d import _decimate, kirchhoff_migrate
+from backend.migration3d import _decimate, _relative_coords, kirchhoff_migrate
 from backend.seismic import index_segy, parse_segy
 from backend.volumetrics import grv_from_depth_grid
 
@@ -96,3 +96,9 @@ def test_segy_signed_inline_header():
 
 def test_decimate_helpers_stable():
     assert _decimate([1, 2, 3], 10) == [1, 2, 3]
+
+
+def test_relative_coords_centered_and_spaced():
+    axis = _relative_coords([100, 101, 102], 25.0)
+    assert axis.tolist() == [-25.0, 0.0, 25.0]
+    assert np.diff(axis).tolist() == [25.0, 25.0]

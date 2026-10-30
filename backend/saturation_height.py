@@ -70,6 +70,11 @@ def fit_model(model_type: str, pc: np.ndarray, sw: np.ndarray,
     if kind == "brooks_corey":
         x, y = np.log(sw), np.log(pc)
         slope, intercept = np.polyfit(x, y, 1)
+        # Pc must fall as Sw rises, so the log-log slope is negative.
+        # A non-negative slope means the data violate the model; fail loudly
+        # instead of returning a clamped lambda with a garbage entry pressure.
+        if slope >= 0:
+            raise ValueError("brooks_corey needs monotonically decreasing Pc with Sw")
         lam = float(-1.0 / slope) if abs(slope) > 1e-12 else 1.0
         pe = float(np.exp(intercept))
         lam = max(lam, 1e-6)
