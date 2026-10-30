@@ -76,6 +76,20 @@ def test_eur_growing_series_stays_bounded():
     assert eur is not None and eur < 10_000_000
 
 
+def test_eur_truncates_at_economic_limit():
+    from datetime import date, timedelta
+
+    dates = [date(2020, 1, 1) + timedelta(days=30 * i) for i in range(24)]
+    rates = [1000.0 * 0.97 ** i for i in range(24)]
+    best = fit_best(dates, rates)
+    assert best is not None
+    full = compute_eur(best, q_limit=0.0)
+    cut = compute_eur(best, q_limit=50.0)
+    assert full is not None and cut is not None
+    assert cut <= full
+    assert compute_eur(best, q_limit=1e12) == pytest.approx(0.0)
+
+
 def test_hyperbolic_b_capped_at_unity():
     from datetime import date, timedelta
 
