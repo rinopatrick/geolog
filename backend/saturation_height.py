@@ -6,6 +6,9 @@ Supported empirical models:
 - Lambda: Sw = (1 + Pc/Pe)^(-lambda)
 - Thomeer: Sw = 1 - exp(-G * Pe / Pc)
 - Skelt-Harrison: Sw = (1 + (Pc/Pe)^n)^(-1/n)
+
+Brooks-Corey requires Pc to fall as Sw rises (negative log-log slope);
+non-monotonic input raises ValueError instead of returning a clamped lambda.
 """
 
 from __future__ import annotations
