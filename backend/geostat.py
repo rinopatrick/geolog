@@ -31,6 +31,14 @@ def _transform(points: np.ndarray, ratio: float, azimuth_deg: float) -> np.ndarr
     return np.column_stack([rotated_x, rotated_y, points[:, 2]])
 
 
+def _covariance_matrix(distances: np.ndarray, range_m: float, sill: float, nugget: float, model: str) -> np.ndarray:
+    """Stationary covariance between sample pairs from inter-sample distances."""
+    return float(sill) - _variogram(distances, range_m, sill, nugget, model)
+
+def _covariance_vector(distances: np.ndarray, range_m: float, sill: float, nugget: float, model: str) -> np.ndarray:
+    """Covariance between one estimation node and each neighbour sample."""
+    return np.asarray(float(sill) - _variogram(distances, range_m, sill, nugget, model), dtype=float)
+
 def krige_grid(
     points: np.ndarray,
     grid_inlines: list[float],
@@ -80,19 +88,24 @@ def krige_grid(
             chosen = np.argpartition(distances, neighbors - 1)[:neighbors]
         else:
             chosen = np.arange(len(distances))
+        local_coords = coordinates[chosen]
         local_distances = distances[chosen]
         local_values = z_values[chosen]
-        covariance = sill - _variogram(local_distances, range_m, sill, nugget, variogram_model)
-        covariance = np.asarray(covariance, dtype=float)
+        pair = np.sqrt(
+            np.sum((local_coords[:, None, :] - local_coords[None, :, :]) ** 2, axis=-1)
+        )
+        pair_cov = _covariance_matrix(pair, range_m, sill, nugget, variogram_model)
+        pair_cov = np.asarray(pair_cov, dtype=float)
+        node_cov = _covariance_vector(local_distances, range_m, sill, nugget, variogram_model)
         system = np.ones((len(chosen) + 1, len(chosen) + 1), dtype=float)
-        system[:-1, :-1] = covariance[:, None] + np.eye(len(chosen)) * 1e-9
+        system[:-1, :-1] = pair_cov + np.eye(len(chosen)) * 1e-9
         system[-1, -1] = 0.0
         target = np.ones(len(chosen) + 1, dtype=float)
-        target[:-1] = covariance
+        target[:-1] = node_cov
         try:
             weights = np.linalg.solve(system, target)
             estimates[node_index] = float(weights[:-1] @ local_values)
-            kriging_variance[node_index] = max(0.0, float(covariance[0] - weights[:-1] @ covariance))
+            kriging_variance[node_index] = max(0.0, float(pair_cov[0, 0] - weights[:-1] @ node_cov))
         except np.linalg.LinAlgError:
             weights = 1.0 / (local_distances + 1e-9)
             weights /= weights.sum()

@@ -3,6 +3,9 @@
 Supports IBM 4-byte float (format 1) and IEEE 4-byte float (format 5). It is a
 screening reader: the first `max_traces` traces are kept and the section is
 decimated before it is sent to the browser.
+
+Inline/crossline header words (bytes 189-196) are SEG-Y int32 and are read
+signed, so negative or unassigned coordinates parse correctly.
 """
 
 from __future__ import annotations
@@ -74,8 +77,8 @@ def parse_segy(content: bytes, max_traces: int = 2500) -> dict[str, Any]:
         if len(values) < ns:
             values = np.pad(values, (0, ns - len(values)), constant_values=np.nan)
         traces.append(values[:ns].copy())
-        inlines.append(int.from_bytes(header[188:192], "big"))
-        crosslines.append(int.from_bytes(header[192:196], "big"))
+        inlines.append(int.from_bytes(header[188:192], "big", signed=True))
+        crosslines.append(int.from_bytes(header[192:196], "big", signed=True))
 
     if not traces:
         raise ValueError("no traces could be read")
@@ -163,8 +166,8 @@ def index_segy(content: bytes, max_traces: int = 500000) -> dict[str, Any]:
             break
         offsets.append(offset + TRACE_HEADER)
         sample_counts.append(int(trace_ns))
-        inlines.append(int.from_bytes(header[188:192], "big"))
-        crosslines.append(int.from_bytes(header[192:196], "big"))
+        inlines.append(int.from_bytes(header[188:192], "big", signed=True))
+        crosslines.append(int.from_bytes(header[192:196], "big", signed=True))
         delays.append(int.from_bytes(header[108:110], "big", signed=True))
         offset += TRACE_HEADER + nbytes
     if not offsets:

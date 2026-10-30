@@ -89,25 +89,35 @@ def kirchhoff_migrate(
     x = np.asarray(inlines, dtype=float) * inline_spacing
     y = np.asarray(crosslines, dtype=float) * crossline_spacing
     grid_x, grid_y = np.meshgrid(x, y, indexing="ij")
+    grid_x = grid_x - grid_x.mean()
+    grid_y = grid_y - grid_y.mean()
+    x = x - x.mean()
+    y = y - y.mean()
     migrated = np.zeros((ni, nx, depth_count), dtype=np.float32)
-    weight_sum = np.zeros(depth_count, dtype=np.float64)
+    fold = np.zeros((ni, nx, depth_count), dtype=np.float64)
     aperture = float(aperture_m) if aperture_m is not None else None
     for row in range(ni):
         for column in range(nx):
             trace = cube[row, column]
-            if not np.any(trace):
+            if not np.any(np.isfinite(trace)) or not np.any(trace != 0):
                 continue
+            trace = np.nan_to_num(trace, nan=0.0)
             distance_xy = np.sqrt((grid_x - x[row]) ** 2 + (grid_y - y[column]) ** 2)
+            inside = np.ones_like(distance_xy, dtype=bool)
             if aperture is not None:
-                distance_xy = np.where(distance_xy <= aperture, distance_xy, np.inf)
+                inside = distance_xy <= aperture
             for depth_index, depth in enumerate(depths):
                 distance = np.sqrt(distance_xy ** 2 + depth ** 2)
                 travel_ms = 2000.0 * distance / velocity
                 sample = np.interp(travel_ms, times_ms, trace, left=0.0, right=0.0)
                 weight = depth / np.maximum(distance, 1e-6)
-                migrated[:, :, depth_index] += (sample * weight).astype(np.float32)
-                weight_sum[depth_index] += 1.0
-    migrated /= np.maximum(weight_sum[None, None, :], 1.0)
+                contribution = (sample * weight).astype(np.float64)
+                contribution[~inside] = 0.0
+                migrated[:, :, depth_index] += contribution.astype(np.float32)
+                fold[:, :, depth_index] += (weight * inside).astype(np.float64)
+    nonzero = fold > 1e-12
+    migrated[nonzero] = (migrated[nonzero] / fold[nonzero]).astype(np.float32)
+    migrated[~nonzero] = 0.0
     return {
         "cube": migrated,
         "inlines": inlines,

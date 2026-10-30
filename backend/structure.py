@@ -136,11 +136,11 @@ def build_compartments(
     grid = np.asarray(depth_grid, dtype=float)
     if grid.ndim != 2 or grid.size == 0:
         raise ValueError("surface has no depth grid")
-    if not inline_spacing_m or not crossline_spacing_m:
-        raise ValueError("surface needs inline/crossline spacing")
-    inline_step = float(np.median(np.diff(np.asarray(inlines, dtype=float)))) if len(inlines) > 1 else 1.0
-    crossline_step = float(np.median(np.diff(np.asarray(crosslines, dtype=float)))) if len(crosslines) > 1 else 1.0
-    cell_area = float(inline_spacing_m) * float(crossline_spacing_m) * max(1.0, inline_step) * max(1.0, crossline_step)
+    try:
+        from volumetrics import _cell_area_m2
+    except ImportError:
+        from backend.volumetrics import _cell_area_m2
+    cell_area = _cell_area_m2(inline_spacing_m, crossline_spacing_m)
     base = None
     if base_depth_grid is not None:
         base = np.asarray(base_depth_grid, dtype=float)

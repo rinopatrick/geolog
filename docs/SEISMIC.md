@@ -7,7 +7,8 @@
 
 - IBM 4-byte float (SEG-Y format code 1)
 - IEEE 4-byte float (format code 5)
-- 2D lines and 3D volumes with inline/crossline headers
+- 2D lines and 3D volumes with inline/crossline headers (bytes 189-196 read as
+  signed int32, so negative or unassigned coordinates parse correctly)
 
 Upload writes a JSON index sidecar next to the SEG-Y file. The index scans every
 trace header and stores byte offsets, sample counts, inlines and crosslines

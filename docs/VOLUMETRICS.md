@@ -4,8 +4,13 @@ A prospect is calculated from a depth-converted `SeismicSurface`:
 
 ```
 GRV = sum(max(0, contact_depth - top_depth)) * cell_area
-cell_area = inline_spacing_m * crossline_spacing_m * inline_step * crossline_step
+cell_area = inline_spacing_m * crossline_spacing_m
 ```
+
+`inlines`/`crosslines` on a surface are trace **labels** (they may start at an
+arbitrary offset such as 100, or be coordinates in metres); they never scale
+the area. Grid nodes are adjacent cells, so one node covers exactly one bin:
+`inline_spacing_m * crossline_spacing_m`.
 
 The surface must have `depth_grid`, `inline_spacing_m` and
 `crossline_spacing_m`. Time-only surfaces are rejected. Supply
