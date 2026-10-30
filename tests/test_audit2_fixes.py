@@ -63,6 +63,19 @@ def test_exponential_decline_rejects_growing_rates():
     assert best.get("d", best.get("di", 0.0)) <= 1e-3
 
 
+def test_eur_growing_series_stays_bounded():
+    from datetime import date, timedelta
+
+    dates = [date(2020, 1, 1) + timedelta(days=30 * i) for i in range(12)]
+    rates = [100.0 + 5.0 * i for i in range(12)]
+    best = fit_best(dates, rates)
+    assert best is not None
+    eur = compute_eur(best)
+    # Flat clamped fit over 10 years at ~155 bpd stays in a sane band;
+    # a runaway exponential would explode into the billions.
+    assert eur is not None and eur < 10_000_000
+
+
 def test_hyperbolic_b_capped_at_unity():
     from datetime import date, timedelta
 
