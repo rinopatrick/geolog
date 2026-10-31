@@ -54,6 +54,19 @@ porosity, Klinkenberg permeability, fluid saturations. No Pc curves,
 no SCAL — this validates transforms against laboratory plugs, not
 capillary-pressure behaviour.
 
+## Deterministic solver validation
+
+The VCL/PHIE kernels live in `backend/petro_deterministic.py` and are
+shared by the `compute_saturation` endpoint (same code path, not a copy).
+Validated against the Volve F-1 fixture:
+
+- IGR with gr_clean=15/gr_shale=135 reproduces reference VSH (MAE < 1e-3,
+  CSV rounding floor). Report headers cite /235, delivered curves use /120.
+- Density-neutron blend tracks reference PHIF (mean resid < 0.02, max < 0.08).
+- Archie Sw rank-tracks the reference (Spearman > 0.7 at Rw=0.02). Absolute
+  Sw needs the interpreter's Rw (not in delivered curves); Rw=0.1 default
+  saturates this interval to 1.0 — documented, not hidden.
+
 ## Saturation-height vs measured Pc
 
 `fit_model` is checked against DOE Pc-to-RP Sw–Pc pairs

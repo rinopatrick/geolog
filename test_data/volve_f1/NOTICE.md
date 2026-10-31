@@ -17,6 +17,9 @@ do not sell the material; do not present it in a misleading or distorted
 manner. This fixture is a small adapted extract used for test calibration
 only, with this notice preserved alongside it.
 
-VSH in the reference uses (GR-15)/(250-15). KLOGH is log-derived
+VSH in the reference output is (GR-15)/(135-15): a linear fit recovers
+gr_clean=15, gr_shale=135 with R²=1. Note the Volve report headers cite
+(GR-15)/235 — the delivered F-1 curves match /120, pinned by test so a
+fixture swap cannot slip by unnoticed. KLOGH is log-derived
 permeability, not core. This fixture validates consistency against a
 professional interpretation, not against laboratory core measurements.
