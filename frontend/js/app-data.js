@@ -1227,6 +1227,32 @@ Object.assign(GeoLogApp.prototype, {
         }
     },
 
+    async runAnomalyDetection() {
+        if (!this.currentWell) return GeoToast.warn('Select a well first.');
+        const threshold = Number(document.getElementById('anomalyThreshold')?.value) || 20;
+        GeoLoading.show('Detecting anomalies...');
+        try {
+            const result = await this._api(`/wells/${this.currentWell.id}/production/anomalies`, {
+                method: 'POST',
+                body: JSON.stringify({ threshold_pct: threshold }),
+            });
+            const status = document.getElementById('anomalyStatus');
+            if (status) status.textContent = `${result.anomaly_count} flags · trend ${result.trend} · ${result.fit_model} fit`;
+            const host = document.getElementById('anomalyTable');
+            if (host) {
+                host.innerHTML = result.anomalies?.length
+                    ? `<table class="px-table"><tr><th>Date</th><th>Kind</th><th>Actual</th><th>Forecast</th><th>Residual %</th></tr>${result.anomalies.map(a =>
+                        `<tr><td>${escapeHtml(a.date)}</td><td>${a.kind}</td><td>${a.actual}</td><td>${a.forecast}</td><td>${a.residual_pct}</td></tr>`).join('')}</table>`
+                    : 'No anomalies flagged in the test window.';
+            }
+            GeoToast.success('Anomaly detection complete');
+        } catch (e) {
+            GeoToast.error('Anomaly detection failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    },
+
     _drawProductionEconomicsChart(rows) {
         const canvas = document.getElementById('productionEconomicsCanvas');
         if (!canvas) return;
