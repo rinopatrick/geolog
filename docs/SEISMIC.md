@@ -91,6 +91,14 @@ converts a stored surface with a model from the same project, stores
 include a `depth_m` column. The Seismic panel can add constant models, convert
 the selected surface and toggle the map between time and depth.
 
+`POST /api/projects/{pid}/velocity-models/invert-checkshot` inverts
+interval velocities from checkshot `{depth, twt_ms}` pairs by piecewise
+least squares (slope/segment × 2000 = m/s), with optional `holdout` points
+reported as `holdout_rmse_m`. `save: true` stores the result as a `layers`
+model. Synthetic two-layer recovery is exact (2000/3000 m/s within 5%,
+residual < 1 m); field checkshots need monotonic, well-conditioned picks —
+garbage picks fail loudly instead of producing a wild model.
+
 ## Well-to-seismic tie
 
 `POST /api/wells/{wid}/seismic-ties` builds a synthetic trace from DT/RHOB,
