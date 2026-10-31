@@ -8,6 +8,17 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-30
+
+### Added
+
+- **Orphan-endpoint UI.** All production endpoints now reachable from the
+  workbench: cell P10/P90/probability heatmap with layer toggle (Seismic),
+  production allocation form with per-compartment split (Seismic),
+  forecast-vs-actual anomaly flags with CUSUM trend (Production panel),
+  and reference-CSV petrophysics calibration with save to PetroParams
+  (Petrophysics). E2E smoke asserts all four panel functions exist.
+
 ## [0.23.0] - 2026-10-30
 
 ### Added
