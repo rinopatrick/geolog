@@ -111,3 +111,29 @@ def test_cell_maps_rejects_oversize_workload():
         cell_posterior_maps(big, 2100, 25, 25, 0.2, 0.3, iterations=1000, seed=7)
     ok = cell_posterior_maps([[2000.0] * 40 for _ in range(40)], 2100, 25, 25, 0.2, 0.3, iterations=1000, seed=7)
     assert ok["rows"] == 40
+
+def test_lateral_mode_neighbors_move_together():
+    from backend.cell_maps import cell_posterior_maps
+    import numpy as np
+    grid = [[2000.0] * 16 for _ in range(16)]
+    kw = dict(contact_depth_m=2100, inline_spacing_m=25, crossline_spacing_m=25,
+              porosity=0.2, water_saturation=0.3, net_to_gross={"low": 0.4, "mode": 0.8, "high": 1.0},
+              iterations=300, seed=7)
+    ind = cell_posterior_maps(grid, correlation="none", **kw)
+    lat = cell_posterior_maps(grid, correlation="lateral", correlation_range_cells=6.0, **kw)
+    assert lat["inputs"]["correlation"] == "lateral"
+    # Lateral NTG moves together: the mean column map carries spatial
+    # structure (independent mode is perfectly flat on a flat gross grid),
+    # and neighbours correlate positively.
+    a = np.asarray(lat["mean_column_m"])
+    assert float(np.std(a)) > 0
+    horiz = float(np.corrcoef(a[:, :-1].ravel(), a[:, 1:].ravel())[0, 1])
+    assert horiz > 0.3
+
+def test_cell_maps_rejects_bad_correlation():
+    from backend.cell_maps import cell_posterior_maps
+    import pytest as _pt
+    with _pt.raises(ValueError, match="correlation"):
+        cell_posterior_maps([[2000.0]], 2100, 25, 25, 0.2, 0.3, correlation="kriging", seed=1)
+    with _pt.raises(ValueError, match="correlation_range_cells"):
+        cell_posterior_maps([[2000.0]], 2100, 25, 25, 0.2, 0.3, correlation="lateral", correlation_range_cells=0.0, seed=1)

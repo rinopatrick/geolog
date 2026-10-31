@@ -94,8 +94,12 @@ iterations and seed) and returns P10/P50/P90 hydrocarbon-column grids with
 a hydrocarbon-probability grid. Each cell runs the same triangular sampling
 as prospect Monte Carlo; the cell mean times cell count reconciles with
 prospect GRV math. Contact above the surface yields zero probability,
-not an error. Screening resolution: one value per grid cell, no lateral
-correlation between cells.
+not an error. Default `correlation: "none"` draws cells independently.
+With `correlation: "lateral"` (plus `correlation_range_cells`, default 8),
+each iteration shares one Gaussian NTG-multiplier field (exponential
+covariance, mean-preserving): neighbouring cells move together, matching
+the screening geology better than iid noise. Lateral mode costs one field
+synthesis per iteration and counts the same toward the SLO cap.
 
 **SLO:** cells × iterations is capped at 2,000,000 draws (≈1–2 s worst
 case; measured 50×50×5000 at ~0.5 s, 200×200×20000 at ~60 s without the

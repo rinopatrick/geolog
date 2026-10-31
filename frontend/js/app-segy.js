@@ -826,6 +826,7 @@ Object.assign(GeoLogApp.prototype, {
         const iterations = Number(document.getElementById('cellMapsIterations')?.value) || 1000;
         const seedRaw = document.getElementById('cellMapsSeed')?.value;
         const seed = seedRaw === '' || seedRaw == null ? null : Number(seedRaw);
+        const correlation = document.getElementById('cellMapsCorr')?.value || 'none';
         GeoLoading.show('Running cell posterior maps...');
         try {
             const result = await this._api(`/projects/${line.project_id}/prospect-maps`, {
@@ -834,7 +835,7 @@ Object.assign(GeoLogApp.prototype, {
                     surface_id: surface.id,
                     contact_depth_m: contact,
                     porosity, water_saturation: sw, net_to_gross: ntg,
-                    iterations, seed,
+                    iterations, seed, correlation,
                 }),
             });
             this._cellMapsResult = result;
