@@ -8,6 +8,17 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-31
+
+### Added
+
+- **Deterministic petrophysics kernels.** `backend/petro_deterministic.py` shares VCL/PHIE/Sw math with the endpoint; validated on Volve F-1 (IGR exact at 15/135, PHIE mean resid < 0.02, Sw rank-track > 0.7). Endpoint deduplicated onto kernels.
+- **NPD LOT sanity anchor.** 500 casing-shoe LOT records (`test_data/npd_lot/`, NLOD 2.0) with `lot_gradient_band`; default shmin gradient sits near data median.
+- **Checkshot velocity inversion.** `POST /api/projects/{pid}/velocity-models/invert-checkshot` fits interval velocities by piecewise least squares with holdout RMSE and optional save as `layers` model. Synthetic recovery exact.
+- **Lateral NTG correlation.** `prospect-maps` accepts `correlation: lateral` — one mean-preserving Gaussian field per iteration (exponential covariance via FFT) so neighbouring cells move together, plus UI toggle.
+- **Real click-through E2E.** `scripts/e2e_clickthrough.js` seeds a dedicated well then drives real button clicks (wedge, allocation, anomaly). Deterministic, zero-JS-error gate; chain runs in CI browser-smoke (`npm run e2e`).
+- **Monte Carlo SLO guard.** `prospect-maps` rejects cells x iterations above 2,000,000 with HTTP 400 (measured 200x200x20000 at ~60 s without cap).
+
 ## [0.27.0] - 2026-10-31
 
 ### Added
