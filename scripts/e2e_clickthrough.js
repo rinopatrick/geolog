@@ -33,15 +33,12 @@ async function api(base, path, opts = {}) {
     const projects = await api(base, '/api/projects/');
     const pid = projects[0]?.id ?? (await api(base, '/api/projects/', { method: 'POST', body: JSON.stringify({ name: 'E2E Prod' }) })).id;
     out.pid = pid;
-    const wells = await api(base, '/api/wells/');
-    let wid = wells[0]?.id;
-    if (!wid) {
-      const w = await api(base, '/api/wells/', { method: 'POST', body: JSON.stringify({ project_id: pid, name: 'E2E-01' }) });
-      wid = w.id;
-    }
+    // Always create a dedicated E2E well: demo-seeded wells have unknown
+    // history shapes that break the deterministic anomaly fixture below.
+    const w = await api(base, '/api/wells/', { method: 'POST', body: JSON.stringify({ project_id: pid, name: 'E2E-Clickthrough' }) });
+    const wid = w.id;
     out.wid = wid;
-    const hist = await api(base, `/api/wells/${wid}/production`);
-    if (hist.length < 12) {
+    {
       const start = new Date(2020, 0, 1);
       for (let i = 0; i < 24; i++) {
         const d = new Date(start.getTime() + i * 30 * 864e5).toISOString().slice(0, 10);
@@ -87,7 +84,10 @@ async function api(base, path, opts = {}) {
       { timeout: 30000 },
     );
     out.alloc = await page.textContent('#allocStatus');
-    // Production anomaly via UI click (nav may need reopen after rerender).
+    // Production anomaly via UI click. Select the seeded well first so the
+    // panel reads real production history; this mirrors the user flow.
+    await page.evaluate((id) => app.selectWell(id), out.wid);
+    await page.waitForFunction(() => !!window.app?.currentWell, { timeout: 15000 });
     await page.evaluate(() => {
       document.querySelectorAll('nav details').forEach(d => { d.open = true; });
     });

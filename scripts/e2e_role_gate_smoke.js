@@ -11,7 +11,8 @@ const { chromium } = require('playwright');
     if (m.type() === 'error') errors.push(m.text());
   });
 
-  await page.goto('http://localhost:8000', { waitUntil: 'domcontentloaded' });
+  const base = process.env.GEOLOG_BASE_URL || 'http://localhost:8000';
+  await page.goto(base, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(400);
 
   const roles = ['viewer', 'interpreter', 'admin'];
