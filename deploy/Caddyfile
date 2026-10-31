@@ -1,0 +1,27 @@
+# GeoLog production reverse proxy. Replace geolog.example.com with the
+# real hostname. Caddy obtains and renews the certificate automatically.
+{
+	auto_https off
+}
+
+geolog.example.com {
+	tls {
+		# Use `tls internal` only for a staging host without public DNS.
+	}
+
+	# Never let oversized bodies reach the app.
+	request_body {
+		max_size 256MB
+	}
+
+	reverse_proxy geolog:8000 {
+		# Preserve client address for rate limiting (needs GEOLOG_TRUST_PROXY=true).
+		header_up X-Forwarded-For {http.request.header.X-Forwarded-For}
+		header_up X-Forwarded-Proto {scheme}
+		header_up Host {host}
+
+		health_uri /api/health
+		health_interval 30s
+		health_timeout 5s
+	}
+}

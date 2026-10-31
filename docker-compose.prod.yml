@@ -1,0 +1,69 @@
+services:
+  geolog:
+    build: .
+    # No host ports published: traffic enters through the reverse proxy only.
+    expose:
+      - "8000"
+    environment:
+      PYTHONUNBUFFERED: "1"
+      GEOLOG_ENV: prod
+      AUTH_MODE: jwt
+      GEOLOG_SECRETS_SOURCE: docker-secrets
+      AUTH_JWT_SECRET_FILE: /run/secrets/auth_jwt_secret
+      AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:?set issuer}
+      AUTH_JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:?set audience}
+      AUTH_JWT_JWKS_URL: ${AUTH_JWT_JWKS_URL:?set jwks url}
+      GEOLOG_REQUIRE_HTTPS: "true"
+      GEOLOG_TRUST_PROXY: "true"
+      GEOLOG_DB_PATH: /app/backend/data/geolog.db
+      GEOLOG_ARTIFACT_DIR: /app/backend/data/artifacts
+      GEOLOG_WORKERS: ${GEOLOG_WORKERS:-2}
+    secrets:
+      - auth_jwt_secret
+    volumes:
+      - geolog-data:/app/backend/data
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2).status < 500 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  migrate:
+    build: .
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    environment:
+      GEOLOG_ENV: prod
+      GEOLOG_SECRETS_SOURCE: docker-secrets
+      GEOLOG_DB_PATH: /app/backend/data/geolog.db
+      GEOLOG_ARTIFACT_DIR: /app/backend/data/artifacts
+    volumes:
+      - geolog-data:/app/backend/data
+    # Migration failures must stop the deploy, not start old code on new schema.
+    restart: "no"
+
+  proxy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      geolog:
+        condition: service_healthy
+    restart: unless-stopped
+
+secrets:
+  auth_jwt_secret:
+    file: ./secrets/auth_jwt_secret
+
+volumes:
+  geolog-data:
+  caddy-data:
+  caddy-config:
