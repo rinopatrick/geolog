@@ -5,6 +5,9 @@ on:
     branches: [main]
   push:
     branches: [main]
+  schedule:
+    # Nightly backup-drill + attestation evidence, independent of pushes.
+    - cron: "0 2 * * *"
   workflow_dispatch:
 
 permissions:

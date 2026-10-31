@@ -149,6 +149,16 @@ jobs:
       - name: Browser smoke
         run: npm run e2e
 
+      - name: Validate production compose
+        env:
+          AUTH_JWT_ISSUER: https://idp.example.com/
+          AUTH_JWT_AUDIENCE: geolog-api
+          AUTH_JWT_JWKS_URL: https://idp.example.com/.well-known/jwks.json
+        run: |
+          docker compose -f docker-compose.prod.yml config > /dev/null
+          bash -n scripts/nightly_backup.sh
+          echo "prod compose + nightly script OK"
+
       - name: Stop API
         if: always()
         run: |
