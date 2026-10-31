@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, the API is not yet stable.
 
+## [Unreleased]
+
+## [0.26.0] - 2026-10-31
+
+### Added
+
+- **SCAL Pc fixtures pin saturation-height limits.** Sw–Pc pairs from the
+  DOE Pc-to-RP dataset (10.18141/1998892, GFDL, `test_data/scal_pc/`):
+  Berea and Viking sandstones fit Brooks-Corey with R² ≥ 0.8, while
+  bimodal Tuscaloosa scores R² < 0.5 — enforced by test
+  (`tests/test_sat_height_scal.py`). The model demonstrably knows when
+  it does not apply.
+
 ## [0.25.0] - 2026-10-31
 
 ### Added
