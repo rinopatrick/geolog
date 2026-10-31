@@ -213,6 +213,38 @@ Object.assign(GeoLogApp.prototype, {
         }
     },
 
+    async runAllocation() {
+        const projectId = this._segyLine?.project_id;
+        if (!projectId) return GeoToast.warn('Load a seismic line first.');
+        const total = Number(document.getElementById('allocTotalRate')?.value);
+        if (!(total >= 0)) return GeoToast.warn('Enter a total rate in bpd.');
+        let compartments;
+        try {
+            compartments = JSON.parse(document.getElementById('allocKh')?.value || '[]');
+        } catch {
+            return GeoToast.warn('kh JSON is invalid.');
+        }
+        GeoLoading.show('Allocating production...');
+        try {
+            const result = await this._api(`/projects/${projectId}/production-allocation`, {
+                method: 'POST',
+                body: JSON.stringify({ total_rate_bpd: total, compartments, seed: 7 }),
+            });
+            const status = document.getElementById('allocStatus');
+            if (status) status.textContent = `allocated ${result.allocated_bbl ?? result.allocated_bpd} bpd · ${result.method}`;
+            const host = document.getElementById('allocList');
+            if (host) {
+                host.innerHTML = (result.allocations || []).map(a =>
+                    `<span style="margin-right:14px">C${escapeHtml(String(a.id))} · ${Number(a.rate_bpd).toLocaleString()} bpd (${(Number(a.fraction) * 100).toFixed(1)}%)</span>`).join('') || 'No compartments.';
+            }
+            GeoToast.success('Allocation complete');
+        } catch (e) {
+            GeoToast.error('Allocation failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    },
+
     async createProspect() {
         const projectId = this._segyLine?.project_id;
         if (!projectId) return GeoToast.warn('Load a seismic line first.');

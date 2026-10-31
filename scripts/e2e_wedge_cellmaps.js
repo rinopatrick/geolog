@@ -46,7 +46,14 @@ const { chromium } = require('playwright');
       };
       app._drawCellMaps();
       checks.cellmaps = true;
-      return { ok: checks.switched && checks.drawn && checks.canvas && checks.table && checks.cellmaps, checks };
+      app._wedgeResult = null;
+      try { app.runAllocation = app.runAllocation || null; checks.allocFn = typeof app.runAllocation === 'function';
+      if (!checks.allocFn) throw new Error('runAllocation missing'); } catch (e) { checks.allocFn = false; }
+      try { checks.anomalyFn = typeof app.runAnomalyDetection === 'function';
+      if (!checks.anomalyFn) throw new Error('runAnomalyDetection missing'); } catch (e) { checks.anomalyFn = false; }
+      try { checks.calibFn = typeof app.runPetroCalibration === 'function';
+      if (!checks.calibFn) throw new Error('runPetroCalibration missing'); } catch (e) { checks.calibFn = false; }
+      return { ok: checks.switched && checks.drawn && checks.canvas && checks.table && checks.cellmaps && checks.allocFn && checks.anomalyFn && checks.calibFn, checks };
     } catch (e) {
       return { ok: false, reason: e.message };
     }

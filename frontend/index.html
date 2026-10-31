@@ -545,6 +545,9 @@
                     <div class="form-row"><label>Sw cutoff variation ±%</label><input type="number" id="sensSwCutPct" value="15" step="5" min="0" max="95"></div>
                     <button class="btn-primary" data-role-required="interpreter" data-action="app.runSensitivity" title="Role required: Interpreter"><i data-lucide="play"></i> Run Sensitivity</button>
                     <button class="btn-sm" data-role-required="interpreter" data-action="app.runPetroUncertainty" title="Role required: Interpreter"><i data-lucide="chart-spline"></i> Curve uncertainty</button>
+                    <button class="btn-sm" data-role-required="interpreter" data-action="app.runPetroCalibration" title="Fit gr_clean/gr_shale/phi_sh against reference curves"><i data-lucide="sliders-horizontal"></i> Calibrate vs reference</button>
+                    <input type="file" id="calibrationFileInput" accept=".csv" style="display:none">
+                    <span id="calibrationStatus" class="toolbar-hint"></span>
                 </div>
                 <div id="sensResults" class="petro-results">
                     <p style="color:#8b949e">Set parameters in Petrophysics tab, then run sensitivity analysis.</p>
@@ -889,6 +892,15 @@
                     <canvas id="productionEconomicsCanvas" width="1000" height="260" style="margin-top:8px"></canvas>
                 </div>
                 <div id="productionTable" class="stats-container"></div>
+                <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:10px">
+                    <div class="toolbar-group" style="margin-bottom:8px"><label>Anomaly Detection</label><span class="toolbar-hint">Forecast-vs-actual flags + CUSUM trend</span></div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                        <label style="font-size:12px">Threshold %<input id="anomalyThreshold" type="number" min="1" max="200" value="20" step="1" style="width:80px"></label>
+                        <button class="btn-sm" data-action="app.runAnomalyDetection"><i data-lucide="alert-triangle"></i> Detect anomalies</button>
+                        <span id="anomalyStatus" class="toolbar-hint"></span>
+                    </div>
+                    <div id="anomalyTable" style="margin-top:8px;font-size:12px;color:#c9d1d9"></div>
+                </div>
             </div>
         </div>
 
@@ -1485,6 +1497,14 @@
                         <span id="prospectStatus" class="toolbar-hint"></span>
                     </div>
                     <div id="prospectList" style="font-size:12px;color:#8b949e;margin-top:6px"></div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+                        <label class="toolbar-hint">Allocation</label>
+                        <input id="allocTotalRate" type="number" min="0" placeholder="total bpd" style="width:100px">
+                        <input id="allocKh" placeholder='kh JSON e.g. [{"id":1,"kh_md_m":500}]' style="min-width:220px" value='[{"id":1,"kh_md_m":500},{"id":2,"kh_md_m":300}]'>
+                        <button class="btn-sm" data-action="app.runAllocation"><i data-lucide="pie-chart"></i> Allocate</button>
+                        <span id="allocStatus" class="toolbar-hint"></span>
+                    </div>
+                    <div id="allocList" style="font-size:12px;color:#8b949e;margin-top:6px"></div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
                         <input id="fenceStart" placeholder="start inline,xline" style="width:150px">
                         <input id="fenceEnd" placeholder="end inline,xline" style="width:150px">

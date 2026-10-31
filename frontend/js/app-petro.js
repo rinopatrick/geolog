@@ -953,6 +953,52 @@ Object.assign(GeoLogApp.prototype, {
     }
 ,
 
+    async runPetroCalibration() {
+        if (!this.currentWell) return GeoToast.warn('No well selected');
+        const picker = document.getElementById('calibrationFileInput');
+        if (!picker) return GeoToast.warn('Calibration file input missing.');
+        if (!picker._bound) {
+            picker._bound = true;
+            picker.addEventListener('change', () => this.runPetroCalibrationFile(picker));
+        }
+        picker.click();
+    },
+
+    async runPetroCalibrationFile(input) {
+        const file = input?.files?.[0];
+        input.value = '';
+        if (!file || !this.currentWell) return;
+        GeoLoading.show('Calibrating petrophysics...');
+        try {
+            const text = await file.text();
+            const lines = text.trim().split(/\r?\n/);
+            const header = lines[0].split(',').map(s => s.trim().toLowerCase());
+            const need = ['gr', 'vsh_ref', 'phi_raw', 'phi_ref'];
+            const missing = need.filter(c => !header.includes(c));
+            if (missing.length) throw new Error('CSV needs columns: ' + missing.join(', '));
+            const col = (name) => header.indexOf(name);
+            const rows = lines.slice(1).map(l => l.split(',').map(Number)).filter(r => r.every(Number.isFinite));
+            if (rows.length < 5) throw new Error('Need at least 5 valid reference rows.');
+            const pick = (name) => rows.map(r => r[col(name)]);
+            const result = await this._api(`/wells/${this.currentWell.id}/petro-calibration`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    gr: pick('gr'), vsh_ref: pick('vsh_ref'),
+                    phi_raw: pick('phi_raw'), phi_ref: pick('phi_ref'), save: true,
+                }),
+            });
+            const status = document.getElementById('calibrationStatus');
+            if (status) {
+                status.textContent = `gr_clean ${result.vsh.gr_clean} · gr_shale ${result.vsh.gr_shale} · phi_sh ${result.phi_sh.phi_sh} · MAE ${result.vsh.mae}/${result.phi_sh.mae} (saved)`;
+            }
+            GeoToast.success('Calibration saved to PetroParams');
+        } catch (e) {
+            GeoToast.error('Calibration failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    },
+
     async runPetroUncertainty() {
         if (!this.currentWell) return GeoToast.warn('No well selected');
         const iterations = parseInt(document.getElementById('sensIter')?.value || '200', 10);
