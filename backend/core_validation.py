@@ -71,3 +71,25 @@ def sw_baseline(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "p90_sw_pct": round(float(np.percentile(sw, 90)), 2),
         "n": len(sw),
     }
+
+
+def lot_gradient_band(rows: list[dict[str, Any]], emw_col: str = "wlbLotMudDencity") -> dict[str, Any]:
+    """Summarise LOT mud-equivalents as Shmin-gradient band (psi/ft)."""
+    vals = []
+    for row in rows:
+        try:
+            v = float(row[emw_col])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if np.isfinite(v) and v > 0:
+            vals.append(v * 0.4335)
+    arr = np.asarray(vals, dtype=float)
+    if len(arr) < 5:
+        raise ValueError("need at least 5 valid LOT mud-equivalent values")
+    return {
+        "n": len(arr),
+        "median_psi_ft": round(float(np.median(arr)), 4),
+        "p10_psi_ft": round(float(np.percentile(arr, 10)), 4),
+        "p90_psi_ft": round(float(np.percentile(arr, 90)), 4),
+        "unit": "psi/ft",
+    }

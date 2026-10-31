@@ -23,6 +23,16 @@ three bands. The existing **Run Sensitivity** action remains the net-pay Monte
 Carlo with driver ranking. The deterministic multimineral solver remains
 available from the Petrophysics toolbar.
 
+## Shmin sanity anchor (NPD LOT)
+
+Casing-shoe LOT mud equivalents from the NPD FactMaps
+`wellbore_casing_and_lot` layer (`test_data/npd_lot/`, NLOD 2.0)
+convert to a Shmin-gradient band via `lot_gradient_band` (emw × 0.4335).
+On the 500-record subset the median sits near the default
+`shmin_gradient` assumption — an anchor, not a calibration: shoe tests
+are shallow and do not replace a well-specific LOT/XLOT/DFIT at
+reservoir depth.
+
 ## Calibration against reference interpretation
 
 `POST /api/wells/{wid}/petro-calibration` fits GR endpoints and shale
