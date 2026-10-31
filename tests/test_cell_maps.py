@@ -103,3 +103,11 @@ def test_prospect_maps_endpoint_rejects_and_accepts():
     assert data["surface_id"] == surface["id"]
     assert len(data["p50_column_m"]) == len(data["hydrocarbon_probability"])
     assert min(min(r) for r in data["p10_column_m"]) <= max(max(r) for r in data["p90_column_m"])
+
+def test_cell_maps_rejects_oversize_workload():
+    from backend.cell_maps import cell_posterior_maps
+    big = [[2000.0] * 200 for _ in range(200)]
+    with pytest.raises(ValueError, match="workload too large"):
+        cell_posterior_maps(big, 2100, 25, 25, 0.2, 0.3, iterations=1000, seed=7)
+    ok = cell_posterior_maps([[2000.0] * 40 for _ in range(40)], 2100, 25, 25, 0.2, 0.3, iterations=1000, seed=7)
+    assert ok["rows"] == 40

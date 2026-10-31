@@ -97,6 +97,11 @@ prospect GRV math. Contact above the surface yields zero probability,
 not an error. Screening resolution: one value per grid cell, no lateral
 correlation between cells.
 
+**SLO:** cells × iterations is capped at 2,000,000 draws (≈1–2 s worst
+case; measured 50×50×5000 at ~0.5 s, 200×200×20000 at ~60 s without the
+cap). Oversize requests fail fast with HTTP 400 — downsample the grid or
+lower iterations first.
+
 ## Production allocation
 
 `POST /api/projects/{pid}/production-allocation` splits a total rate

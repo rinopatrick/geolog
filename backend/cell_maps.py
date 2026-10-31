@@ -46,6 +46,16 @@ def cell_posterior_maps(
     sw_range = normalize_range(water_saturation, "water_saturation", 0.3)
     ntg_range = normalize_range(net_to_gross, "net_to_gross", 1.0)
 
+    # SLO guard: cells x iterations bounded so the endpoint answers in
+    # seconds, not minutes. Measured: 50x50x5000 ~0.5s; 200x200x20000 ~60s.
+    # Cap at 2M draws (~1-2s worst case); larger jobs must downsample first.
+    workload = int(grid.shape[0]) * int(grid.shape[1]) * iterations
+    if workload > 2_000_000:
+        raise ValueError(
+            f"workload too large: {workload:,} cell-draws exceeds 2,000,000; "
+            "reduce grid resolution or iterations"
+        )
+
     base = None
     if base_depth_grid is not None:
         base = np.asarray(base_depth_grid, dtype=float)
