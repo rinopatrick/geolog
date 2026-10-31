@@ -53,3 +53,27 @@ attribution to GeoProvider — see `NOTICE.md`). Routine plugs only:
 porosity, Klinkenberg permeability, fluid saturations. No Pc curves,
 no SCAL — this validates transforms against laboratory plugs, not
 capillary-pressure behaviour.
+
+## Saturation-height vs measured Pc
+
+`fit_model` is checked against DOE Pc-to-RP Sw–Pc pairs
+(`test_data/scal_pc/`, GFDL — see `NOTICE.md`): Berea and Viking
+sandstones fit Brooks-Corey with R² ≥ 0.8, while bimodal Tuscaloosa
+scores R² < 0.5 by test. When neither clean curve fits, the saturation-height
+models must be treated as screening, not calibrated.
+
+## Plug transform check
+
+`POST /api/wells/{wid}/plug-transform-check` is the stateless complement
+to the DB-backed `core-calibration` endpoint: it fits a log-linear
+porosity-permeability transform on a plug table alone (no log run
+needed). Body: `{plugs: [{porosity_pct, perm_klinkenberg_md, sw_pct,
+...}]}`. Returns slope/intercept/R²/residual spread plus the laboratory
+Sw baseline. On the RealPore NCS fixture (300 plugs, well 35/11-7):
+R² 0.53, residual σ 0.10 log10, median Sw 57.7%.
+
+Reference: RealPore NCS subset (`test_data/realpore_ncs/`, CC-BY 4.0,
+attribution to GeoProvider — see `NOTICE.md`). Routine plugs only:
+porosity, Klinkenberg permeability, fluid saturations. No Pc curves,
+no SCAL — this validates transforms against laboratory plugs, not
+capillary-pressure behaviour.
