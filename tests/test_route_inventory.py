@@ -220,6 +220,7 @@ EXPECTED_ROUTES = [
     "POST /api/projects/{pid}/prospects",
     "POST /api/projects/{pid}/seismic",
     "POST /api/projects/{pid}/velocity-models",
+    "POST /api/projects/{pid}/velocity-models/invert-checkshot",
     "POST /api/projects/{pid}/velocity-models/{model_id}/convert",
     "POST /api/report-templates",
     "POST /api/seismic/wedge-model",

@@ -14,11 +14,13 @@ try:
     from database import get_db
     from models import Project, SeismicSurface, VelocityModel
     from velocity import normalize_model, time_to_depth_ms
+    from velocity_inversion import invert_checkshot
 except ImportError:
     from backend.acl import require_project_access
     from backend.database import get_db
     from backend.models import Project, SeismicSurface, VelocityModel
     from backend.velocity import normalize_model, time_to_depth_ms
+    from backend.velocity_inversion import invert_checkshot
 
 router = APIRouter(prefix="/api", tags=["velocity"])
 
@@ -151,3 +153,44 @@ def convert_times(pid: int, model_id: int, data: dict, request: Request, db: Ses
         "times_ms": times.tolist(),
         "depths_m": [round(float(value), 3) for value in depths],
     }
+
+@router.post("/projects/{pid}/velocity-models/invert-checkshot", status_code=201)
+def invert_checkshot_model(pid: int, data: dict, request: Request, db: Session = Depends(get_db)):
+    """Invert interval velocities from checkshot pairs; optionally save."""
+    _project(db, pid)
+    require_project_access(db, request, pid, write=True)
+    points = data.get("checkshot")
+    if not isinstance(points, list) or not points:
+        raise HTTPException(400, "checkshot must be a non-empty list")
+    try:
+        n_layers = int(data.get("n_layers", 2))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "n_layers must be an integer")
+    holdout = data.get("holdout")
+    if holdout is not None and not isinstance(holdout, list):
+        raise HTTPException(400, "holdout must be a list")
+    name = str(data.get("name") or "checkshot inversion").strip() or "checkshot inversion"
+    try:
+        result = invert_checkshot(points, n_layers=n_layers, holdout=holdout)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    saved = None
+    if bool(data.get("save")):
+        try:
+            normalized = normalize_model({
+                "name": name, "kind": "layers", "layers": result["layers"],
+            })
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        item = VelocityModel(
+            project_id=pid,
+            name=normalized["name"],
+            kind=normalized["kind"],
+            velocity_m_s=normalized["velocity_m_s"],
+            layers_json=json.dumps(normalized["layers"]),
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        saved = _model(item)
+    return {"inversion": result, "saved_model": saved}
