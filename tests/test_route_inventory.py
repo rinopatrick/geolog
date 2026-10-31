@@ -300,6 +300,7 @@ EXPECTED_ROUTES = [
     "POST /api/wells/{wid}/petro-calibration",
     "POST /api/wells/{wid}/petro-params",
     "POST /api/wells/{wid}/petro-uncertainty",
+    "POST /api/wells/{wid}/plug-transform-check",
     "POST /api/wells/{wid}/probability-plot",
     "POST /api/wells/{wid}/production",
     "POST /api/wells/{wid}/production/anomalies",

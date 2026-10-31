@@ -159,12 +159,16 @@ try:
         fit_exponential as _fit_exponential_decline,
         fit_hyperbolic as _fit_hyperbolic_decline,
     )
+    from core_validation import fit_poro_perm, sw_baseline
+    from petro_calibration import calibrate_phi_sh, calibrate_vsh
 except ImportError:
     from backend.decline import (
         compute_eur as _compute_eur,
         fit_exponential as _fit_exponential_decline,
         fit_hyperbolic as _fit_hyperbolic_decline,
     )
+    from backend.core_validation import fit_poro_perm, sw_baseline
+    from backend.petro_calibration import calibrate_phi_sh, calibrate_vsh
 _trapezoid = getattr(np, "trapezoid", None) or getattr(np, "trapz")
 
 
@@ -837,10 +841,6 @@ def calibrate_petro_params(wid: int, data: dict, db: Session = Depends(get_db)):
     see backend/petro_calibration.py. Returns fitted params + MAE vs defaults.
     """
     import numpy as _np
-    try:
-        from petro_calibration import calibrate_phi_sh, calibrate_vsh
-    except ImportError:
-        from backend.petro_calibration import calibrate_phi_sh, calibrate_vsh
     tlock = _get_template_lock(wid)
     if tlock.get("locked"):
         raise HTTPException(423, "Template is locked; unlock required before edits")
@@ -877,6 +877,30 @@ def calibrate_petro_params(wid: int, data: dict, db: Session = Depends(get_db)):
         _log_audit(db, "calibrate_petro_params", "well", entity_id=wid, well_id=wid,
                    details=f"gr_clean={values['gr_clean']};gr_shale={values['gr_shale']};phi_sh={values['phi_sh']}")
     return {"vsh": vsh_fit, "phi_sh": phi_fit, "saved": saved}
+
+@router.post("/{wid}/plug-transform-check")
+def validate_against_core(wid: int, data: dict, db: Session = Depends(get_db)):
+    """Validate log-derived transforms against laboratory plug rows.
+
+    Stateless complement to core-calibration (which depth-matches core to
+    log curves in the DB): this checks a plug table on its own. Body:
+    {plugs: [{porosity_pct, perm_klinkenberg_md, sw_pct, ...}]}.
+    Returns the fitted log-linear poro-perm transform, its R2 and residual
+    spread, plus the laboratory Sw baseline. Reference: RealPore NCS fixture.
+    """
+    if not db.query(Well.id).filter(Well.id == wid).first():
+        raise HTTPException(404, "Well not found")
+    plugs = data.get("plugs")
+    if not isinstance(plugs, list) or not plugs:
+        raise HTTPException(400, "plugs must be a non-empty list")
+    if len(plugs) > 20000:
+        raise HTTPException(400, "plugs limited to 20000 rows")
+    try:
+        transform = fit_poro_perm(plugs)
+        sw = sw_baseline(plugs)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"well_id": wid, "poro_perm_transform": transform, "sw_baseline": sw}
 
 
 

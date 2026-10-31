@@ -1,0 +1,301 @@
+seq,well,npdid,depth_m,porosity_pct,perm_klinkenberg_md,so_pct,sw_pct,grain_density,lithology,clean_lithology,grain_size
+208831,35_11-7,1979,1801.5,27.6,0.507,4.6,44,2.67,sandstone,sandstone,fine grained
+208835,35_11-7,1979,1802.5,23.3,0.505,14.5,42.8,2.66,sandstone,sandstone,fine grained
+208839,35_11-7,1979,1803.5,23.1,0.497,17.9,39,2.66,sandstone,sandstone,fine grained medium grained
+208844,35_11-7,1979,1804.75,16.7,0.341,29.2,41.1,2.64,sandstone,sandstone,very fine grained fine grained
+208847,35_11-7,1979,1805.5,18.4,0.341,24.8,46.6,2.66,sandstone,sandstone,very fine grained fine grained
+208851,35_11-7,1979,1806.5,19.2,0.463,27.3,42.7,2.64,sandstone,sandstone,very fine grained fine grained
+208855,35_11-7,1979,1807.5,16.6,0.342,10,54.1,2.66,sandstone,sandstone,very fine grained fine grained
+208859,35_11-7,1979,1808.5,14.7,0.342,12.8,73.2,2.62,sandstone,sandstone,very fine grained fine grained
+208863,35_11-7,1979,1809.5,17,0.445,23.3,61.3,2.61,sandstone,sandstone,very fine grained fine grained
+208867,35_11-7,1979,1810.5,22.3,0.506,42.2,24,2.68,sandstone,sandstone,fine grained
+208871,35_11-7,1979,1811.5,31.3,0.998,13.9,46,2.64,sandstone,sandstone,medium grained
+208876,35_11-7,1979,1812.75,30.3,1,50.7,17.9,2.7,sandstone,sandstone,medium grained
+208879,35_11-7,1979,1813.5,28.8,0.506,37.2,33.7,2.68,sandstone,sandstone,fine grained
+208883,35_11-7,1979,1814.5,23.9,0.505,40.3,22.8,2.72,sandstone,sandstone,fine grained
+208887,35_11-7,1979,1815.5,25.8,0.499,33.5,34.8,2.66,sandstone,sandstone,fine grained
+208891,35_11-7,1979,1816.5,22.2,0.357,47.4,27.3,2.66,siltstone,siltstone,grained
+208895,35_11-7,1979,1817.50.,19.9,0.34,18.5,59.6,2.67,siltstone,siltstone,grained
+208899,35_11-7,1979,1818.5,23.4,0.438,19,53.6,2.69,sandstone,sandstone,very fine grained fine grained
+208903,35_11-7,1979,1819.5,20.3,0.341,17.8,60.9,2.68,sandstone,sandstone,very fine grained fine grained
+208907,35_11-7,1979,1820.5,19.7,0.341,5,55.1,2.66,sandstone,sandstone,very fine grained fine grained
+208911,35_11-7,1979,1821.5,15.6,0.342,11.2,81.2,2.67,sandstone,sandstone,very fine grained fine grained
+208919,35_11-7,1979,1823.5,16,0.341,14.5,71.2,2.66,sandstone,sandstone,very fine grained fine grained
+208923,35_11-7,1979,1824.5,20.4,0.342,13.4,63.9,2.65,sandstone,sandstone,very fine grained fine grained
+208927,35_11-7,1979,1825.5,17.8,0.341,15.9,65.9,2.64,sandstone,sandstone,very fine grained fine grained
+208931,35_11-7,1979,1826.5,18.5,0.339,18.3,64.7,2.63,sandstone,sandstone,very fine grained fine grained
+208934,35_11-7,1979,1827.25,17.7,0.339,15.9,62.4,2.64,sandstone,sandstone,very fine grained fine grained
+208950,35_11-7,1979,1831.25,23.1,0.504,29,49.5,2.63,sandstone,sandstone,fine grained medium grained
+208954,35_11-7,1979,1832.25,21.2,0.504,24.4,43,2.62,sandstone,sandstone,fine grained
+208958,35_11-7,1979,1833.25,29.1,0.506,16.2,47.2,2.61,sandstone,sandstone,medium grained
+208962,35_11-7,1979,1834.25,20.7,0.504,31.9,47.8,2.62,sandstone,sandstone,fine grained medium grained
+208966,35_11-7,1979,1835.25,19.7,0.463,26.1,33,2.63,,,fine grained
+208970,35_11-7,1979,1836.25,19,0.505,11.4,59.6,2.65,sandstone,sandstone,fine grained medium grained
+208979,35_11-7,1979,1841.75,31.5,0.509,20.2,40.9,2.67,sandstone,sandstone,fine grained
+208982,35_11-7,1979,1842.5,25.1,0.504,29.6,39.8,2.68,sandstone,sandstone,very fine grained fine grained
+208986,35_11-7,1979,1843.5,29.6,0.512,25,36.4,2.7,sandstone,sandstone,fine grained
+208990,35_11-7,1979,1844.5,34.5,0.998,25.1,34.2,2.65,sandstone,sandstone,fine grained medium grained
+208994,35_11-7,1979,1845.5,30,0.993,12.1,62.8,2.65,sandstone,sandstone,medium grained
+208998,35_11-7,1979,1846.5,27.8,0.995,12.1,51.1,2.62,sandstone,sandstone,medium coarse grained
+209002,35_11-7,1979,1847.5,23.3,0.988,11,59.8,2.66,sandstone,sandstone,fine grained medium grained
+209006,35_11-7,1979,1848.5,31.1,0.995,10.7,67.9,2.65,sandstone,sandstone,medium coarse grained
+209010,35_11-7,1979,1849.5,29.2,0.994,12.1,49,2.64,sandstone,sandstone,medium grained
+209014,35_11-7,1979,1850.5,30.5,0.994,7.2,47.9,2.62,sandstone,sandstone,fine grained medium grained
+209018,35_11-7,1979,1851.5,27.5,0.99,16.5,63.5,2.63,sandstone,sandstone,fine grained medium grained
+209026,35_11-7,1979,1853.5,33.3,0.994,31.6,21.7,2.63,sandstone,sandstone,fine grained medium grained
+209030,35_11-7,1979,1854.5,27.4,0.994,1.2,66.3,2.62,sandstone,sandstone,fine grained medium grained
+209034,35_11-7,1979,1855.5,27.7,0.992,2.2,68,2.63,sandstone,sandstone,fine grained pebble (-ly)
+209038,35_11-7,1979,1856.5,27.4,0.987,1.3,59.2,2.64,sandstone,sandstone,fine grained
+209042,35_11-7,1979,1857.5,30.5,0.987,1.6,61.9,2.64,sandstone,sandstone,fine grained
+209046,35_11-7,1979,1858.5,28.7,0.507,0.3,64.7,2.67,sandstone,sandstone,fine grained
+209054,35_11-7,1979,1860.5,26.4,0.505,2.7,59.3,2.65,sandstone,sandstone,very fine grained fine grained
+209058,35_11-7,1979,1861.5,23.7,0.99,5.5,55.4,2.6,sandstone,sandstone,fine grained medium grained
+209062,35_11-7,1979,1862.5,27.4,0.992,2.2,59.3,2.65,sandstone,sandstone,fine grained medium grained
+209066,35_11-7,1979,1863.5,23.2,0.981,,78,2.59,sandstone,sandstone,fine grained medium grained
+209070,35_11-7,1979,1864.5,30.6,0.99,,80,2.65,sandstone,sandstone,fine grained medium grained
+209074,35_11-7,1979,1865.5,33.4,0.993,,72.9,2.65,sandstone,sandstone,fine grained medium grained
+209078,35_11-7,1979,1866.5,34.2,0.993,,47.9,2.64,sandstone,sandstone,medium grained
+209082,35_11-7,1979,1868.5,32.5,0.992,,73.1,2.66,sandstone,sandstone,medium grained
+209091,35_11-7,1979,1869.5,25.7,0.505,,77.7,2.64,sandstone,sandstone,medium grained
+209099,35_11-7,1979,1871.5,31.8,0.506,,74.9,2.65,sandstone,sandstone,medium grained
+209103,35_11-7,1979,1872.5,30.7,0.504,0.3,75.1,2.65,sandstone,sandstone,medium grained
+209107,35_11-7,1979,1873.5,34.4,0.989,,72.5,2.65,sandstone,sandstone,fine grained
+209110,35_11-7,1979,1874.25,30.9,0.987,,75,2.65,sandstone,sandstone,fine grained
+209111,35_11-7,1979,1874.5,30.9,0.986,,75,2.65,sandstone,sandstone,fine grained
+209115,35_11-7,1979,1875.5,31.6,0.993,,64.9,2.64,sandstone,sandstone,fine grained medium grained
+209119,35_11-7,1979,1876.5,8.2,0.341,,36.9,2.66,Sandstone calcareous,Sandstone,grained
+209123,35_11-7,1979,1877.5,6,0.341,,47.7,2.67,Sandstone calcareous,Sandstone,grained
+209127,35_11-7,1979,1878.5,27.5,0.98,,72.2,2.61,sandstone,sandstone,fine grained
+209135,35_11-7,1979,1880.5,32.9,0.989,,75.5,2.66,sandstone,sandstone,fine grained
+209152,35_11-7,1979,1886.5,32.4,0.992,,76.6,2.65,sandstone,sandstone,medium grained
+209160,35_11-7,1979,1888.5,31.8,0.505,0.4,75.5,2.66,sandstone,sandstone,medium grained
+209164,35_11-7,1979,1889.5,29.7,0.505,,74.1,2.66,sandstone,sandstone,fine grained
+209172,35_11-7,1979,1891.5,24.4,0.993,,75.1,2.65,sandstone,sandstone,medium coarse grained pebble (-ly)
+209177,35_11-7,1979,2430.5,10.4,0.338,,97.5,2.67,sandstone,sandstone,very fine grained fine grained
+209182,35_11-7,1979,2434.5,21.4,0.484,,53.5,2.67,sandstone,sandstone,very fine grained fine grained
+209190,35_11-7,1979,2436.5,23,0.502,,54.1,2.69,sandstone,sandstone,fine grained
+209203,35_11-7,1979,2439.75,28.9,0.506,,42.6,2.64,sandstone,sandstone,fine grained
+209208,35_11-7,1979,2440.5,28.5,0.506,1,51.2,2.65,sandstone,sandstone,fine grained medium grained
+209214,35_11-7,1979,2443.25,11.3,0.341,0.8,64.2,2.71,siltstone,siltstone,grained
+209216,35_11-7,1979,2446.5,22,0.502,0.3,48.6,2.65,sandstone,sandstone,fine grained
+209221,35_11-7,1979,2450.5,23.9,0.503,1.4,54.2,2.7,sandstone,sandstone,fine grained medium grained
+209225,35_11-7,1979,2451.5,24.7,0.505,1.3,50.6,2.64,sandstone,sandstone,fine grained medium grained
+209228,35_11-7,1979,2452.25,21.3,0.502,1.4,51.7,2.6,sandstone,sandstone,fine grained
+209232,35_11-7,1979,2453.25,22.2,0.498,1.5,49.5,2.65,sandstone,sandstone,fine grained medium grained
+209236,35_11-7,1979,2454.5,9.9,0.341,0.5,39.3,2.56,sandstone,sandstone,very fine grained fine grained
+209240,35_11-7,1979,2455.5,13.9,0.343,0.4,59.5,2.64,sandstone,sandstone,very fine grained fine grained
+209243,35_11-7,1979,2456.25,18.6,0.486,0.5,56.2,2.64,sandstone,sandstone,fine grained
+209248,35_11-7,1979,2458.5,19.3,0.457,,60.1,2.65,sandstone,sandstone,fine grained
+209252,35_11-7,1979,2459.5,17.9,0.48,,66.2,2.65,sandstone,sandstone,fine grained
+209256,35_11-7,1979,2460.5,21.1,0.493,1.6,59.4,2.67,sandstone,sandstone,fine grained
+209260,35_11-7,1979,2461.5,22.3,0.338,0.4,56.8,2.64,sandstone,sandstone,fine grained
+209264,35_11-7,1979,2462.5,24.8,0.496,0.3,45.6,2.64,sandstone,sandstone,fine grained medium grained
+209268,35_11-7,1979,2463.5,24.7,0.501,1.3,42.1,2.64,sandstone,sandstone,fine grained medium grained
+209273,35_11-7,1979,2464.75,21.5,0.501,1.6,49,2.64,sandstone,sandstone,fine grained medium grained
+209276,35_11-7,1979,2465.5,21.2,0.5,0.4,50.1,2.69,sandstone,sandstone,fine grained medium grained
+209280,35_11-7,1979,2466.5,25.4,0.502,0.3,47.6,2.65,sandstone,sandstone,fine grained medium grained
+209283,35_11-7,1979,2467.25,18.2,0.501,,36.2,2.65,sandstone,sandstone,fine grained medium grained
+209288,35_11-7,1979,2468.5,23.2,0.504,,43.6,2.65,sandstone,sandstone,fine grained medium grained
+209292,35_11-7,1979,2469.5,24.2,0.503,0.4,56.9,2.65,sandstone,sandstone,fine grained medium grained
+209296,35_11-7,1979,2470.5,18.8,0.494,,60.3,2.72,sandstone,sandstone,fine grained medium grained
+209300,35_11-7,1979,2471.5,24.7,0.505,1.3,49.7,2.66,sandstone,sandstone,fine grained medium grained
+209304,35_11-7,1979,2472.5,24.8,0.505,7.8,58.5,2.65,sandstone,sandstone,fine grained medium grained
+209308,35_11-7,1979,2473.5,26.5,0.504,10.8,52.7,2.64,sandstone,sandstone,fine grained medium grained
+209312,35_11-7,1979,2474.5,25.4,0.504,9.9,57.8,2.64,sandstone,sandstone,fine grained medium grained
+209316,35_11-7,1979,2475.5,27.5,0.503,9.3,55.9,2.64,sandstone,sandstone,fine grained medium grained
+209319,35_11-7,1979,2476.25,26.1,0.503,5.9,53.9,2.64,sandstone,sandstone,fine grained medium grained
+209323,35_11-7,1979,2477.5,24.4,0.504,7.4,55.8,2.64,sandstone,sandstone,fine grained medium grained
+209327,35_11-7,1979,2478.5,25.4,0.502,7.7,45.9,2.64,sandstone,sandstone,fine grained medium grained
+209331,35_11-7,1979,2479.5,26.4,0.505,5.2,47,2.64,sandstone,sandstone,fine grained medium grained
+209335,35_11-7,1979,2480.5,25.2,0.503,8.8,48.5,2.64,sandstone,sandstone,medium grained
+209339,35_11-7,1979,2481.5,26.2,0.502,6.9,5.1,2.64,sandstone,sandstone,fine grained medium grained
+209343,35_11-7,1979,2482.5,25.9,0.504,9.5,57,2.65,sandstone,sandstone,fine grained medium grained
+209348,35_11-7,1979,2485.25,21,0.48,,67.5,2.64,sandstone,sandstone,fine grained
+209352,35_11-7,1979,2486.25,17,0.382,,72.3,2.67,sandstone,sandstone,fine grained medium grained
+209356,35_11-7,1979,2487,25,0.499,12.8,54.2,2.66,sandstone,sandstone,fine grained medium grained
+209360,35_11-7,1979,2488,26.2,0.499,9.7,45.9,2.65,sandstone,sandstone,fine grained medium grained
+209364,35_11-7,1979,2489,24.1,0.501,7,52.5,2.65,sandstone,sandstone,fine grained medium grained
+209368,35_11-7,1979,2490,24.6,0.5,8.8,54.5,2.65,sandstone,sandstone,fine grained medium grained
+209372,35_11-7,1979,2491,23.1,0.5,7.3,53.9,2.64,sandstone,sandstone,fine grained medium grained
+209376,35_11-7,1979,2492,27.2,0.506,5.8,58.6,2.64,sandstone,sandstone,medium grained
+209381,35_11-7,1979,2493.35,25,0.503,5.3,54.3,2.65,sandstone,sandstone,fine grained medium grained
+209383,35_11-7,1979,2494,18.8,0.394,7.1,68.7,2.69,sandstone,sandstone,fine grained
+209387,35_11-7,1979,2495,18.9,0.432,6.6,72.1,2.67,sandstone,sandstone,fine grained
+209391,35_11-7,1979,2496,26.3,0.506,9.9,54.2,2.65,sandstone,sandstone,fine grained
+209395,35_11-7,1979,2497,21.2,0.496,8.1,58.8,2.65,sandstone,sandstone,fine grained medium grained
+209399,35_11-7,1979,2498,26,0.505,9.5,60.9,2.65,sandstone,sandstone,fine grained medium grained
+209403,35_11-7,1979,2499,22,0.498,9.7,55.2,2.65,sandstone,sandstone,fine grained medium grained
+209407,35_11-7,1979,2500,20.9,0.499,5.4,46.8,2.66,sandstone,sandstone,fine grained medium grained
+209411,35_11-7,1979,2501,27.4,0.505,10,52.5,2.64,sandstone,sandstone,fine grained medium grained
+209415,35_11-7,1979,2502,20.2,0.498,6.9,65.9,2.65,sandstone,sandstone,fine grained medium grained
+209419,35_11-7,1979,2503,23.7,0.505,7.1,73.7,2.65,sandstone,sandstone,fine grained medium grained
+209424,35_11-7,1979,2504.3,24.8,0.504,6.6,69.3,2.65,sandstone,sandstone,fine grained medium grained
+209426,35_11-7,1979,2505,22,0.498,7.6,77.6,2.66,sandstone,sandstone,fine grained medium grained
+209430,35_11-7,1979,2506,21.7,0.503,1.8,54.2,2.65,sandstone,sandstone,fine grained medium grained
+209434,35_11-7,1979,2507,23.3,0.502,8.2,57.7,2.65,sandstone,sandstone,fine grained medium grained
+209438,35_11-7,1979,2508,21.3,0.505,2.9,64.7,2.63,sandstone,sandstone,fine grained medium grained
+209442,35_11-7,1979,2509,22.6,0.504,7,61.7,2.64,sandstone,sandstone,fine grained medium grained
+209446,35_11-7,1979,2510,24.6,0.505,5.7,65.3,2.63,sandstone,sandstone,fine grained medium grained
+209450,35_11-7,1979,2511,23,0.503,5.3,67.7,2.64,sandstone,sandstone,fine grained medium grained
+209454,35_11-7,1979,2512,23.7,0.505,4.1,68,2.64,sandstone,sandstone,fine grained medium grained
+209458,35_11-7,1979,2513,23.6,0.506,,68.5,2.64,sandstone,sandstone,fine grained medium grained
+209466,35_11-7,1979,2514.5,18,0.46,0.5,75.6,2.69,sandstone,sandstone,fine grained medium grained
+209470,35_11-7,1979,2515.5,19.1,0.458,,58.3,2.68,sandstone,sandstone,fine grained medium grained
+209483,35_11-7,1979,2518.75,16.8,0.433,0.6,73,2.72,sandstone,sandstone,fine grained medium grained
+209486,35_11-7,1979,2519.5,16.7,0.424,,72.7,2.74,sandstone,sandstone,fine grained medium grained
+209494,35_11-7,1979,2521.5,9.4,0.341,1.4,72.3,2.93,sandstone,sandstone,fine grained medium grained
+209498,35_11-7,1979,2522.5,16.9,0.448,,69.6,2.67,sandstone,sandstone,fine grained medium grained
+209502,35_11-7,1979,2523.5,14.9,0.372,0.5,71.1,2.69,sandstone,sandstone,fine grained medium grained
+209505,35_11-7,1979,2524.25,12.7,0.34,,71.2,2.71,sandstone,sandstone,fine grained medium grained
+209509,35_11-7,1979,2525.25,8.1,0.458,0.7,65.6,2.74,sandstone,sandstone,fine grained medium grained
+209514,35_11-7,1979,2526.5,11,0.41,,53.3,2.68,sandstone,sandstone,fine grained medium grained
+209518,35_11-7,1979,2527.5,15.4,0.342,,77.5,3.05,sandstone,sandstone,fine grained medium grained
+209526,35_11-7,1979,2529.45,20,0.483,,81.2,2.67,sandstone,sandstone,fine grained medium grained
+209530,35_11-7,1979,2530.25,22.7,0.506,0.5,82.2,2.65,sandstone,sandstone,fine grained medium grained
+209537,35_11-7,1979,2532.5,25.5,0.504,,79.4,2.62,sandstone,sandstone,fine grained medium grained
+209541,35_11-7,1979,2533.5,23.4,0.506,,77.6,2.61,sandstone,sandstone,fine grained medium grained
+209545,35_11-7,1979,2534.5,22.1,0.506,,80.3,2.63,sandstone,sandstone,fine grained medium grained
+209549,35_11-7,1979,2535.5,25.4,0.506,,75.4,2.65,sandstone,sandstone,fine grained medium grained
+209553,35_11-7,1979,2336.5,25.3,0.506,,69.1,2.65,sandstone,sandstone,fine grained medium grained
+209557,35_11-7,1979,2537.5,26,0.506,,79.3,2.64,sandstone,sandstone,fine grained medium grained
+209561,35_11-7,1979,2538.5,24.8,0.506,,69.8,2.64,sandstone,sandstone,fine grained medium grained
+209564,35_11-7,1979,2539.25,16.5,0.502,,65.4,2.73,sandstone,sandstone,fine grained medium grained
+209568,35_11-7,1979,2540.75,27.3,0.507,,78.6,2.64,sandstone,sandstone,fine grained medium grained
+209570,35_11-7,1979,1801.5,27.6,0.507,4.6,44,2.67,sandstone,sandstone,fine grained
+209574,35_11-7,1979,1802.5,23.3,0.505,14.5,42.8,2.66,sandstone,sandstone,fine grained
+209578,35_11-7,1979,1803.5,23.1,0.497,17.9,39,2.66,sandstone,sandstone,fine grained medium grained
+209583,35_11-7,1979,1804.75,16.7,0.341,29.2,41.1,2.64,sandstone,sandstone,very fine grained fine grained
+209586,35_11-7,1979,1805.5,18.4,0.341,24.8,46.6,2.66,sandstone,sandstone,very fine grained fine grained
+209590,35_11-7,1979,1806.5,19.2,0.463,27.3,42.7,2.64,sandstone,sandstone,very fine grained fine grained
+209594,35_11-7,1979,1807.5,16.6,0.342,10,54.1,2.66,sandstone,sandstone,very fine grained fine grained
+209598,35_11-7,1979,1808.5,14.7,0.342,12.8,73.2,2.62,sandstone,sandstone,very fine grained fine grained
+209602,35_11-7,1979,1809.5,17,0.445,23.3,61.3,2.61,sandstone,sandstone,very fine grained fine grained
+209606,35_11-7,1979,1810.5,22.3,0.506,42.2,24,2.68,sandstone,sandstone,fine grained
+209610,35_11-7,1979,1811.5,31.3,0.998,13.9,46,2.64,sandstone,sandstone,medium grained
+209615,35_11-7,1979,1812.75,30.3,1,50.7,17.9,2.7,sandstone,sandstone,medium grained
+209618,35_11-7,1979,1813.5,28.8,0.506,37.2,33.7,2.68,sandstone,sandstone,fine grained
+209622,35_11-7,1979,1814.5,23.9,0.505,40.3,22.8,2.72,sandstone,sandstone,fine grained
+209626,35_11-7,1979,1815.5,25.8,0.499,33.5,34.8,2.66,sandstone,sandstone,fine grained
+209630,35_11-7,1979,1816.5,22.2,0.357,47.4,27.3,2.66,siltstone,siltstone,grained
+209634,35_11-7,1979,1817.5,19.9,0.34,18.5,59.6,2.67,sandstone,sandstone,grained
+209638,35_11-7,1979,1818.5,23.4,0.438,19,53.6,2.69,sandstone,sandstone,very fine grained fine grained
+209642,35_11-7,1979,1819.5,20.3,0.341,17.8,60.9,2.68,sandstone,sandstone,very fine grained fine grained
+209646,35_11-7,1979,1820.5,19.7,0.341,5,55.1,2.66,sandstone,sandstone,very fine grained fine grained
+209650,35_11-7,1979,1821.5,15.6,0.342,11.2,81.2,2.67,sandstone,sandstone,very fine grained fine grained
+209658,35_11-7,1979,1823.5,16,0.341,14.5,71.2,2.66,sandstone,sandstone,very fine grained fine grained
+209662,35_11-7,1979,1824.5,20.4,0.342,13.4,63.9,2.65,sandstone,sandstone,very fine grained fine grained
+209666,35_11-7,1979,1825.5,17.8,0.341,15.9,65.9,2.64,sandstone,sandstone,very fine grained fine grained
+209670,35_11-7,1979,1826.5,18.5,0.339,18.3,64.7,2.63,sandstone,sandstone,very fine grained fine grained
+209673,35_11-7,1979,1827.25,17.7,0.339,15.9,62.4,2.64,sandstone,sandstone,very fine grained fine grained
+209687,35_11-7,1979,1831.25,23.1,0.504,29,49.5,2.63,sandstone,sandstone,fine grained medium grained
+209691,35_11-7,1979,1832.25,21.2,0.504,24.4,43,2.62,sandstone,sandstone,fine grained
+209695,35_11-7,1979,1833.25,29.1,0.506,16.2,47.2,2.61,sandstone,sandstone,medium grained
+209699,35_11-7,1979,1834.25,20.7,0.504,31.9,47.8,2.62,sandstone,sandstone,fine grained medium grained
+209703,35_11-7,1979,1835.25,19.7,0.463,26.1,33,2.63,sandstone,sandstone,fine grained
+209707,35_11-7,1979,1836.25,19,0.505,11.4,59.6,2.65,sandstone,sandstone,fine grained medium grained pebble (-ly)
+209714,35_11-7,1979,1841.75,31.5,0.509,20.2,40.9,2.67,sandstone,sandstone,fine grained
+209717,35_11-7,1979,1842.5,25.1,0.504,29.6,39.8,2.68,sandstone,sandstone,very fine grained fine grained
+209721,35_11-7,1979,1843.5,29.6,0.512,25,36.4,2.7,sandstone,sandstone,fine grained
+209725,35_11-7,1979,1844.5,34.5,0.998,25.1,34.2,2.65,sandstone,sandstone,fine grained medium grained
+209729,35_11-7,1979,1845.5,30,0.993,12.1,62.8,2.65,sandstone,sandstone,medium grained
+209733,35_11-7,1979,1846.5,27.8,0.995,12.1,51.1,2.62,sandstone,sandstone,medium coarse grained
+209737,35_11-7,1979,1847.5,23.3,0.988,11,59.8,2.66,sandstone,sandstone,fine grained medium grained
+209741,35_11-7,1979,1848.5,31.1,0.995,10.7,67.9,2.65,sandstone,sandstone,medium coarse grained
+209745,35_11-7,1979,1849.5,29.2,0.994,12.1,49,2.64,sandstone,sandstone,medium grained
+209749,35_11-7,1979,1850.5,30.5,0.994,7.2,47.9,2.62,sandstone,sandstone,fine grained medium grained
+209753,35_11-7,1979,1851.5,27.5,0.99,16.5,63.5,2.63,sandstone,sandstone,fine grained medium grained
+209761,35_11-7,1979,1853.5,33.3,0.994,31.6,21.7,2.63,sandstone,sandstone,fine grained medium grained
+209765,35_11-7,1979,1854.5,27.4,0.994,1.2,66.3,2.62,sandstone,sandstone,fine grained medium grained
+209769,35_11-7,1979,1855.5,27.7,0.992,2.2,68,2.63,sandstone,sandstone,fine grained pebble (-ly)
+209773,35_11-7,1979,1856.5,27.4,0.987,1.3,59.2,2.64,sandstone,sandstone,fine grained
+209777,35_11-7,1979,1857.5,30.5,0.987,1.6,61.9,2.64,sandstone,sandstone,fine grained
+209781,35_11-7,1979,1858.5,28.7,0.507,0.3,64.7,2.67,sandstone,sandstone,fine grained
+209789,35_11-7,1979,1860.5,26.4,0.505,2.7,59.3,2.65,sandstone,sandstone,very fine grained fine grained
+209793,35_11-7,1979,1861.5,23.7,0.99,5.5,55.4,2.6,sandstone,sandstone,fine grained medium grained
+209797,35_11-7,1979,1862.5,27.4,0.992,2.2,59.3,2.65,sandstone,sandstone,fine grained medium grained
+209801,35_11-7,1979,1863.5,23.2,0.981,,78,2.59,sandstone,sandstone,fine grained medium grained
+209805,35_11-7,1979,1864.5,30.6,0.99,,80,2.65,sandstone,sandstone,fine grained
+209809,35_11-7,1979,1865.5,33.4,0.993,,72.9,2.65,sandstone,sandstone,fine grained medium grained
+209813,35_11-7,1979,1866.5,34.2,0.993,,47.9,2.64,sandstone,sandstone,medium grained
+209817,35_11-7,1979,1867.5,32.5,0.992,,73.1,2.66,sandstone,sandstone,fine grained medium grained
+209825,35_11-7,1979,1869.5,25.7,0.505,,77.7,2.64,sandstone,sandstone,medium grained
+209833,35_11-7,1979,1871.5,31.8,0.506,,74.9,2.65,sandstone,sandstone,medium grained
+209837,35_11-7,1979,1872.5,30.7,0.504,0.3,75.1,2.65,sandstone,sandstone,medium grained
+209841,35_11-7,1979,1873.5,34.4,0.989,,72.5,2.65,sandstone,sandstone,fine grained
+209845,35_11-7,1979,1874.5,30.9,0.986,,75,2.65,sandstone,sandstone,fine grained
+209849,35_11-7,1979,1875.5,31.6,0.993,,64.9,2.64,sandstone,sandstone,fine grained medium grained
+209853,35_11-7,1979,1876.5,8.2,0.341,,36.9,2.66,Sandstone calcareous,Sandstone,grained
+209857,35_11-7,1979,1877.5,6,0.341,,47.7,2.67,Sandstone calcareous,Sandstone,grained
+209861,35_11-7,1979,1878.5,27.5,0.98,,72.2,2.61,sandstone,sandstone,fine grained
+209869,35_11-7,1979,1880.5,32.9,0.989,,75.5,2.66,sandstone,sandstone,fine grained
+209885,35_11-7,1979,1886.5,32.4,0.992,,76.6,2.65,sandstone,sandstone,medium grained
+209893,35_11-7,1979,1888.5,31.8,0.505,0.4,75.5,2.66,sandstone,sandstone,medium grained
+209897,35_11-7,1979,1889.5,29.7,0.505,,74.1,2.66,sandstone,sandstone,fine grained
+209905,35_11-7,1979,1891.5,24.4,0.993,,75.1,2.65,sandstone,sandstone,medium coarse grained pebble (-ly)
+209910,35_11-7,1979,2430.5,10.4,0.338,,97.5,2.67,sandstone,sandstone,very fine grained fine grained
+209915,35_11-7,1979,2434.5,21.4,0.484,,53.5,2.67,sandstone,sandstone,very fine grained fine grained
+209923,35_11-7,1979,2436.5,23,0.502,,54.1,2.69,sandstone,sandstone,fine grained
+209936,35_11-7,1979,2439.75,28.9,0.506,,42.6,2.64,sandstone,sandstone,fine grained medium grained
+209939,35_11-7,1979,2440.5,28.5,0.506,1,51.2,2.65,sandstone,sandstone,fine grained medium grained
+209945,35_11-7,1979,2443.25,11.3,0.341,0.8,64.2,2.71,siltstone,siltstone,grained
+209947,35_11-7,1979,2446.5,22,0.502,0.3,48.6,2.65,sandstone,sandstone,fine grained
+209952,35_11-7,1979,2450.5,23.9,0.503,1.4,54.2,2.7,sandstone,sandstone,fine grained medium grained
+209956,35_11-7,1979,2451.5,24.7,0.505,1.3,50.6,2.64,sandstone,sandstone,fine grained medium grained
+209959,35_11-7,1979,2452.25,21.3,0.502,1.4,51.7,2.6,sandstone,sandstone,fine grained
+209963,35_11-7,1979,2453.25,22.2,0.498,1.5,49.5,2.65,sandstone,sandstone,fine grained medium grained
+209967,35_11-7,1979,2454.5,9.9,0.341,0.5,39.3,2.56,sandstone,sandstone,very fine grained fine grained
+209971,35_11-7,1979,2455.5,13.9,0.343,0.4,59.5,2.64,sandstone,sandstone,very fine grained fine grained
+209974,35_11-7,1979,2456.25,18.6,0.486,0.5,56.2,2.64,sandstone,sandstone,fine grained
+209978,35_11-7,1979,2458.5,19.3,0.457,1.8,60.1,2.65,sandstone,sandstone,fine grained
+209982,35_11-7,1979,2459.5,17.9,0.48,,66.2,2.65,sandstone,sandstone,fine grained
+209986,35_11-7,1979,2460.5,21.1,0.493,1.6,59.4,2.67,sandstone,sandstone,fine grained
+209990,35_11-7,1979,2461.5,22.3,0.338,0.4,56.8,2.64,sandstone,sandstone,fine grained
+209994,35_11-7,1979,2462.5,24.8,0.496,0.3,45.6,2.64,sandstone,sandstone,fine grained medium grained
+209998,35_11-7,1979,2463.5,24.7,0.501,1.3,42.1,2.64,sandstone,sandstone,fine grained medium grained
+210003,35_11-7,1979,2464.75,21.5,0.501,1.6,49,2.64,sandstone,sandstone,fine grained medium grained
+210006,35_11-7,1979,2465.5,21.2,0.5,0.4,50.1,2.69,sandstone,sandstone,fine grained medium grained
+210010,35_11-7,1979,2466.5,25.4,0.502,0.3,47.6,2.65,sandstone,sandstone,fine grained medium grained
+210013,35_11-7,1979,2467.25,18.2,0.501,,36.2,2.65,sandstone,sandstone,fine grained medium grained
+210018,35_11-7,1979,2468.5,23.2,0.504,,43.6,2.65,sandstone,sandstone,fine grained medium grained
+210022,35_11-7,1979,2469.5,24.2,0.503,0.4,56.9,2.65,sandstone,sandstone,fine grained medium grained
+210026,35_11-7,1979,2470.5,18.8,0.494,,60.3,2.72,sandstone,sandstone,fine grained medium grained
+210030,35_11-7,1979,2471.5,24.7,0.505,1.3,49.7,2.66,sandstone,sandstone,fine grained medium grained
+210034,35_11-7,1979,2472.5,24.8,0.505,7.8,58.5,2.65,sandstone,sandstone,fine grained medium grained
+210038,35_11-7,1979,2473.5,26.5,0.504,10.8,52.7,2.64,sandstone,sandstone,fine grained medium grained
+210042,35_11-7,1979,2474.5,25.4,0.504,9.9,57.8,2.64,sandstone,sandstone,fine grained medium grained
+210046,35_11-7,1979,2475.5,27.5,0.503,9.3,55.9,2.64,sandstone,sandstone,fine grained medium grained
+210049,35_11-7,1979,2476.25,26.1,0.503,5.9,53.9,2.64,sandstone,sandstone,fine grained medium grained
+210053,35_11-7,1979,2477.5,24.4,0.504,7.4,55.8,2.64,sandstone,sandstone,fine grained medium grained
+210057,35_11-7,1979,2478.5,25.4,0.502,7.7,45.9,2.64,sandstone,sandstone,fine grained medium grained
+210061,35_11-7,1979,2479.5,26.4,0.505,5.2,47,2.64,sandstone,sandstone,fine grained medium grained
+210065,35_11-7,1979,2480.5,25.2,0.503,8.8,48.5,2.64,sandstone,sandstone,medium grained
+210069,35_11-7,1979,2481.5,26.2,0.502,6.9,55.1,2.64,sandstone,sandstone,fine grained medium grained
+210073,35_11-7,1979,2482.5,25.9,0.504,9.5,57,2.65,sandstone,sandstone,fine grained medium grained
+210076,35_11-7,1979,2484.75,18.8,0.473,1.9,65.9,2.64,sandstone,sandstone,fine grained
+210078,35_11-7,1979,2485.25,21,0.48,,67.5,2.64,sandstone,sandstone,fine grained
+210082,35_11-7,1979,2486.25,17,0.382,,72.3,2.67,sandstone,sandstone,very fine grained fine grained
+210085,35_11-7,1979,2487,25,0.499,12.8,54.2,2.66,sandstone,sandstone,fine grained medium grained
+210089,35_11-7,1979,2488,26.2,0.499,9.7,45.9,2.65,sandstone,sandstone,fine grained medium grained
+210093,35_11-7,1979,2489,24.1,0.501,7,52.5,2.65,sandstone,sandstone,fine grained medium grained
+210097,35_11-7,1979,2490,24.6,0.5,8.8,54.5,2.65,sandstone,sandstone,fine grained medium grained
+210101,35_11-7,1979,2491,23.1,0.5,7.3,53.9,2.64,sandstone,sandstone,fine grained medium grained
+210105,35_11-7,1979,2492,27.2,0.506,5.8,58.6,2.64,sandstone,sandstone,medium grained
+210110,35_11-7,1979,2493.35,25,0.503,5.3,54.3,2.65,sandstone,sandstone,fine grained medium grained
+210112,35_11-7,1979,2494,18.8,0.394,7.1,68.7,2.69,sandstone,sandstone,fine grained
+210116,35_11-7,1979,2495,18.9,0.432,6.6,72.1,2.67,sandstone,sandstone,fine grained
+210120,35_11-7,1979,2496,26.3,0.506,9.9,54.2,2.65,sandstone,sandstone,fine grained
+210124,35_11-7,1979,2497,21.2,0.496,8.1,58.8,2.65,sandstone,sandstone,fine grained medium grained
+210128,35_11-7,1979,2498,26,0.505,9.5,60.9,2.65,sandstone,sandstone,fine grained medium grained
+210132,35_11-7,1979,2499,22,0.498,9.7,55.2,2.65,sandstone,sandstone,fine grained medium grained
+210136,35_11-7,1979,2500,20.9,0.499,5.4,46.8,2.66,sandstone,sandstone,fine grained medium grained
+210140,35_11-7,1979,2501,27.4,0.505,10,52.5,2.64,sandstone,sandstone,fine grained medium grained
+210144,35_11-7,1979,2502,20.2,0.498,6.9,65.9,2.65,sandstone,sandstone,fine grained medium grained
+210148,35_11-7,1979,2503,23.7,0.505,7.1,73.7,2.65,sandstone,sandstone,medium grained
+210153,35_11-7,1979,2504.3,24.8,0.504,6.6,69.3,2.65,sandstone,sandstone,fine grained medium grained
+210155,35_11-7,1979,2505,22,0.498,7.6,77.6,2.66,sandstone,sandstone,fine grained medium grained
+210159,35_11-7,1979,2506,21.7,0.503,4.8,54.2,2.65,sandstone,sandstone,fine grained medium grained
+210163,35_11-7,1979,2507,23.3,0.502,8.2,57.7,2.65,sandstone,sandstone,fine grained medium grained
+210167,35_11-7,1979,2508,21.3,0.505,2.9,64.7,2.63,sandstone,sandstone,medium coarse grained
+210171,35_11-7,1979,2509,22.6,0.504,7,61.7,2.64,sandstone,sandstone,medium grained
+210175,35_11-7,1979,2510,24.6,0.505,5.7,65.3,2.63,sandstone,sandstone,grained
+210179,35_11-7,1979,2511,23,0.503,5.3,67.7,2.64,sandstone,sandstone,medium grained
