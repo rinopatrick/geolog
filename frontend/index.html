@@ -1448,6 +1448,18 @@
                     </div>
                     <div id="segyCompartmentList" style="font-size:12px;color:#8b949e;margin-top:6px"></div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+                        <label class="toolbar-hint">Cell maps</label>
+                        <input id="cellMapsPorosity" type="number" min="0.001" max="0.6" step="0.01" value="0.2" title="Porosity" style="width:80px">
+                        <input id="cellMapsSw" type="number" min="0" max="1" step="0.01" value="0.3" title="Water saturation" style="width:80px">
+                        <input id="cellMapsNtg" type="number" min="0" max="1" step="0.05" value="0.8" title="Net-to-gross" style="width:80px">
+                        <input id="cellMapsIterations" type="number" min="100" max="20000" step="100" value="1000" title="Iterations" style="width:90px">
+                        <input id="cellMapsSeed" type="number" value="7" title="Seed" style="width:80px">
+                        <select id="cellMapsLayer" title="Map layer"><option value="p50_column_m">P50</option><option value="p10_column_m">P10</option><option value="p90_column_m">P90</option><option value="hydrocarbon_probability">Probability</option></select>
+                        <button class="btn-sm" data-action="app.runCellMaps"><i data-lucide="grid"></i> Cell maps</button>
+                        <span id="cellMapsStatus" class="toolbar-hint"></span>
+                    </div>
+                    <canvas id="cellMapsCanvas" width="1000" height="320" style="width:100%;margin-top:10px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
                         <input id="segyTieInline" type="number" placeholder="tie inline" style="width:100px">
                         <input id="segyTieCrossline" type="number" placeholder="tie xline" style="width:100px">
                         <input id="segyTieMaxShift" type="number" min="1" max="500" value="40" title="Max shift (ms)" style="width:90px">

@@ -782,6 +782,88 @@ Object.assign(GeoLogApp.prototype, {
             : 'No compartments built yet.';
     },
 
+    async runCellMaps() {
+        const line = this._segyLine;
+        const surface = this._segySurface;
+        if (!line || !surface) return GeoToast.warn('Build or load a depth surface first.');
+        const contact = Number(document.getElementById('segyCompartmentContact')?.value);
+        if (!(contact > 0)) return GeoToast.warn('Enter a contact depth in metres.');
+        const porosity = Number(document.getElementById('cellMapsPorosity')?.value) || 0.2;
+        const sw = Number(document.getElementById('cellMapsSw')?.value ?? 0.3);
+        const ntg = Number(document.getElementById('cellMapsNtg')?.value ?? 0.8);
+        const iterations = Number(document.getElementById('cellMapsIterations')?.value) || 1000;
+        const seedRaw = document.getElementById('cellMapsSeed')?.value;
+        const seed = seedRaw === '' || seedRaw == null ? null : Number(seedRaw);
+        GeoLoading.show('Running cell posterior maps...');
+        try {
+            const result = await this._api(`/projects/${line.project_id}/prospect-maps`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    surface_id: surface.id,
+                    contact_depth_m: contact,
+                    porosity, water_saturation: sw, net_to_gross: ntg,
+                    iterations, seed,
+                }),
+            });
+            this._cellMapsResult = result;
+            this._drawCellMaps();
+            const status = document.getElementById('cellMapsStatus');
+            if (status) {
+                const probs = (result.hydrocarbon_probability || []).flat().filter(Number.isFinite);
+                const mean = probs.length ? (probs.reduce((a, b) => a + b, 0) / probs.length) : 0;
+                status.textContent = `${result.rows}×${result.cols} cells · mean P(hc) ${(mean * 100).toFixed(1)}%`;
+            }
+            GeoToast.success('Cell maps complete');
+        } catch (e) {
+            GeoToast.error('Cell maps failed: ' + e.message);
+        } finally {
+            GeoLoading.hide();
+        }
+    },
+
+    _drawCellMaps() {
+        const canvas = document.getElementById('cellMapsCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, w, h);
+        const result = this._cellMapsResult;
+        const layer = document.getElementById('cellMapsLayer')?.value || 'p50_column_m';
+        const grid = result?.[layer];
+        if (!grid?.length) {
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '13px sans-serif';
+            ctx.fillText('Run cell maps to view P10/P50/P90 posterior', 18, 28);
+            return;
+        }
+        const rows = grid.length;
+        const cols = grid[0]?.length || 0;
+        const left = 56;
+        const right = w - 18;
+        const top = 22;
+        const bottom = h - 30;
+        const flat = grid.flat().filter(Number.isFinite);
+        const maxV = Math.max(...flat, 1e-9);
+        const isProb = layer === 'hydrocarbon_probability';
+        for (let y = 0; y < rows; y += 1) {
+            for (let x = 0; x < cols; x += 1) {
+                const v = Number(grid[y][x]);
+                const norm = isProb ? Math.min(1, Math.max(0, v)) : Math.min(1, v / maxV);
+                const r = Math.round(30 + 225 * norm);
+                const g = Math.round(120 - 60 * norm);
+                const b = Math.round(90 - 60 * norm);
+                ctx.fillStyle = `rgb(${r},${g},${b})`;
+                ctx.fillRect(left + (x / cols) * (right - left), top + (y / rows) * (bottom - top),
+                    Math.ceil((right - left) / cols) + 1, Math.ceil((bottom - top) / rows) + 1);
+            }
+        }
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '11px sans-serif';
+        ctx.fillText(`${layer} · max ${isProb ? '100%' : maxV.toFixed(1) + ' m'}`, left, h - 10);
+    },
+
     async convertSurfaceDepth() {
         const line = this._segyLine;
         const surface = this._segySurface;
