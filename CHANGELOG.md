@@ -6,7 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, the API is not yet stable.
 
-## [Unreleased]
+## [0.25.0] - 2026-10-31
+
+### Added
+
+- **Volve F-1 petrophysics calibration.** `POST /api/wells/{wid}/petro-calibration`
+  fits GR endpoints and shale porosity against reference curves
+  (`test_data/volve_f1/`, Equinor open data with licence notice). On that
+  fixture: VSH MAE 0.25 → 0.07, PHIE MAE 0.063 → 0.006 vs the min-max/0.3
+  defaults. New `gr_clean`, `gr_shale`, `phi_sh` columns on `PetroParams`
+  with migration.
+- **RealPore NCS plug transform check.** `POST
+  /api/wells/{wid}/plug-transform-check` fits a log-linear
+  porosity-permeability transform on laboratory plug tables (no log run
+  needed), complementing the DB-backed `core-calibration`. Fixture: 300
+  plug triplets, well 35/11-7, CC-BY 4.0 with GeoProvider attribution
+  (`test_data/realpore_ncs/`). Reports R² 0.53, residual σ 0.10 log10,
+  median laboratory Sw 57.7%.
+
+### CI
+
+- Coverage floor 80% for new physics engines now includes
+  `backend/core_validation.py`.
 
 ## [0.24.0] - 2026-10-30
 
