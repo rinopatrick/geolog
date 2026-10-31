@@ -48,6 +48,7 @@ try:
     )
     from las_parser import LASParser
     from saturation import saturation
+    from petro_deterministic import vclay as _vclay, porosity_blend as _porosity_blend
     from semantics import apply_run_semantics
     from uploads import read_upload
     from models import (
@@ -106,6 +107,7 @@ except ImportError:
     )
     from backend.las_parser import LASParser
     from backend.saturation import saturation
+    from backend.petro_deterministic import vclay as _vclay, porosity_blend as _porosity_blend
     from backend.semantics import apply_run_semantics
     from backend.uploads import read_upload
     from backend.models import (
@@ -1144,46 +1146,12 @@ def compute_saturation(wid: int, data: dict, db: Session = Depends(get_db)):
         drho_limit=drho_limit, washout_inches=washout_inches,
     )
 
-    # --- Vclay computation ---
-    gr_range = max(gr_shale - gr_clean, 1.0)
-    for i in range(n):
-        if np.isnan(gr[i]):
-            continue
-        igr = np.clip((gr[i] - gr_clean) / gr_range, 0, 1)
+    # --- Vclay computation (shared kernel in backend/petro_deterministic.py) ---
+    vsh_arr = _vclay(gr, gr_clean, gr_shale, method=vsh_method)
+    vsh_arr[np.isnan(gr)] = np.nan
 
-        if vsh_method == "steiber":
-            vsh_v = igr / (3 - 2 * igr) if igr < 1 else 1.0
-        elif vsh_method == "clavier":
-            vsh_v = 1.7 - np.sqrt(3.38 - (igr + 0.7) ** 2) if igr < 1 else 1.0
-        elif vsh_method == "larionov_old":
-            vsh_v = 0.33 * (2 ** (2 * igr) - 1) if igr < 1 else 1.0
-        else:  # larionov_tertiary (default)
-            vsh_v = 0.083 * (2 ** (3.7 * igr) - 1) if igr < 1 else 1.0
-
-        vsh_arr[i] = np.clip(vsh_v, 0, 1)
-
-    # --- Porosity computation ---
-    for i in range(n):
-        phi_n = nphi[i] if not np.isnan(nphi[i]) else np.nan
-        phi_d = np.nan
-        if not np.isnan(rhob[i]):
-            phi_d = density_porosity(rhob[i], lo=-0.15, hi=0.60)
-
-        # Density porosity preferred, neutron-density combo for gas
-        if not np.isnan(phi_d) and not np.isnan(phi_n):
-            # If gas effect (phi_n < phi_d), use density only
-            if phi_n < phi_d - 0.03:
-                phie_v = phi_d
-            else:
-                phie_v = (phi_d + phi_n) / 2
-        elif not np.isnan(phi_d):
-            phie_v = phi_d
-        elif not np.isnan(phi_n):
-            phie_v = phi_n * (1 - vsh_arr[i])  # Neutron corrected for clay
-        else:
-            continue
-
-        phie_arr[i] = max(0.0, min(0.60, phie_v - vsh_arr[i] * phi_sh))
+    # --- Porosity computation (shared kernel) ---
+    phie_arr = _porosity_blend(nphi, rhob, np.nan_to_num(vsh_arr, nan=0.0), rho_ma=2.65, rho_f=1.0, phi_sh=phi_sh)
 
     # Apply the bad-hole filter after the porosity loop, not by blanking RHOB:
     # a NaN RHOB would fall through to the neutron fallback branch above and
