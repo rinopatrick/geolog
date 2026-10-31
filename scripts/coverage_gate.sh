@@ -13,7 +13,7 @@ PYTHON="${PYTHON:-python}"
   --fail-under=75
 # New physics engines ship with pinned regression tests; keep their floor high.
 "${PYTHON}" -m coverage report \
-  --include='backend/cell_maps.py,backend/allocation.py,backend/anomaly.py,backend/petro_calibration.py,backend/wedge.py,backend/wavelet.py' \
+  --include='backend/cell_maps.py,backend/allocation.py,backend/anomaly.py,backend/petro_calibration.py,backend/core_validation.py,backend/wedge.py,backend/wavelet.py' \
   --fail-under=80
 # The largest router is the slowest to cover; keep the floor moving up rather
 # than letting it regress while the module is being split.
