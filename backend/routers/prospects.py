@@ -379,6 +379,14 @@ def prospect_maps(pid: int, data: dict, request: Request, db: Session = Depends(
             seed = int(seed)
         except (TypeError, ValueError):
             raise HTTPException(400, "seed must be an integer")
+    correlation = str(data.get("correlation", "none") or "none").lower()
+    if correlation not in ("none", "lateral"):
+        raise HTTPException(400, "correlation must be 'none' or 'lateral'")
+    correlation_range = data.get("correlation_range_cells", 8.0)
+    try:
+        correlation_range = float(correlation_range)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "correlation_range_cells must be a number")
     try:
         maps = cell_posterior_maps(
             depth_grid=json.loads(surface.depth_grid_json),
@@ -391,6 +399,8 @@ def prospect_maps(pid: int, data: dict, request: Request, db: Session = Depends(
             base_depth_grid=json.loads(base_surface.depth_grid_json) if base_surface else None,
             iterations=iterations,
             seed=seed,
+            correlation=correlation,
+            correlation_range_cells=correlation_range,
         )
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(400, str(exc))

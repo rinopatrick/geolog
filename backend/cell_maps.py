@@ -15,8 +15,10 @@ import numpy as np
 
 try:
     from volumetrics import _cell_area_m2, normalize_range
+    from spatial import simulate_gaussian_field
 except ImportError:
     from backend.volumetrics import _cell_area_m2, normalize_range
+    from backend.spatial import simulate_gaussian_field
 
 
 def cell_posterior_maps(
@@ -30,6 +32,8 @@ def cell_posterior_maps(
     base_depth_grid: list[list[float]] | None = None,
     iterations: int = 1000,
     seed: int | None = None,
+    correlation: str = "none",
+    correlation_range_cells: float = 8.0,
 ) -> dict[str, Any]:
     grid = np.asarray(depth_grid, dtype=float)
     if grid.ndim != 2 or grid.size == 0 or not np.any(np.isfinite(grid)):
@@ -41,6 +45,13 @@ def cell_posterior_maps(
     iterations = int(iterations)
     if not 100 <= iterations <= 20000:
         raise ValueError("iterations must be between 100 and 20000")
+
+    mode = str(correlation or "none").lower()
+    if mode not in ("none", "lateral"):
+        raise ValueError("correlation must be 'none' or 'lateral'")
+    corr_range = float(correlation_range_cells)
+    if mode == "lateral" and (not np.isfinite(corr_range) or corr_range <= 0):
+        raise ValueError("correlation_range_cells must be positive for lateral mode")
 
     porosity_range = normalize_range(porosity, "porosity", 0.2, 0.001, 0.6)
     sw_range = normalize_range(water_saturation, "water_saturation", 0.3)
@@ -76,6 +87,16 @@ def cell_posterior_maps(
     poro = sample(porosity_range)[:, None, None]
     sw = sample(sw_range)[:, None, None]
     ntg = sample(ntg_range)[:, None, None]
+    if mode == "lateral":
+        # One correlated NTG multiplier field per iteration: neighbouring
+        # cells move together (shared geology), mean-preserving (mean 1).
+        rows, cols = int(grid.shape[0]), int(grid.shape[1])
+        fields = np.stack([
+            simulate_gaussian_field(rows, cols, mean=0.0, std=0.25,
+                                    range_cells=corr_range, seed=None if seed is None else seed + k)
+            for k in range(iterations)
+        ])
+        ntg = np.clip(ntg * (1.0 + fields), 0.0, 1.0)
     pay = gross[None, :, :] * ntg * poro * (1.0 - sw)
 
     p10 = np.percentile(pay, 10, axis=0)
@@ -100,5 +121,7 @@ def cell_posterior_maps(
             "water_saturation": list(sw_range),
             "net_to_gross": list(ntg_range),
             "base_used": base is not None,
+            "correlation": mode,
+            "correlation_range_cells": corr_range if mode == "lateral" else None,
         },
     }
