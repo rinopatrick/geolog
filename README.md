@@ -154,6 +154,10 @@ GeoLog currently includes **35+ analysis views/panels** and **100+ API capabilit
 
 ## Quick Start
 
+Operator installs (prerequisites, production path, verification,
+troubleshooting): see [`docs/INSTALL.md`](docs/INSTALL.md). Production
+deploy runbook: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
 ### Method 1 — One-command local run (`run.sh`)
 ```bash
 chmod +x run.sh
