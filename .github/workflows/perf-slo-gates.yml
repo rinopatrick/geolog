@@ -59,6 +59,9 @@ jobs:
             --p95-max-ms 800 \
             --error-rate-max 0.01
 
+      - name: Run heavy-endpoint SLO gate
+        run: npm run slo:heavy
+
       - name: Stop API server
         if: always()
         run: |
