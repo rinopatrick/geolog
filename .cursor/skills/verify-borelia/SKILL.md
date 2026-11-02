@@ -19,8 +19,6 @@ VFY_DIR=$(mktemp -d -t borelia-verify-XXXXXX)
 BORELIA_DB_PATH="$VFY_DIR/verify.db" BORELIA_ARTIFACT_DIR="$VFY_DIR/artifacts" \
   BORELIA_ENV=test python3 -m uvicorn backend.main:app --host 127.0.0.1 --port 8137 &
 echo $! > "$VFY_DIR/server.pid"
-# NOTE: until the GeoLog->Borelia rename lands, the env prefix is still GEOLOG_*:
-# GEOLOG_DB_PATH, GEOLOG_ARTIFACT_DIR, GEOLOG_ENV. Use those if BORELIA_* is ignored.
 ```
 
 Ready means: `curl -sf http://127.0.0.1:8137/api/health` returns 200 AND
@@ -60,8 +58,8 @@ Two harnesses, pick by what the feature needs:
   (No `GET /api/wells/{id}/curves` route exists — curves live under log runs.)
 - **Browser (Playwright, `scripts/e2e_*.js` as prior art):** viewer rendering,
   `app.switchView(name)` for each of the 40+ panels, correlation picks.
-  Set `GEOLOG_BASE_URL` (or `BORELIA_BASE_URL` post-rename) to the verify port:
-  `GEOLOG_BASE_URL=http://127.0.0.1:8137 node scripts/e2e_panel_smoke.js`.
+  Set `BORELIA_BASE_URL` to the verify port:
+  `BORELIA_BASE_URL=http://127.0.0.1:8137 node scripts/e2e_panel_smoke.js`.
 
 Prefer route paths and `app.switchView` names over coordinates. Never use
 internal setters or test-only endpoints to fake a pass; exercise the real path.
@@ -92,6 +90,6 @@ Always run cleanup after failed iterations too.
 None shipped; repo scripts are the helpers:
 
 - `node scripts/e2e_panel_smoke.js` — all-panel switch smoke (needs
-  `GEOLOG_BASE_URL` set to verify port until rename lands).
+  `BORELIA_BASE_URL` set to verify port).
 - `python scripts/regression_harness.py` — health + app-name contract check.
 - `bash scripts/backup_restore_drill.sh <db> <artifacts>` — backup proof.
