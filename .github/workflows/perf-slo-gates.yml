@@ -14,8 +14,8 @@ jobs:
   slo-load-gate:
     runs-on: ubuntu-latest
     env:
-      GEOLOG_ENV: ci
-      GEOLOG_ENFORCE_SECRETS_SOURCE: "false"
+      BORELIA_ENV: ci
+      BORELIA_ENFORCE_SECRETS_SOURCE: "false"
       OPS_SLO_AVG_MS: "500"
       OPS_SLO_P95_MS: "800"
       OPS_SLO_ERROR_RATE: "0.01"

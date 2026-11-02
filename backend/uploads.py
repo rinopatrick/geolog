@@ -29,11 +29,11 @@ def _env_int(name: str, default: int) -> int:
 
 
 def max_upload_bytes() -> int:
-    return _env_int("GEOLOG_MAX_UPLOAD_BYTES", DEFAULT_MAX_UPLOAD_BYTES)
+    return _env_int("BORELIA_MAX_UPLOAD_BYTES", DEFAULT_MAX_UPLOAD_BYTES)
 
 
 def max_body_bytes() -> int:
-    return _env_int("GEOLOG_MAX_BODY_BYTES", DEFAULT_MAX_BODY_BYTES)
+    return _env_int("BORELIA_MAX_BODY_BYTES", DEFAULT_MAX_BODY_BYTES)
 
 
 def _too_large(limit: int) -> HTTPException:

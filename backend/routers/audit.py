@@ -153,7 +153,7 @@ def export_audit_log_verification(
             "auth_subject": str(getattr(request.state, "auth_subject", "") or ""),
             "auth_role": str(getattr(request.state, "user_role", "viewer") or "viewer"),
             "input": {"limit": int(limit)},
-            "code_version": (os.getenv("GEOLOG_CODE_VERSION") or __version__).strip() or "unknown",
+            "code_version": (os.getenv("BORELIA_CODE_VERSION") or __version__).strip() or "unknown",
         },
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)

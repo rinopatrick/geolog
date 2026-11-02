@@ -70,9 +70,9 @@ jobs:
       # Names must match _resolve_audit_export_signing_key() in backend/main.py.
       AUDIT_EXPORT_HMAC_KEYS_JSON: '{"ci-audit-signing-kid":"ci-audit-signing-key"}'
       AUDIT_EXPORT_HMAC_ACTIVE_KID: ci-audit-signing-kid
-      GEOLOG_ENV: ci
-      GEOLOG_ENFORCE_SECRETS_SOURCE: "false"
-      GEOLOG_ENABLE_DEMO_SEED: "true"
+      BORELIA_ENV: ci
+      BORELIA_ENFORCE_SECRETS_SOURCE: "false"
+      BORELIA_ENABLE_DEMO_SEED: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v7

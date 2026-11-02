@@ -1093,8 +1093,8 @@ def ops_evidence_status(
 
 @router.get("/security-posture-status", response_model=OpsSecurityPostureStatusResponse)
 def ops_security_posture_status(_role: str = Depends(require_viewer)):
-    secrets_source = (os.getenv("GEOLOG_SECRETS_SOURCE") or "").strip()
-    tls_required = (os.getenv("GEOLOG_REQUIRE_TLS", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
+    secrets_source = (os.getenv("BORELIA_SECRETS_SOURCE") or "").strip()
+    tls_required = (os.getenv("BORELIA_REQUIRE_TLS", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
     ci_security_gates_enabled = os.path.exists(".github/workflows/security-gates.yml")
     backup_drill_script_present = os.path.exists("scripts/backup_restore_drill.sh")
     branch_protection_checklist_present = os.path.exists("docs/BRANCH_PROTECTION_CHECKLIST.md")
@@ -1126,7 +1126,7 @@ def ops_security_posture_status(_role: str = Depends(require_viewer)):
 
 @router.get("/security-evidence-status", response_model=OpsSecurityEvidenceStatusResponse)
 def ops_security_evidence_status(_role: str = Depends(require_viewer)):
-    artifact_dir = (os.getenv("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
+    artifact_dir = (os.getenv("BORELIA_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
 
     def _resolve_paths(base_dir: str):
         root_report = os.path.join(base_dir, "report.json")
@@ -1219,7 +1219,7 @@ def ops_security_evidence_status(_role: str = Depends(require_viewer)):
 
 @router.get("/security-evidence/manifest", response_model=OpsSecurityEvidenceManifestResponse)
 def ops_security_evidence_manifest(sign: bool = False, kid: str | None = None, _role: str = Depends(require_viewer)):
-    artifact_dir = (os.getenv("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
+    artifact_dir = (os.getenv("BORELIA_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
 
     report_path = os.path.join(artifact_dir, "report.json")
     sig_path = os.path.join(artifact_dir, "report.signature.json")
@@ -1538,7 +1538,7 @@ def ops_security_evidence_attest(
     response_model=OpsSecurityEvidenceAttestResponse,
 )
 def ops_security_evidence_attest_latest(_role: str = Depends(require_viewer)):
-    artifact_dir = (os.getenv("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
+    artifact_dir = (os.getenv("BORELIA_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
     report_path = os.path.join(artifact_dir, "report.json")
     sig_path = os.path.join(artifact_dir, "report.signature.json")
 
@@ -1581,7 +1581,7 @@ def ops_security_evidence_attest_latest(_role: str = Depends(require_viewer)):
 )
 def ops_security_evidence_freshness(max_age_seconds: int = 86400, _role: str = Depends(require_viewer)):
     max_age_seconds = max(60, int(max_age_seconds))
-    artifact_dir = (os.getenv("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
+    artifact_dir = (os.getenv("BORELIA_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
     report_path = os.path.join(artifact_dir, "report.json")
     sig_path = os.path.join(artifact_dir, "report.signature.json")
 

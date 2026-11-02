@@ -92,8 +92,8 @@ def test_script_runs_as_a_module(tmp_path):
     """`python -m backend.seed` must work from a clean database."""
     db = tmp_path / "seedcli.db"
     env = dict(__import__("os").environ)
-    env["GEOLOG_DB_PATH"] = str(db)
-    env["GEOLOG_ENV"] = "test"
+    env["BORELIA_DB_PATH"] = str(db)
+    env["BORELIA_ENV"] = "test"
     env["PYTHONPATH"] = str(REPO_ROOT)
 
     proc = subprocess.run(

@@ -57,8 +57,8 @@ def test_witsml_pull_and_osdu_push(monkeypatch, make_well):
     finally:
         db.close()
 
-    monkeypatch.setenv("GEOLOG_OSDU_URL", "https://osdu.example")
-    monkeypatch.setenv("GEOLOG_OSDU_PARTITION", "p1")
+    monkeypatch.setenv("BORELIA_OSDU_URL", "https://osdu.example")
+    monkeypatch.setenv("BORELIA_OSDU_PARTITION", "p1")
     seen = {}
     def fake_osdu(cfg, method, path, body=None):
         seen["method"], seen["path"] = method, path
@@ -71,7 +71,7 @@ def test_witsml_pull_and_osdu_push(monkeypatch, make_well):
 
 def test_osdu_pull(monkeypatch):
     pid = _project_id()
-    monkeypatch.setenv("GEOLOG_OSDU_URL", "https://osdu.example")
+    monkeypatch.setenv("BORELIA_OSDU_URL", "https://osdu.example")
     monkeypatch.setattr(interop, "osdu_request", lambda cfg, method, path, body=None: (
         200, {"results": [{"data": {"WellName": "OSDU-1", "UWI": "OSDU-U1"}}]}
     ))
@@ -82,7 +82,7 @@ def test_osdu_pull(monkeypatch):
 
 def test_osdu_log_pull(monkeypatch, make_well):
     wid = make_well("OSDU-LOG", {"DEPT": [1000.0, 1001.0], "GR": [10.0, 20.0]})
-    monkeypatch.setenv("GEOLOG_OSDU_URL", "https://osdu.example")
+    monkeypatch.setenv("BORELIA_OSDU_URL", "https://osdu.example")
     payload = {"results": [{"data": {
         "Name": "L1",
         "Curves": [{"Mnemonic": "DEPT", "Unit": "m"}, {"Mnemonic": "GR", "Unit": "gAPI"}],

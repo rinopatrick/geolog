@@ -29,11 +29,11 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
-      GEOLOG_ENV: ci
-      GEOLOG_ENFORCE_SECRETS_SOURCE: "false"
-      GEOLOG_ENABLE_DEMO_SEED: "false"
-      GEOLOG_DATABASE_URL: postgresql+psycopg://borelia:borelia@127.0.0.1:5432/borelia
-      GEOLOG_STATE_BACKEND: database
+      BORELIA_ENV: ci
+      BORELIA_ENFORCE_SECRETS_SOURCE: "false"
+      BORELIA_ENABLE_DEMO_SEED: "false"
+      BORELIA_DATABASE_URL: postgresql+psycopg://borelia:borelia@127.0.0.1:5432/borelia
+      BORELIA_STATE_BACKEND: database
       AUTH_MODE: jwt
       AUTH_JWT_SECRET: multi-instance-secret-0123456789-abcdef
       AUTH_JWT_ALGORITHMS: HS256

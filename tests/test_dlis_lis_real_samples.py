@@ -3,8 +3,8 @@
 The sample files are third-party test data, so they are not committed. Point the
 environment variables at local copies:
 
-    GEOLOG_DLIS_SAMPLE=/path/file.dlis \
-    GEOLOG_LIS_SAMPLE=/path/file.lis \
+    BORELIA_DLIS_SAMPLE=/path/file.dlis \
+    BORELIA_LIS_SAMPLE=/path/file.lis \
     pytest tests/test_dlis_lis_real_samples.py -q
 
 dlisio's repository publishes samples under ``python/data``. LIS parsing with
@@ -24,8 +24,8 @@ from backend.dlis_lis_parser import parse_dlis_content, parse_lis_content, dlis_
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FIXTURE_DIR = ROOT / "test_data" / "dlisio"
-DLIS_SAMPLE = os.getenv("GEOLOG_DLIS_SAMPLE", str(FIXTURE_DIR / "206_05a-_3_DWL_DWL_WIRE_258276498.DLIS"))
-LIS_SAMPLE = os.getenv("GEOLOG_LIS_SAMPLE", str(FIXTURE_DIR / "MUD_LOG_1.LIS"))
+DLIS_SAMPLE = os.getenv("BORELIA_DLIS_SAMPLE", str(FIXTURE_DIR / "206_05a-_3_DWL_DWL_WIRE_258276498.DLIS"))
+LIS_SAMPLE = os.getenv("BORELIA_LIS_SAMPLE", str(FIXTURE_DIR / "MUD_LOG_1.LIS"))
 
 @pytest.mark.skipif(dlis_mod is None, reason="dlisio is not installed")
 @pytest.mark.skipif(not DLIS_SAMPLE or not pathlib.Path(DLIS_SAMPLE).is_file(), reason="DLIS fixture is missing")

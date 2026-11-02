@@ -20,11 +20,11 @@ if str(ROOT) not in sys.path:
 
 # Must be set before backend.database / backend.main are imported.
 _TMP_DIR = tempfile.mkdtemp(prefix="geolog-test-")
-os.environ["GEOLOG_DB_PATH"] = str(pathlib.Path(_TMP_DIR) / "test.db")
+os.environ["BORELIA_DB_PATH"] = str(pathlib.Path(_TMP_DIR) / "test.db")
 # Snapshots/locks are files on disk, not rows: without this the suite leaves a
 # well locked for the next run.
-os.environ["GEOLOG_ARTIFACT_DIR"] = str(pathlib.Path(_TMP_DIR) / "artifacts")
-os.environ.setdefault("GEOLOG_ENV", "test")
+os.environ["BORELIA_ARTIFACT_DIR"] = str(pathlib.Path(_TMP_DIR) / "artifacts")
+os.environ.setdefault("BORELIA_ENV", "test")
 
 import pytest  # noqa: E402
 

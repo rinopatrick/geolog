@@ -11,7 +11,7 @@ from backend import jobs, observability, ratelimit, state_backend, well_state
 
 @pytest.fixture(autouse=True)
 def database_state(monkeypatch):
-    monkeypatch.setenv("GEOLOG_STATE_BACKEND", "database")
+    monkeypatch.setenv("BORELIA_STATE_BACKEND", "database")
     state_backend.reset_rate_limits()
     state_backend.reset_metrics()
     state_backend.reset_jobs()
@@ -34,7 +34,7 @@ def _wait(job_id: str, timeout: float = 5.0) -> dict:
 
 
 def test_rate_limit_counters_are_shared(monkeypatch):
-    monkeypatch.setenv("GEOLOG_AUTH_IP_LIMIT", "2")
+    monkeypatch.setenv("BORELIA_AUTH_IP_LIMIT", "2")
     assert ratelimit.hit("shared:ip", 2, 60) == 0
     assert ratelimit.hit("shared:ip", 2, 60) == 0
     assert ratelimit.hit("shared:ip", 2, 60) > 0

@@ -9,7 +9,7 @@ query touching it failed with "no such column".
 These tests pin both halves of the fix: migrations actually apply, and drift is
 detected rather than discovered later.
 
-Each case runs in a subprocess with its own GEOLOG_DB_PATH, because the app's
+Each case runs in a subprocess with its own BORELIA_DB_PATH, because the app's
 engine is created at import time and cannot be redirected within a process.
 """
 
@@ -31,8 +31,8 @@ PYTHON = sys.executable
 def _run(code: str, db_path: pathlib.Path, expect_ok: bool = True) -> str:
     """Run a snippet in a fresh interpreter against the given database."""
     env = dict(os.environ)
-    env["GEOLOG_DB_PATH"] = str(db_path)
-    env["GEOLOG_ENV"] = "test"
+    env["BORELIA_DB_PATH"] = str(db_path)
+    env["BORELIA_ENV"] = "test"
     env["PYTHONPATH"] = str(REPO_ROOT)
     proc = subprocess.run(
         [PYTHON, "-c", code],
@@ -275,8 +275,8 @@ def test_alembic_check_passes_on_a_migrated_database(tmp_path):
     """`alembic check` is the CI gate; it must be usable as written in the repo."""
     db = tmp_path / "cli.db"
     env = dict(os.environ)
-    env["GEOLOG_DB_PATH"] = str(db)
-    env["GEOLOG_ENV"] = "test"
+    env["BORELIA_DB_PATH"] = str(db)
+    env["BORELIA_ENV"] = "test"
     env["PYTHONPATH"] = str(REPO_ROOT)
 
     up = subprocess.run(
@@ -298,8 +298,8 @@ def test_alembic_check_passes_on_a_migrated_database(tmp_path):
 def test_alembic_downgrade_reverses_the_baseline(tmp_path):
     db = tmp_path / "down.db"
     env = dict(os.environ)
-    env["GEOLOG_DB_PATH"] = str(db)
-    env["GEOLOG_ENV"] = "test"
+    env["BORELIA_DB_PATH"] = str(db)
+    env["BORELIA_ENV"] = "test"
     env["PYTHONPATH"] = str(REPO_ROOT)
 
     for args in (["upgrade", "head"], ["downgrade", "base"]):
@@ -318,8 +318,8 @@ def test_migrations_are_usable_from_another_working_directory(tmp_path):
     """alembic.ini is resolved from the repo root, not the caller's CWD."""
     db = tmp_path / "cwd.db"
     env = dict(os.environ)
-    env["GEOLOG_DB_PATH"] = str(db)
-    env["GEOLOG_ENV"] = "test"
+    env["BORELIA_DB_PATH"] = str(db)
+    env["BORELIA_ENV"] = "test"
     env["PYTHONPATH"] = str(REPO_ROOT)
 
     proc = subprocess.run(

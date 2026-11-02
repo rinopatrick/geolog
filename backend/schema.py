@@ -52,16 +52,16 @@ def _env_truthy(name: str, default: bool) -> bool:
 
 
 def _current_env() -> str:
-    return (os.getenv("GEOLOG_ENV") or os.getenv("ENV") or "dev").strip().lower()
+    return (os.getenv("BORELIA_ENV") or os.getenv("ENV") or "dev").strip().lower()
 
 
 def run_migrations_on_startup() -> bool:
     """Dev/test convenience only. Production migrates as a deploy step."""
-    return _env_truthy("GEOLOG_RUN_MIGRATIONS_ON_STARTUP", _current_env() in DEV_ENVIRONMENTS)
+    return _env_truthy("BORELIA_RUN_MIGRATIONS_ON_STARTUP", _current_env() in DEV_ENVIRONMENTS)
 
 
 def fail_on_schema_mismatch() -> bool:
-    return _env_truthy("GEOLOG_FAIL_ON_SCHEMA_MISMATCH", _current_env() not in DEV_ENVIRONMENTS)
+    return _env_truthy("BORELIA_FAIL_ON_SCHEMA_MISMATCH", _current_env() not in DEV_ENVIRONMENTS)
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALEMBIC_INI = REPO_ROOT / "alembic.ini"
@@ -91,7 +91,7 @@ def run_migrations() -> None:
     except ImportError:
         from backend.filelock import interprocess_lock
 
-    lock_root = os.getenv("GEOLOG_ARTIFACT_DIR") or str(REPO_ROOT / "backend" / "artifacts")
+    lock_root = os.getenv("BORELIA_ARTIFACT_DIR") or str(REPO_ROOT / "backend" / "artifacts")
     lock_path = os.path.join(lock_root, "schema-migrations.json")
 
     with interprocess_lock(lock_path, timeout=120.0):
@@ -212,7 +212,7 @@ def bootstrap_schema() -> None:
         run_migrations()
     else:
         logger.info(
-            "Startup migrations disabled (GEOLOG_ENV=%s); expecting a deploy-step migration",
+            "Startup migrations disabled (BORELIA_ENV=%s); expecting a deploy-step migration",
             _current_env(),
         )
 

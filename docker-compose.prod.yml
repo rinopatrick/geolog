@@ -6,18 +6,18 @@ services:
       - "8000"
     environment:
       PYTHONUNBUFFERED: "1"
-      GEOLOG_ENV: prod
+      BORELIA_ENV: prod
       AUTH_MODE: jwt
-      GEOLOG_SECRETS_SOURCE: docker-secrets
+      BORELIA_SECRETS_SOURCE: docker-secrets
       AUTH_JWT_SECRET_FILE: /run/secrets/auth_jwt_secret
       AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:?set issuer}
       AUTH_JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:?set audience}
       AUTH_JWT_JWKS_URL: ${AUTH_JWT_JWKS_URL:?set jwks url}
-      GEOLOG_REQUIRE_HTTPS: "true"
-      GEOLOG_TRUST_PROXY: "true"
-      GEOLOG_DB_PATH: /app/backend/data/borelia.db
-      GEOLOG_ARTIFACT_DIR: /app/backend/data/artifacts
-      GEOLOG_WORKERS: ${GEOLOG_WORKERS:-2}
+      BORELIA_REQUIRE_HTTPS: "true"
+      BORELIA_TRUST_PROXY: "true"
+      BORELIA_DB_PATH: /app/backend/data/borelia.db
+      BORELIA_ARTIFACT_DIR: /app/backend/data/artifacts
+      BORELIA_WORKERS: ${BORELIA_WORKERS:-2}
     secrets:
       - auth_jwt_secret
     volumes:
@@ -36,10 +36,10 @@ services:
     build: .
     command: ["python", "-m", "alembic", "upgrade", "head"]
     environment:
-      GEOLOG_ENV: prod
-      GEOLOG_SECRETS_SOURCE: docker-secrets
-      GEOLOG_DB_PATH: /app/backend/data/borelia.db
-      GEOLOG_ARTIFACT_DIR: /app/backend/data/artifacts
+      BORELIA_ENV: prod
+      BORELIA_SECRETS_SOURCE: docker-secrets
+      BORELIA_DB_PATH: /app/backend/data/borelia.db
+      BORELIA_ARTIFACT_DIR: /app/backend/data/artifacts
     volumes:
       - borelia-data:/app/backend/data
     # Migration failures must stop the deploy, not start old code on new schema.

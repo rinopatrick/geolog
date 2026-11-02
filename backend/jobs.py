@@ -41,7 +41,7 @@ JOBS: dict[str, dict] = {}
 HANDLERS: dict[str, Callable[[dict[str, Any], str], Any]] = {}
 HANDLERS_LOCK = threading.Lock()
 WORKER_ID = f"{os.getpid()}:{uuid.uuid4().hex[:8]}"
-STALE_SECONDS = int(os.getenv("GEOLOG_JOB_STALE_SECONDS", "900") or 900)
+STALE_SECONDS = int(os.getenv("BORELIA_JOB_STALE_SECONDS", "900") or 900)
 
 
 def _db_enabled() -> bool:

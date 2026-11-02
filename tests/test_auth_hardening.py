@@ -13,7 +13,7 @@ from backend.security import AuthConfig, DEV_ENVIRONMENTS
 
 
 def _clear_auth_env(monkeypatch):
-    for key in ("AUTH_MODE", "GEOLOG_ENV", "ENV"):
+    for key in ("AUTH_MODE", "BORELIA_ENV", "ENV"):
         monkeypatch.delenv(key, raising=False)
 
 
@@ -25,21 +25,21 @@ def test_header_auth_is_allowed_in_dev_by_default(monkeypatch):
 @pytest.mark.parametrize("env", sorted(DEV_ENVIRONMENTS))
 def test_header_auth_is_allowed_in_dev_environments(monkeypatch, env):
     _clear_auth_env(monkeypatch)
-    monkeypatch.setenv("GEOLOG_ENV", env)
+    monkeypatch.setenv("BORELIA_ENV", env)
     assert AuthConfig.from_env().mode == "header"
 
 
 @pytest.mark.parametrize("env", ["prod", "production", "staging"])
 def test_auth_defaults_to_jwt_outside_dev(monkeypatch, env):
     _clear_auth_env(monkeypatch)
-    monkeypatch.setenv("GEOLOG_ENV", env)
+    monkeypatch.setenv("BORELIA_ENV", env)
     assert AuthConfig.from_env().mode == "jwt"
 
 
 @pytest.mark.parametrize("env", ["prod", "production", "staging"])
 def test_header_auth_is_refused_outside_dev(monkeypatch, env):
     _clear_auth_env(monkeypatch)
-    monkeypatch.setenv("GEOLOG_ENV", env)
+    monkeypatch.setenv("BORELIA_ENV", env)
     monkeypatch.setenv("AUTH_MODE", "header")
     with pytest.raises(RuntimeError, match="AUTH_MODE=header"):
         AuthConfig.from_env()
@@ -47,7 +47,7 @@ def test_header_auth_is_refused_outside_dev(monkeypatch, env):
 
 def test_jwt_mode_is_accepted_outside_dev(monkeypatch):
     _clear_auth_env(monkeypatch)
-    monkeypatch.setenv("GEOLOG_ENV", "prod")
+    monkeypatch.setenv("BORELIA_ENV", "prod")
     monkeypatch.setenv("AUTH_MODE", "jwt")
     monkeypatch.setenv("AUTH_JWT_SECRET", "s3cret")
     assert AuthConfig.from_env().mode == "jwt"

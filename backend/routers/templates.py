@@ -20,7 +20,7 @@ def _template_locked(wid: int) -> bool:
 
     Delegates to well_state so there is one lock file. This module used to build
     its own path with os.path.dirname(__file__), which ignored
-    GEOLOG_ARTIFACT_DIR — so a deployment that redirected the artifact directory
+    BORELIA_ARTIFACT_DIR — so a deployment that redirected the artifact directory
     had lock_template write one file and apply_template read another, and the
     lock appeared not to work.
     """

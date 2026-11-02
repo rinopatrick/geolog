@@ -1,7 +1,7 @@
 """Optional OpenTelemetry tracing.
 
 The application runs without any OpenTelemetry package installed. When
-`GEOLOG_OTEL_ENABLED=true` and the optional dependencies are present, FastAPI
+`BORELIA_OTEL_ENABLED=true` and the optional dependencies are present, FastAPI
 requests are instrumented and exported over OTLP/HTTP. Missing packages are a
 warning, not a startup failure.
 """
@@ -29,18 +29,18 @@ def _truthy(value: str | None) -> bool:
 
 
 def _environment() -> str:
-    return (os.getenv("GEOLOG_ENV") or os.getenv("ENV") or "dev").strip().lower()
+    return (os.getenv("BORELIA_ENV") or os.getenv("ENV") or "dev").strip().lower()
 
 
 def config() -> dict[str, Any]:
     return {
-        "enabled": _truthy(os.getenv("GEOLOG_OTEL_ENABLED")),
-        "endpoint": (os.getenv("GEOLOG_OTEL_ENDPOINT") or "http://localhost:4318/v1/traces").strip(),
-        "service_name": (os.getenv("GEOLOG_OTEL_SERVICE_NAME") or "geolog").strip(),
-        "sample_ratio": os.getenv("GEOLOG_OTEL_SAMPLE_RATIO", "1.0"),
-        "headers": os.getenv("GEOLOG_OTEL_HEADERS", ""),
+        "enabled": _truthy(os.getenv("BORELIA_OTEL_ENABLED")),
+        "endpoint": (os.getenv("BORELIA_OTEL_ENDPOINT") or "http://localhost:4318/v1/traces").strip(),
+        "service_name": (os.getenv("BORELIA_OTEL_SERVICE_NAME") or "geolog").strip(),
+        "sample_ratio": os.getenv("BORELIA_OTEL_SAMPLE_RATIO", "1.0"),
+        "headers": os.getenv("BORELIA_OTEL_HEADERS", ""),
         "excluded_urls": (
-            os.getenv("GEOLOG_OTEL_EXCLUDED_URLS")
+            os.getenv("BORELIA_OTEL_EXCLUDED_URLS")
             or "api/health,api/ops/metrics,api/ops/metrics/prometheus"
         ).strip(),
     }
@@ -60,7 +60,7 @@ def _headers(raw: str) -> dict[str, str]:
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        logger.warning("GEOLOG_OTEL_HEADERS is not valid JSON; ignoring it")
+        logger.warning("BORELIA_OTEL_HEADERS is not valid JSON; ignoring it")
         return {}
     if not isinstance(parsed, dict):
         return {}

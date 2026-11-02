@@ -42,8 +42,8 @@ jobs:
       # gets a red build instead of a database that silently lacks their column.
       - name: Migration gates
         env:
-          GEOLOG_ENV: ci
-          GEOLOG_DB_PATH: ${{ runner.temp }}/migration-gate.db
+          BORELIA_ENV: ci
+          BORELIA_DB_PATH: ${{ runner.temp }}/migration-gate.db
         run: |
           python -m alembic upgrade head
           python -m alembic check
@@ -79,8 +79,8 @@ jobs:
         run: |
           set -euo pipefail
           docker run -d --name borelia-ci -p 8000:8000 \
-            -e GEOLOG_ENV=dev \
-            -e GEOLOG_ENABLE_DEMO_SEED=true \
+            -e BORELIA_ENV=dev \
+            -e BORELIA_ENABLE_DEMO_SEED=true \
             borelia:ci
           for i in {1..60}; do
             if curl -sf http://127.0.0.1:8000/api/health >/dev/null; then
@@ -102,9 +102,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      GEOLOG_ENV: ci
-      GEOLOG_ENFORCE_SECRETS_SOURCE: "false"
-      GEOLOG_ENABLE_DEMO_SEED: "true"
+      BORELIA_ENV: ci
+      BORELIA_ENFORCE_SECRETS_SOURCE: "false"
+      BORELIA_ENABLE_DEMO_SEED: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v7

@@ -1,6 +1,6 @@
 """Database-backed shared state for multi-instance deployments.
 
-Set ``GEOLOG_STATE_BACKEND=database`` to move rate-limit counters, metric
+Set ``BORELIA_STATE_BACKEND=database`` to move rate-limit counters, metric
 snapshots and job records from per-host files into the primary database. With
 PostgreSQL this makes them shared across app instances; with SQLite it keeps the
 same single-host constraint but preserves the existing behavior.
@@ -28,7 +28,7 @@ except ImportError:
 
 
 def enabled() -> bool:
-    return (os.getenv("GEOLOG_STATE_BACKEND") or "file").strip().lower() in {
+    return (os.getenv("BORELIA_STATE_BACKEND") or "file").strip().lower() in {
         "database",
         "db",
         "postgres",

@@ -8,7 +8,7 @@ Works on Windows (`msvcrt`) and POSIX (`fcntl`). The lock is advisory: every
 writer in this codebase must use it.
 
 The lock file name is a hash of the requested logical path and always lives in
-GEOLOG_ARTIFACT_DIR. Callers never control a filesystem path here, which keeps
+BORELIA_ARTIFACT_DIR. Callers never control a filesystem path here, which keeps
 the lock primitive free of path traversal.
 """
 
@@ -27,7 +27,7 @@ else:  # pragma: no cover - exercised on Linux CI
 
 def _lock_root() -> str:
     return os.path.abspath(
-        os.getenv("GEOLOG_ARTIFACT_DIR")
+        os.getenv("BORELIA_ARTIFACT_DIR")
         or os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
     )
 

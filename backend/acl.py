@@ -38,7 +38,7 @@ def _env_truthy(name: str, default: bool) -> bool:
 
 
 def enforcement_enabled() -> bool:
-    return _env_truthy("GEOLOG_ENFORCE_PROJECT_ACL", True)
+    return _env_truthy("BORELIA_ENFORCE_PROJECT_ACL", True)
 
 
 def project_is_restricted(db, project_id: int) -> bool:

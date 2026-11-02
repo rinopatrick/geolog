@@ -1,6 +1,6 @@
 """Cross-worker rate limits and login lockout.
 
-State is a JSON file under GEOLOG_ARTIFACT_DIR, protected by the same advisory
+State is a JSON file under BORELIA_ARTIFACT_DIR, protected by the same advisory
 file lock used by the other file-backed state. That is sufficient for the
 single-host deployment this project supports; a multi-host deployment should
 move the same interface to Redis or the primary database.
@@ -38,23 +38,23 @@ def _env_int(name: str, default: int) -> int:
 
 
 def auth_ip_limit() -> int:
-    return _env_int("GEOLOG_AUTH_IP_LIMIT", 30)
+    return _env_int("BORELIA_AUTH_IP_LIMIT", 30)
 
 
 def auth_ip_window_seconds() -> int:
-    return _env_int("GEOLOG_AUTH_IP_WINDOW_SECONDS", 300)
+    return _env_int("BORELIA_AUTH_IP_WINDOW_SECONDS", 300)
 
 
 def auth_failure_limit() -> int:
-    return _env_int("GEOLOG_AUTH_FAILURE_LIMIT", 5)
+    return _env_int("BORELIA_AUTH_FAILURE_LIMIT", 5)
 
 
 def auth_failure_window_seconds() -> int:
-    return _env_int("GEOLOG_AUTH_FAILURE_WINDOW_SECONDS", 900)
+    return _env_int("BORELIA_AUTH_FAILURE_WINDOW_SECONDS", 900)
 
 
 def auth_lockout_seconds() -> int:
-    return _env_int("GEOLOG_AUTH_LOCKOUT_SECONDS", 900)
+    return _env_int("BORELIA_AUTH_LOCKOUT_SECONDS", 900)
 
 
 def _db_enabled() -> bool:

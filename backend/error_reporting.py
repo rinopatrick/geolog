@@ -1,7 +1,7 @@
 """Optional error reporting to an operator-configured webhook.
 
 The request path only formats a small payload and hands it to a daemon thread.
-No third-party SDK is required, and an unset `GEOLOG_ERROR_WEBHOOK_URL` makes
+No third-party SDK is required, and an unset `BORELIA_ERROR_WEBHOOK_URL` makes
 every call a no-op. The payload deliberately excludes query strings, request
 bodies, tokens and user subjects.
 """
@@ -30,17 +30,17 @@ _MAX_PER_WINDOW = 30
 
 
 def _webhook_url() -> str:
-    return (os.getenv("GEOLOG_ERROR_WEBHOOK_URL") or "").strip()
+    return (os.getenv("BORELIA_ERROR_WEBHOOK_URL") or "").strip()
 
 
 def _include_trace() -> bool:
-    return (os.getenv("GEOLOG_ERROR_WEBHOOK_INCLUDE_TRACE") or "").strip().lower() in {
+    return (os.getenv("BORELIA_ERROR_WEBHOOK_INCLUDE_TRACE") or "").strip().lower() in {
         "1", "true", "yes", "on"
     }
 
 
 def _environment() -> str:
-    return (os.getenv("GEOLOG_ENV") or os.getenv("ENV") or "dev").strip().lower()
+    return (os.getenv("BORELIA_ENV") or os.getenv("ENV") or "dev").strip().lower()
 
 
 def _state(request: Any, name: str, default: str = "") -> str:
