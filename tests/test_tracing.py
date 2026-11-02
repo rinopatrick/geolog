@@ -23,7 +23,7 @@ def test_config_defaults(monkeypatch):
     monkeypatch.setenv("BORELIA_OTEL_SAMPLE_RATIO", "0.25")
     cfg = tracing.config()
     assert cfg["enabled"] is True
-    assert cfg["service_name"] == "geolog"
+    assert cfg["service_name"] == "borelia"
     assert cfg["endpoint"].endswith("/v1/traces")
     assert cfg["sample_ratio"] == "0.25"
     assert "api/health" in cfg["excluded_urls"]

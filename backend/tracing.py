@@ -36,7 +36,7 @@ def config() -> dict[str, Any]:
     return {
         "enabled": _truthy(os.getenv("BORELIA_OTEL_ENABLED")),
         "endpoint": (os.getenv("BORELIA_OTEL_ENDPOINT") or "http://localhost:4318/v1/traces").strip(),
-        "service_name": (os.getenv("BORELIA_OTEL_SERVICE_NAME") or "geolog").strip(),
+        "service_name": (os.getenv("BORELIA_OTEL_SERVICE_NAME") or "borelia").strip(),
         "sample_ratio": os.getenv("BORELIA_OTEL_SAMPLE_RATIO", "1.0"),
         "headers": os.getenv("BORELIA_OTEL_HEADERS", ""),
         "excluded_urls": (

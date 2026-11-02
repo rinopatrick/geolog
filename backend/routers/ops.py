@@ -914,7 +914,7 @@ def ops_alert_rules(_role: str = Depends(require_viewer)):
             "description": "Prometheus text exposition format",
             "content": {
                 "text/plain": {
-                    "example": "# HELP geolog_requests_total Total HTTP requests observed\n# TYPE geolog_requests_total counter\ngeolog_requests_total 123"
+                    "example": "# HELP borelia_requests_total Total HTTP requests observed\n# TYPE borelia_requests_total counter\nborelia_requests_total 123"
                 }
             },
         }
@@ -931,29 +931,29 @@ def ops_metrics_prometheus(_role: str = Depends(require_viewer)):
         lat_count = int(OBS_METRICS.get("latency_ms_count", 0))
 
     lines = [
-        "# HELP geolog_requests_total Total HTTP requests observed",
-        "# TYPE geolog_requests_total counter",
-        f"geolog_requests_total {total}",
-        "# HELP geolog_requests_by_method_total HTTP requests by method",
-        "# TYPE geolog_requests_by_method_total counter",
+        "# HELP borelia_requests_total Total HTTP requests observed",
+        "# TYPE borelia_requests_total counter",
+        f"borelia_requests_total {total}",
+        "# HELP borelia_requests_by_method_total HTTP requests by method",
+        "# TYPE borelia_requests_by_method_total counter",
     ]
     for method, count in sorted(by_method.items()):
-        lines.append(f'geolog_requests_by_method_total{{method="{method}"}} {int(count)}')
+        lines.append(f'borelia_requests_by_method_total{{method="{method}"}} {int(count)}')
 
     lines += [
-        "# HELP geolog_requests_by_status_total HTTP requests by response status",
-        "# TYPE geolog_requests_by_status_total counter",
+        "# HELP borelia_requests_by_status_total HTTP requests by response status",
+        "# TYPE borelia_requests_by_status_total counter",
     ]
     for status, count in sorted(by_status.items()):
-        lines.append(f'geolog_requests_by_status_total{{status="{status}"}} {int(count)}')
+        lines.append(f'borelia_requests_by_status_total{{status="{status}"}} {int(count)}')
 
     lines += [
-        "# HELP geolog_request_latency_ms_sum Sum of request latency in milliseconds",
-        "# TYPE geolog_request_latency_ms_sum counter",
-        f"geolog_request_latency_ms_sum {lat_sum}",
-        "# HELP geolog_request_latency_ms_count Count of request latency samples",
-        "# TYPE geolog_request_latency_ms_count counter",
-        f"geolog_request_latency_ms_count {lat_count}",
+        "# HELP borelia_requests_latency_ms_sum Sum of request latency in milliseconds",
+        "# TYPE borelia_requests_latency_ms_sum counter",
+        f"borelia_requests_latency_ms_sum {lat_sum}",
+        "# HELP borelia_requests_latency_ms_count Count of request latency samples",
+        "# TYPE borelia_requests_latency_ms_count counter",
+        f"borelia_requests_latency_ms_count {lat_count}",
         "",
     ]
     return StreamingResponse(iter(["\n".join(lines)]), media_type="text/plain; version=0.0.4")

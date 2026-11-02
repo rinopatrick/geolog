@@ -16,8 +16,8 @@ def test_create_access_token_and_decode():
     cfg = AuthConfig(
         mode="jwt",
         jwt_secret="super-secret-key-12345",
-        jwt_issuer="geolog-auth",
-        jwt_audience="geolog-api",
+        jwt_issuer="borelia-auth",
+        jwt_audience="borelia-api",
     )
     token = create_access_token(
         subject="petrophysicist",

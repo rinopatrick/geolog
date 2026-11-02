@@ -8,6 +8,15 @@ While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
 
+### Changed (BREAKING)
+
+- **Renamed GeoLog to Borelia** (trademark clearance). Migration for operators:
+  1. env: rename every `GEOLOG_*` to `BORELIA_*` (no backward-compat alias);
+  2. DB file: copy/rename `geolog.db` to `borelia.db` (or point `BORELIA_DB_PATH` at the old file);
+  3. compose: volume `geolog-data` is now `borelia-data`.
+  Prometheus metric names changed `geolog_*` to `borelia_*`; JWT example issuer/audience
+  changed to `borelia-auth`/`borelia-api`; health field `app` is now `"Borelia"`.
+
 ## [0.28.0] - 2026-10-31
 
 ### Added

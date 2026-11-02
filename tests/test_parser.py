@@ -1,4 +1,4 @@
-"""Tests for GeoLog LAS parser and API endpoints."""
+"""Tests for Borelia LAS parser and API endpoints."""
 import sys, os, io, json, math
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -287,7 +287,7 @@ def test_api_health():
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["app"] == "GeoLog"
+    assert body["app"] == "Borelia"
     assert body["version"] == __version__
 
 

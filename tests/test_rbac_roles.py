@@ -266,11 +266,11 @@ def test_jwt_mode_enforces_issuer_and_audience_valid():
     main_mod.AUTH_CONFIG.mode = "jwt"
     main_mod.AUTH_CONFIG.jwt_secret = "test-secret"
     main_mod.AUTH_CONFIG.jwt_algorithms = ("HS256",)
-    main_mod.AUTH_CONFIG.jwt_issuer = "geolog-auth"
-    main_mod.AUTH_CONFIG.jwt_audience = "geolog-api"
+    main_mod.AUTH_CONFIG.jwt_issuer = "borelia-auth"
+    main_mod.AUTH_CONFIG.jwt_audience = "borelia-api"
 
     token = jwt.encode(
-        {"sub": "u3", "role": "viewer", "iss": "geolog-auth", "aud": "geolog-api"},
+        {"sub": "u3", "role": "viewer", "iss": "borelia-auth", "aud": "borelia-api"},
         "test-secret",
         algorithm="HS256",
     )
@@ -1077,11 +1077,11 @@ def test_ops_metrics_prometheus_exposition_shape():
     r = client.get("/api/ops/metrics/prometheus", headers=_h("viewer"))
     assert r.status_code == 200
     text = r.text
-    assert "# HELP geolog_requests_total" in text
-    assert "# TYPE geolog_requests_total counter" in text
-    assert "geolog_requests_total" in text
-    assert "geolog_request_latency_ms_sum" in text
-    assert "geolog_request_latency_ms_count" in text
+    assert "# HELP borelia_requests_total" in text
+    assert "# TYPE borelia_requests_total counter" in text
+    assert "borelia_requests_total" in text
+    assert "borelia_requests_latency_ms_sum" in text
+    assert "borelia_requests_latency_ms_count" in text
 
 
 def test_ops_health_shape_and_access():
@@ -1124,8 +1124,8 @@ def test_ops_otel_status_shape_and_env_signals():
     old_attrs = os.environ.get("OTEL_RESOURCE_ATTRIBUTES")
 
     os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://otel-collector:4318"
-    os.environ["OTEL_SERVICE_NAME"] = "geolog-api"
-    os.environ["OTEL_RESOURCE_ATTRIBUTES"] = "service.namespace=geolog,deployment.environment=dev"
+    os.environ["OTEL_SERVICE_NAME"] = "borelia-api"
+    os.environ["OTEL_RESOURCE_ATTRIBUTES"] = "service.namespace=borelia,deployment.environment=dev"
 
     try:
         r = client.get("/api/ops/otel-status", headers=_h("viewer"))
@@ -1134,7 +1134,7 @@ def test_ops_otel_status_shape_and_env_signals():
         assert data.get("ok") is True
         assert data.get("enabled") is True
         assert data.get("exporter_otlp_endpoint_set") is True
-        assert data.get("service_name") == "geolog-api"
+        assert data.get("service_name") == "borelia-api"
         assert data.get("resource_attributes_set") is True
         assert "timestamp" in data
     finally:
@@ -1158,7 +1158,7 @@ def test_ops_evidence_status_shape_and_acceptance_gate():
     keys = ["OPS_DASHBOARD_URL", "OPS_ALERT_TARGET", "OPS_TRACE_BACKEND_URL"]
     old = {k: os.environ.get(k) for k in keys}
 
-    os.environ["OPS_DASHBOARD_URL"] = "http://grafana.local/d/geolog"
+    os.environ["OPS_DASHBOARD_URL"] = "http://grafana.local/d/borelia"
     os.environ["OPS_ALERT_TARGET"] = "slack:#ops-alerts"
     os.environ["OPS_TRACE_BACKEND_URL"] = "http://jaeger.local:16686"
 
@@ -1174,7 +1174,7 @@ def test_ops_evidence_status_shape_and_acceptance_gate():
         assert data.get("probes_enabled") is False
         assert data.get("dashboard_reachable") is None
         assert data.get("trace_backend_reachable") is None
-        assert data.get("dashboard_url") == "http://grafana.local/d/geolog"
+        assert data.get("dashboard_url") == "http://grafana.local/d/borelia"
         assert data.get("alert_delivery_target") == "slack:#ops-alerts"
         assert data.get("trace_backend_url") == "http://jaeger.local:16686"
         assert "timestamp" in data
