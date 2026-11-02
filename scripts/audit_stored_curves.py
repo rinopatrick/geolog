@@ -9,7 +9,7 @@ them.
 Usage:
   python scripts/audit_stored_curves.py
   python scripts/audit_stored_curves.py --json
-  python scripts/audit_stored_curves.py --db backend/geolog.db
+  python scripts/audit_stored_curves.py --db backend/borelia.db
 
 Exit codes: 0 = nothing found, 1 = at least one corrupt curve found.
 """
@@ -30,7 +30,7 @@ from backend.curve_plausibility import audit_curves  # noqa: E402
 
 def collect(db_path: str | None) -> list[dict]:
     if db_path:
-        os.environ["GEOLOG_DB_PATH"] = db_path
+        os.environ["BORELIA_DB_PATH"] = db_path
 
     from backend.database import SessionLocal
     from backend.models import CurveData, LogRun, Well

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Nightly backup + restore verification for a production GeoLog host.
-# Usage (cron): 15 2 * * * /srv/geolog/scripts/nightly_backup.sh >> /var/log/geolog-backup.log 2>&1
-# Requires: GEOLOG_DB_PATH, GEOLOG_ARTIFACT_DIR, BACKUP_DIR, BACKUP_DRILL_SIGNING_KEY.
+# Nightly backup + restore verification for a production Borelia host.
+# Usage (cron): 15 2 * * * /srv/borelia/scripts/nightly_backup.sh >> /var/log/borelia-backup.log 2>&1
+# Requires: BORELIA_DB_PATH, BORELIA_ARTIFACT_DIR, BACKUP_DIR, BACKUP_DRILL_SIGNING_KEY.
 set -euo pipefail
 
-: "${GEOLOG_DB_PATH:?set GEOLOG_DB_PATH}"
-: "${GEOLOG_ARTIFACT_DIR:?set GEOLOG_ARTIFACT_DIR}"
+: "${BORELIA_DB_PATH:?set BORELIA_DB_PATH}"
+: "${BORELIA_ARTIFACT_DIR:?set BORELIA_ARTIFACT_DIR}"
 : "${BACKUP_DIR:?set BACKUP_DIR}"
 : "${BACKUP_DRILL_SIGNING_KEY:?set BACKUP_DRILL_SIGNING_KEY}"
 
@@ -15,7 +15,7 @@ mkdir -p "$DEST"
 cd "$(dirname "$0")/.."
 
 echo "[backup] drill at $STAMP"
-bash scripts/backup_restore_drill.sh "$GEOLOG_DB_PATH" "$GEOLOG_ARTIFACT_DIR"
+bash scripts/backup_restore_drill.sh "$BORELIA_DB_PATH" "$BORELIA_ARTIFACT_DIR"
 LATEST=$(ls -dt artifacts/backup-drill/*/ | head -1)
 cp -r "$LATEST" "$DEST/drill"
 

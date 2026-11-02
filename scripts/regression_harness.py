@@ -131,7 +131,7 @@ def run() -> int:
     data = expect_ok("health", _request("health", _get, "/api/health"), keys=("status", "app", "version"))
     if data:
         check("health [status ok]", data["status"] == "ok", str(data.get("status")))
-        check("health [app name]", data["app"] == "GeoLog", str(data.get("app")))
+        check("health [app name]", data["app"] == "Borelia", str(data.get("app")))
 
     # ─── Reads that must return usable structures ───────────────
     wells = expect_ok("wells list", _request("wells list", _get, "/api/wells/"))

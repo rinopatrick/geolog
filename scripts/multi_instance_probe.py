@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Probe two GeoLog instances backed by one PostgreSQL database.
+"""Probe two Borelia instances backed by one PostgreSQL database.
 
 This is intentionally an end-to-end check, not a unit test: it logs in through
 the public API, creates ACL state on instance A, verifies it on instance B,
@@ -178,8 +178,8 @@ class Probe:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base-a", default=os.getenv("GEOLOG_INSTANCE_A", "http://127.0.0.1:8001"))
-    parser.add_argument("--base-b", default=os.getenv("GEOLOG_INSTANCE_B", "http://127.0.0.1:8002"))
+    parser.add_argument("--base-a", default=os.getenv("BORELIA_INSTANCE_A", "http://127.0.0.1:8001"))
+    parser.add_argument("--base-b", default=os.getenv("BORELIA_INSTANCE_B", "http://127.0.0.1:8002"))
     parser.add_argument("--secret", default=os.getenv("AUTH_JWT_SECRET", DEFAULT_SECRET))
     args = parser.parse_args()
     try:

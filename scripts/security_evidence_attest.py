@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Attest backup drill evidence against GeoLog API contract.
+"""Attest backup drill evidence against Borelia API contract.
 
 Usage:
   python scripts/security_evidence_attest.py \

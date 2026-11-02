@@ -26,7 +26,7 @@ fi
 echo "📦 Installing dependencies from requirements.txt..."
 python3 -m pip install -r requirements.txt
 
-echo "🚀 Starting GeoLog API"
+echo "🚀 Starting Borelia API"
 echo "🌐 URL: http://localhost:8000"
 echo "📘 Swagger UI: http://localhost:8000/docs"
 

@@ -68,7 +68,7 @@ function pct(values, p) {
 }
 
 (async () => {
-  const base = process.env.GEOLOG_BASE_URL || 'http://127.0.0.1:8000';
+  const base = process.env.BORELIA_BASE_URL || 'http://127.0.0.1:8000';
   const out = { checks: {} };
   try {
     // Seed: project + tiny volume + horizons + surface + depth.

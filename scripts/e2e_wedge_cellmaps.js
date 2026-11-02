@@ -9,7 +9,7 @@ const { chromium } = require('playwright');
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
-  const base = process.env.GEOLOG_BASE_URL || 'http://localhost:8000';
+  const base = process.env.BORELIA_BASE_URL || 'http://localhost:8000';
   await page.goto(base, { waitUntil: 'domcontentloaded' });
   const out = await page.evaluate(() => {
     const checks = {};
