@@ -1,4 +1,4 @@
-"""Audit-log router for GeoLog.
+"""Audit-log router for Borelia.
 
 Append-only provenance chain: listing, chain verification, and signed export
 verification. The signing and chain helpers live in backend/audit.py because the

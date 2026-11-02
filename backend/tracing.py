@@ -18,7 +18,7 @@ try:
 except ImportError:
     from backend.version import __version__
 
-logger = logging.getLogger("geolog.tracing")
+logger = logging.getLogger("borelia.tracing")
 
 _PROVIDER: Any = None
 _INSTRUMENTED = False

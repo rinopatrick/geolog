@@ -1,4 +1,4 @@
-"""Operations router for GeoLog.
+"""Operations router for Borelia.
 
 Metrics, SLO status, alerts, health, observability, and the security-evidence
 gate family (manifest, attestation, freshness, gate/enforce/assert/check).
@@ -1024,7 +1024,7 @@ def ops_observability_status(_role: str = Depends(require_viewer)):
 @router.get("/otel-status", response_model=OpsOtelStatusResponse)
 def ops_otel_status(_role: str = Depends(require_viewer)):
     endpoint = (os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or "").strip()
-    service_name = (os.getenv("OTEL_SERVICE_NAME") or "geolog-app").strip() or "geolog-app"
+    service_name = (os.getenv("OTEL_SERVICE_NAME") or "borelia-app").strip() or "borelia-app"
     resource_attrs = (os.getenv("OTEL_RESOURCE_ATTRIBUTES") or "").strip()
     enabled = bool(endpoint)
     return {

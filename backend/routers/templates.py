@@ -1,4 +1,4 @@
-"""Template Workflow router for GeoLog."""
+"""Template Workflow router for Borelia."""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import math

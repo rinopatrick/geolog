@@ -34,7 +34,7 @@ try:
 except ImportError:
     from backend.well_state import ARTIFACT_DIR
 
-JOB_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="geolog-job")
+JOB_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="borelia-job")
 JOBS_FILE = os.path.join(ARTIFACT_DIR, "jobs.json")
 JOBS_LOCK = threading.Lock()
 JOBS: dict[str, dict] = {}
@@ -302,4 +302,4 @@ def _reaper_loop() -> None:
             pass
 
 
-threading.Thread(target=_reaper_loop, name="geolog-job-reaper", daemon=True).start()
+threading.Thread(target=_reaper_loop, name="borelia-job-reaper", daemon=True).start()

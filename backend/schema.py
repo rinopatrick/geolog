@@ -39,7 +39,7 @@ try:
 except ImportError:
     from backend.database import Base, engine
 
-logger = logging.getLogger("geolog")
+logger = logging.getLogger("borelia")
 
 DEV_ENVIRONMENTS = {"dev", "local", "test", "ci"}
 

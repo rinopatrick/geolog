@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 _backend_dir = os.path.dirname(os.path.abspath(__file__))
-_db_path = os.environ.get("GEOLOG_DB_PATH") or os.path.join(_backend_dir, "geolog.db")
+_db_path = os.environ.get("GEOLOG_DB_PATH") or os.path.join(_backend_dir, "borelia.db")
 
 if os.environ.get("GEOLOG_DATABASE_URL"):
     SQLALCHEMY_DATABASE_URL = os.environ["GEOLOG_DATABASE_URL"].strip()

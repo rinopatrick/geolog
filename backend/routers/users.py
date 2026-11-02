@@ -1,4 +1,4 @@
-"""User management router for GeoLog."""
+"""User management router for Borelia."""
 
 import hmac
 import secrets

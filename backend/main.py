@@ -1,4 +1,4 @@
-"""GeoLog — Oil & Gas Well Log Viewer."""
+"""Borelia — Oil & Gas Well Log Viewer."""
 import hashlib
 import json
 import logging
@@ -198,7 +198,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-logger = logging.getLogger("geolog")
+logger = logging.getLogger("borelia")
 
 
 
@@ -222,7 +222,7 @@ _docs_enabled = _env in {"dev", "local", "test", "ci"} or (
 )
 
 app = FastAPI(
-    title="GeoLog",
+    title="Borelia",
     description="Oil & Gas Well Log Viewer",
     version=__version__,
     docs_url="/docs" if _docs_enabled else None,
@@ -692,7 +692,7 @@ def seed_demo_data(db: Session = None) -> bool:
         las = LASParser.parse_file(demo_las)
         fname = os.path.basename(demo_las)
 
-        proj = Project(name="Demo Field Study", field_name="Demo Field", operator="GeoLog Demo", country="US")
+        proj = Project(name="Demo Field Study", field_name="Demo Field", operator="Borelia Demo", country="US")
         db.add(proj)
         db.flush()
 
@@ -747,11 +747,11 @@ def seed_demo_data(db: Session = None) -> bool:
         w1, nc1, np1, nt1 = _seed_well(
             name=las.well.well_name or "DEMO-01",
             uwi=las.well.uwi or "00-000-00000",
-            operator=las.well.operator or "GeoLog Demo",
+            operator=las.well.operator or "Borelia Demo",
         )
         # Well 2: offset well (25 ft structural dip, for correlation demo)
         w2, nc2, np2, nt2 = _seed_well(
-            name="DEMO-02", uwi="00-000-00001", operator="GeoLog Demo",
+            name="DEMO-02", uwi="00-000-00001", operator="Borelia Demo",
             depth_offset=25.0, tops_offset=12.0,
         )
 
@@ -781,13 +781,13 @@ def _auto_seed():
 # ─── Health ───────────────────────────────────────────────────
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "app": "GeoLog", "version": __version__}
+    return {"status": "ok", "app": "Borelia", "version": __version__}
 
 
 @app.get("/api/version")
 def api_version(request: Request):
     return {
-        "app": "GeoLog",
+        "app": "Borelia",
         "version": __version__,
         "api_version": getattr(request.state, "api_version", "v0"),
     }

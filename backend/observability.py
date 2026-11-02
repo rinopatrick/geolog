@@ -229,4 +229,4 @@ def _flush_loop() -> None:
 
 
 atexit.register(flush_metrics)
-threading.Thread(target=_flush_loop, name="geolog-metrics-flush", daemon=True).start()
+threading.Thread(target=_flush_loop, name="borelia-metrics-flush", daemon=True).start()

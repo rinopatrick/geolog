@@ -1,4 +1,4 @@
-"""Unit Normalization + Alias Resolution router for GeoLog."""
+"""Unit Normalization + Alias Resolution router for Borelia."""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import numpy as np

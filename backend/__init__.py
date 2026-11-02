@@ -1,1 +1,1 @@
-# GeoLog backend package
+# Borelia backend package

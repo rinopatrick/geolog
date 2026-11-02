@@ -1,4 +1,4 @@
-"""DLIS/LIS parsers for GeoLog.
+"""DLIS/LIS parsers for Borelia.
 
 Primary path uses dlisio. Fallback path performs minimal binary scanning to
 extract numeric channels with depth-like index.

@@ -96,7 +96,7 @@ def _post(url: str, payload: dict[str, Any]) -> None:
     request = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json", "User-Agent": "GeoLog/error-report"},
+        headers={"Content-Type": "application/json", "User-Agent": "Borelia/error-report"},
         method="POST",
     )
     try:

@@ -1,4 +1,4 @@
-"""Project-level router for GeoLog.
+"""Project-level router for Borelia.
 
 Covers project CRUD and the cross-well views: comparison, cross-section, strip
 log, formation matrix, tops export, summary, locations, crossplot matrix,
