@@ -380,7 +380,7 @@ class ShiftStretchControls {
 }
 
 function _corrAuthHeaders() {
-  return window.geologAuthHeaders ? window.geologAuthHeaders() : { 'X-User-Role': 'viewer' };
+  return window.boreliaAuthHeaders ? window.boreliaAuthHeaders() : { 'X-User-Role': 'viewer' };
 }
 
 async function fetchCrossSection(baseUrl, wellIds = [], curve = 'GR') {

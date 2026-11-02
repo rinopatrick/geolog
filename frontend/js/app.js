@@ -1,4 +1,4 @@
-class GeoLogApp {
+class BoreliaApp {
     constructor() {
         this.renderer = null;
         this.currentWell = null;
@@ -21,13 +21,13 @@ class GeoLogApp {
         this._undoStack = [];
         this._redoStack = [];
         this._maxUndoEntries = 50;
-        this.performanceMode = localStorage.getItem('geolog_performance_mode') === '1';
-        this.maxPoints = parseInt(localStorage.getItem('geolog_max_points') || '3000', 10);
+        this.performanceMode = localStorage.getItem('borelia_performance_mode') === '1';
+        this.maxPoints = parseInt(localStorage.getItem('borelia_max_points') || '3000', 10);
         this._searchDebounceTimer = null;
         this._jobMonitorTimer = null;
-        this.currentRole = (localStorage.getItem('geolog_active_role') || 'admin').toLowerCase();
-        this.authToken = localStorage.getItem('geolog_auth_token') || '';
-        this.jobIds = JSON.parse(localStorage.getItem('geolog_job_ids') || '[]');
+        this.currentRole = (localStorage.getItem('borelia_active_role') || 'admin').toLowerCase();
+        this.authToken = localStorage.getItem('borelia_auth_token') || '';
+        this.jobIds = JSON.parse(localStorage.getItem('borelia_job_ids') || '[]');
         this.dstData = [];
         this.rftData = [];
         this.rftGradientAnalysis = null;
@@ -213,10 +213,10 @@ class GeoLogApp {
         await this.loadCurveConfig();
         await this.loadWorkflowTemplates();
         await this.loadProjects();
-        const lastWell = localStorage.getItem('geolog_last_well');
+        const lastWell = localStorage.getItem('borelia_last_well');
         if (lastWell && this.wells.find(w => w.id === parseInt(lastWell))) {
             await this.selectWell(parseInt(lastWell));
-            const lastRun = localStorage.getItem('geolog_last_run');
+            const lastRun = localStorage.getItem('borelia_last_run');
             if (lastRun && this.currentWell?.log_runs?.find(r => r.id === parseInt(lastRun))) {
                 await this.selectLogRun(parseInt(lastRun));
             }
@@ -252,7 +252,7 @@ class GeoLogApp {
             scaleSelect.addEventListener('change', () => {
                 const scale = parseInt(scaleSelect.value);
                 this.renderer.scale = scale;
-                localStorage.setItem('geolog_scale', String(scale));
+                localStorage.setItem('borelia_scale', String(scale));
                 this._loadCurveData();
             });
         }
@@ -266,8 +266,8 @@ class GeoLogApp {
                 const stop = parseFloat(bottomInput.value);
                 if (!isNaN(start) && !isNaN(stop) && stop > start) {
                     this.renderer.setView(start, stop);
-                    localStorage.setItem('geolog_depth_top', String(start));
-                    localStorage.setItem('geolog_depth_bottom', String(stop));
+                    localStorage.setItem('borelia_depth_top', String(start));
+                    localStorage.setItem('borelia_depth_bottom', String(stop));
                 }
             };
             topInput.addEventListener('change', applyDepth);
@@ -290,7 +290,7 @@ class GeoLogApp {
             perfToggle.checked = this.performanceMode;
             perfToggle.addEventListener('change', async () => {
                 this.performanceMode = perfToggle.checked;
-                localStorage.setItem('geolog_performance_mode', this.performanceMode ? '1' : '0');
+                localStorage.setItem('borelia_performance_mode', this.performanceMode ? '1' : '0');
                 await this._loadCurveData();
             });
         }
@@ -300,7 +300,7 @@ class GeoLogApp {
                 const v = Math.max(500, Math.min(20000, parseInt(maxPointsInput.value || '3000', 10)));
                 this.maxPoints = Number.isFinite(v) ? v : 3000;
                 maxPointsInput.value = String(this.maxPoints);
-                localStorage.setItem('geolog_max_points', String(this.maxPoints));
+                localStorage.setItem('borelia_max_points', String(this.maxPoints));
                 if (this.performanceMode) await this._loadCurveData();
             });
         }
@@ -523,7 +523,7 @@ class GeoLogApp {
         if (view === 'imagelog' && this.currentWell && window.ImageLogView) ImageLogView.load();
         if (view === 'multiwell') { if (typeof MultiWellView !== 'undefined') MultiWellView.load(); }
         if (view === 'formationtester') { if (typeof FormationTesterView !== 'undefined') FormationTesterView.run(); }
-        localStorage.setItem('geolog_last_view', view);
+        localStorage.setItem('borelia_last_view', view);
     }
 
     _bindNavGroups() {
@@ -554,15 +554,15 @@ class GeoLogApp {
     }
 
     _restoreUIPreferences() {
-        const savedScale = parseInt(localStorage.getItem('geolog_scale') || '', 10);
+        const savedScale = parseInt(localStorage.getItem('borelia_scale') || '', 10);
         if (Number.isFinite(savedScale)) {
             const scaleSelect = document.getElementById('scaleSelect');
             if (scaleSelect) scaleSelect.value = String(savedScale);
             if (this.renderer) this.renderer.scale = savedScale;
         }
 
-        const top = parseFloat(localStorage.getItem('geolog_depth_top') || '');
-        const bottom = parseFloat(localStorage.getItem('geolog_depth_bottom') || '');
+        const top = parseFloat(localStorage.getItem('borelia_depth_top') || '');
+        const bottom = parseFloat(localStorage.getItem('borelia_depth_bottom') || '');
         if (Number.isFinite(top)) {
             const topInput = document.getElementById('depthTop');
             if (topInput) topInput.value = String(top);
@@ -575,7 +575,7 @@ class GeoLogApp {
         const roleSelect = document.getElementById('activeRoleSelect');
         if (roleSelect) roleSelect.value = this.currentRole;
 
-        const lastView = localStorage.getItem('geolog_last_view');
+        const lastView = localStorage.getItem('borelia_last_view');
         if (lastView) this.switchView(lastView);
     }
 
@@ -649,16 +649,16 @@ class GeoLogApp {
     setAuthToken(token) {
         this.authToken = (token || '').trim();
         if (this.authToken) {
-            localStorage.setItem('geolog_auth_token', this.authToken);
+            localStorage.setItem('borelia_auth_token', this.authToken);
         } else {
-            localStorage.removeItem('geolog_auth_token');
+            localStorage.removeItem('borelia_auth_token');
         }
     }
 
     setActiveRole(role) {
         const r = String(role || 'viewer').toLowerCase();
         this.currentRole = r;
-        localStorage.setItem('geolog_active_role', r);
+        localStorage.setItem('borelia_active_role', r);
         this._applyRoleGates();
         GeoToast.info(`Active role: ${r}`);
     }
@@ -824,7 +824,7 @@ class GeoLogApp {
             }
 
             this._renderWellHeader(well);
-            localStorage.setItem('geolog_last_well', wellId);
+            localStorage.setItem('borelia_last_well', wellId);
             this._updateWorkflowStrip();
 
             // Connect collaboration WebSocket
@@ -865,13 +865,13 @@ class GeoLogApp {
             await this._loadFormationTops();
             await this._loadZones();
             this._renderWellHeader(well);
-            if (this.currentLogRun) localStorage.setItem('geolog_last_run', logRunId);
+            if (this.currentLogRun) localStorage.setItem('borelia_last_run', logRunId);
             this._refreshPetrophysicsView();
         } catch (e) { console.error('Failed to select log run:', e); }
     }
 
     _refreshPetrophysicsView() {
-        const view = localStorage.getItem('geolog_last_view');
+        const view = localStorage.getItem('borelia_last_view');
         if (view === 'corescal' && window.CoreScalView) CoreScalView.load();
         else if (view === 'geomechanics' && window.GeomechanicsView) GeomechanicsView.load();
         else if (view === 'imagelog' && window.ImageLogView) ImageLogView.load();
@@ -3482,15 +3482,15 @@ class GeoLogApp {
 
     // Feature 11: Recent Wells & Favorites
     _initFavorites() {
-        this._favorites = JSON.parse(localStorage.getItem('geolog_favorites') || '[]');
-        this._recentWells = JSON.parse(localStorage.getItem('geolog_recent') || '[]');
+        this._favorites = JSON.parse(localStorage.getItem('borelia_favorites') || '[]');
+        this._recentWells = JSON.parse(localStorage.getItem('borelia_recent') || '[]');
     }
     
     toggleFavorite(wellId) {
         const idx = this._favorites.indexOf(wellId);
         if (idx >= 0) this._favorites.splice(idx, 1);
         else this._favorites.push(wellId);
-        localStorage.setItem('geolog_favorites', JSON.stringify(this._favorites));
+        localStorage.setItem('borelia_favorites', JSON.stringify(this._favorites));
         this._renderWellSidebar();
     }
     
@@ -3498,7 +3498,7 @@ class GeoLogApp {
         this._recentWells = this._recentWells.filter(r => r.id !== wellId);
         this._recentWells.unshift({id: wellId, name: wellName, time: Date.now()});
         if (this._recentWells.length > 5) this._recentWells = this._recentWells.slice(0, 5);
-        localStorage.setItem('geolog_recent', JSON.stringify(this._recentWells));
+        localStorage.setItem('borelia_recent', JSON.stringify(this._recentWells));
     }
     
     _renderWellSidebar() {

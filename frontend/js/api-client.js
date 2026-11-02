@@ -1,5 +1,5 @@
 /**
- * HTTP client for GeoLogApp. Extracted from the app class so the request
+ * HTTP client for BoreliaApp. Extracted from the app class so the request
  * lifecycle (single-flight, timeout, abort, error toasts) is testable on its own.
  */
 const GeoAPI = {

@@ -1,5 +1,5 @@
 /**
- * GeoLog — Professional Multi-Track Well Log Canvas Renderer
+ * Borelia — Professional Multi-Track Well Log Canvas Renderer
  * Oil & Gas industry standard display with depth ruler, hover readout,
  * track configuration, zone picking, and lithology column.
  */
@@ -120,7 +120,7 @@ class LogRenderer {
         this.curveConfig = curveConfig || {};
         // Restore track widths from localStorage
         try {
-            const saved = JSON.parse(localStorage.getItem('geolog_track_widths') || 'null');
+            const saved = JSON.parse(localStorage.getItem('borelia_track_widths') || 'null');
             if (Array.isArray(saved) && saved.length === this.tracks.length) {
                 this.tracks.forEach((t, i) => { t.width = saved[i]; });
             }
@@ -317,7 +317,7 @@ class LogRenderer {
             this.canvas.style.cursor = 'default';
             // Save to localStorage
             const widths = this.tracks.map(t => t.width);
-            localStorage.setItem('geolog_track_widths', JSON.stringify(widths));
+            localStorage.setItem('borelia_track_widths', JSON.stringify(widths));
             if (typeof this.onTrackResize === 'function') this.onTrackResize(widths);
             return;
         }
@@ -1702,7 +1702,7 @@ class LogRenderer {
         exportCtx.drawImage(this.canvas, 0, 0);
 
         const link = document.createElement('a');
-        link.download = `geolog_export_${Date.now()}.png`;
+        link.download = `borelia_export_${Date.now()}.png`;
         link.href = exportCanvas.toDataURL('image/png');
         link.click();
     }

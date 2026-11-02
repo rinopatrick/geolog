@@ -1,8 +1,8 @@
 /**
- * Petrophysics, plots, QC and interpretation methods for GeoLogApp.
+ * Petrophysics, plots, QC and interpretation methods for BoreliaApp.
  * Loaded after app.js and before bootstrap.js.
  */
-Object.assign(GeoLogApp.prototype, {
+Object.assign(BoreliaApp.prototype, {
     _renderCrossPlot() {
         const canvas = document.getElementById('crossplotCanvas');
         if (!canvas || !this.renderer) return;

@@ -1,5 +1,5 @@
 /**
- * GeoLog — Real-Time Collaboration via WebSocket
+ * Borelia — Real-Time Collaboration via WebSocket
  * Multi-user cursor sharing and edit broadcasting.
  */
 (function () {
@@ -26,7 +26,7 @@
                 name: this.userName,
                 role: window.app?.currentRole || 'viewer',
             });
-            const token = window.app?.authToken || localStorage.getItem('geolog_auth_token');
+            const token = window.app?.authToken || localStorage.getItem('borelia_auth_token');
             if (token) qs.set('token', token);
             const url = `${proto}://${location.host}/ws/collab/${wellId}?${qs.toString()}`;
 

@@ -1,8 +1,8 @@
 /**
- * SEG-Y upload, section preview and horizon picking for GeoLogApp.
+ * SEG-Y upload, section preview and horizon picking for BoreliaApp.
  * Loaded after app.js and before bootstrap.js.
  */
-Object.assign(GeoLogApp.prototype, {
+Object.assign(BoreliaApp.prototype, {
     _segyProjectId() {
         return this.currentWell?.project_id || this.projects?.[0]?.id || null;
     },

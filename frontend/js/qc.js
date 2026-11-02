@@ -119,7 +119,7 @@ class AdvancedQCPanel {
 
     async load(wellId) {
         const res = await fetch(`${this.apiBase}/wells/${wellId}/advanced-qc`, {
-            headers: window.geologAuthHeaders(),
+            headers: window.boreliaAuthHeaders(),
         });
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();

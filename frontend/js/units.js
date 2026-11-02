@@ -1,5 +1,5 @@
 /**
- * Unit Normalization Panel — standalone module for GeoLog.
+ * Unit Normalization Panel — standalone module for Borelia.
  * Shows unit mapping, conversion options, alias resolution.
  */
 /* exported UnitNormalizationPanel */
@@ -34,7 +34,7 @@ class UnitNormalizationPanel {
     async _loadUnitMap() {
         try {
             const resp = await fetch(`${this.apiBase}/wells/${this.wellId}/unit-map`, {
-                headers: window.geologAuthHeaders(),
+                headers: window.boreliaAuthHeaders(),
             });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             this.unitMap = await resp.json();
@@ -91,7 +91,7 @@ class UnitNormalizationPanel {
         try {
             const resp = await fetch(`${this.apiBase}/wells/${this.wellId}/normalize-units`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...window.geologAuthHeaders() },
+                headers: { 'Content-Type': 'application/json', ...window.boreliaAuthHeaders() },
                 body: JSON.stringify({ target: 'field' }),
             });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -117,7 +117,7 @@ class UnitNormalizationPanel {
         try {
             const resp = await fetch(`${this.apiBase}/wells/${this.wellId}/resolve-aliases`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...window.geologAuthHeaders() },
+                headers: { 'Content-Type': 'application/json', ...window.boreliaAuthHeaders() },
                 body: JSON.stringify({ auto: true }),
             });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);

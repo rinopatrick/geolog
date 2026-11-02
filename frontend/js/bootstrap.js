@@ -1,5 +1,5 @@
 // Initialize
-const app = new GeoLogApp();
+const app = new BoreliaApp();
 
 // ─── Keyboard Shortcuts ────────────────────────────────────────
 document.addEventListener('keydown', (e) => {

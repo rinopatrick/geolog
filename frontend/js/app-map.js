@@ -1,7 +1,7 @@
 /**
  * Project map workspace: wells, seismic ties, faults, surfaces and prospects.
  */
-Object.assign(GeoLogApp.prototype, {
+Object.assign(BoreliaApp.prototype, {
     async renderWellMap() {
         const projectId = this.currentWell?.project_id || this.projects?.[0]?.id;
         if (!projectId) {

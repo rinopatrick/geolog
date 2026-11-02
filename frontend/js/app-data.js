@@ -1,8 +1,8 @@
 /**
- * Well, tops, zones, operations and data-table methods for GeoLogApp.
+ * Well, tops, zones, operations and data-table methods for BoreliaApp.
  * Loaded after app.js and before bootstrap.js.
  */
-Object.assign(GeoLogApp.prototype, {
+Object.assign(BoreliaApp.prototype, {
     async createProject() {
         const r = await GeoModal.show({ title: 'New Project', fields: [
             { id: 'name', label: 'Project Name', placeholder: 'e.g. North Sea Study' },
