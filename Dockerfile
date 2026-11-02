@@ -23,9 +23,9 @@ COPY alembic.ini ./alembic.ini
 RUN mkdir -p /app/backend/data
 
 # Create non-root user and grant app ownership
-RUN useradd -m -u 10001 geolog \
-    && chown -R geolog:geolog /app
-USER geolog
+RUN useradd -m -u 10001 borelia \
+    && chown -R borelia:borelia /app
+USER borelia
 
 EXPOSE 8000
 

@@ -42,7 +42,7 @@ jobs:
             type=ref,event=tag
             type=raw,value=latest
           labels: |
-            org.opencontainers.image.title=GeoLog
+            org.opencontainers.image.title=Borelia
             org.opencontainers.image.description=Well log interpretation platform
             org.opencontainers.image.licenses=MIT
 
@@ -67,4 +67,4 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
-          name: GeoLog ${{ github.ref_name }}
+          name: Borelia ${{ github.ref_name }}

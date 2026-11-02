@@ -71,17 +71,17 @@ jobs:
           context: .
           push: false
           load: true
-          tags: geolog:ci
+          tags: borelia:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Run image and probe health
         run: |
           set -euo pipefail
-          docker run -d --name geolog-ci -p 8000:8000 \
+          docker run -d --name borelia-ci -p 8000:8000 \
             -e GEOLOG_ENV=dev \
             -e GEOLOG_ENABLE_DEMO_SEED=true \
-            geolog:ci
+            borelia:ci
           for i in {1..60}; do
             if curl -sf http://127.0.0.1:8000/api/health >/dev/null; then
               echo "container API ready"
@@ -91,12 +91,12 @@ jobs:
             sleep 2
           done
           echo "container failed to become healthy"
-          docker logs geolog-ci || true
+          docker logs borelia-ci || true
           exit 1
 
       - name: Stop container
         if: always()
-        run: docker rm -f geolog-ci || true
+        run: docker rm -f borelia-ci || true
 
   browser-smoke:
     runs-on: ubuntu-latest
@@ -133,8 +133,8 @@ jobs:
         run: |
           set -euo pipefail
           nohup python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 \
-            > /tmp/geolog-browser.log 2>&1 &
-          echo $! > /tmp/geolog-browser.pid
+            > /tmp/borelia-browser.log 2>&1 &
+          echo $! > /tmp/borelia-browser.pid
           for i in {1..40}; do
             if curl -sf http://127.0.0.1:8000/api/health >/dev/null; then
               echo "API ready"
@@ -143,7 +143,7 @@ jobs:
             sleep 1
           done
           echo "API failed to start"
-          cat /tmp/geolog-browser.log || true
+          cat /tmp/borelia-browser.log || true
           exit 1
 
       - name: Browser smoke
@@ -152,7 +152,7 @@ jobs:
       - name: Validate production compose
         env:
           AUTH_JWT_ISSUER: https://idp.example.com/
-          AUTH_JWT_AUDIENCE: geolog-api
+          AUTH_JWT_AUDIENCE: borelia-api
           AUTH_JWT_JWKS_URL: https://idp.example.com/.well-known/jwks.json
         run: |
           docker compose -f docker-compose.prod.yml config > /dev/null
@@ -162,7 +162,7 @@ jobs:
       - name: Stop API
         if: always()
         run: |
-          if [ -f /tmp/geolog-browser.pid ]; then
-            kill "$(cat /tmp/geolog-browser.pid)" || true
+          if [ -f /tmp/borelia-browser.pid ]; then
+            kill "$(cat /tmp/borelia-browser.pid)" || true
           fi
-          cat /tmp/geolog-browser.log || true
+          cat /tmp/borelia-browser.log || true

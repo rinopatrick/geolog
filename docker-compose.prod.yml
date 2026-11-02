@@ -1,5 +1,5 @@
 services:
-  geolog:
+  borelia:
     build: .
     # No host ports published: traffic enters through the reverse proxy only.
     expose:
@@ -15,13 +15,13 @@ services:
       AUTH_JWT_JWKS_URL: ${AUTH_JWT_JWKS_URL:?set jwks url}
       GEOLOG_REQUIRE_HTTPS: "true"
       GEOLOG_TRUST_PROXY: "true"
-      GEOLOG_DB_PATH: /app/backend/data/geolog.db
+      GEOLOG_DB_PATH: /app/backend/data/borelia.db
       GEOLOG_ARTIFACT_DIR: /app/backend/data/artifacts
       GEOLOG_WORKERS: ${GEOLOG_WORKERS:-2}
     secrets:
       - auth_jwt_secret
     volumes:
-      - geolog-data:/app/backend/data
+      - borelia-data:/app/backend/data
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -38,10 +38,10 @@ services:
     environment:
       GEOLOG_ENV: prod
       GEOLOG_SECRETS_SOURCE: docker-secrets
-      GEOLOG_DB_PATH: /app/backend/data/geolog.db
+      GEOLOG_DB_PATH: /app/backend/data/borelia.db
       GEOLOG_ARTIFACT_DIR: /app/backend/data/artifacts
     volumes:
-      - geolog-data:/app/backend/data
+      - borelia-data:/app/backend/data
     # Migration failures must stop the deploy, not start old code on new schema.
     restart: "no"
 
@@ -55,7 +55,7 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
-      geolog:
+      borelia:
         condition: service_healthy
     restart: unless-stopped
 
@@ -64,6 +64,6 @@ secrets:
     file: ./secrets/auth_jwt_secret
 
 volumes:
-  geolog-data:
+  borelia-data:
   caddy-data:
   caddy-config:
