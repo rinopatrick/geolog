@@ -1,4 +1,4 @@
-# GeoLog Field Quickstart
+# Borelia Field Quickstart
 1. Upload LAS (`Upload LAS`)
 2. Add tops (`Interpret -> Tops` or double-click on track)
 3. Add zones (`Petrophysics -> Auto Zone from Tops`)

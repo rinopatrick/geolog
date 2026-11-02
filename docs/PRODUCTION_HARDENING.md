@@ -1,12 +1,12 @@
 # Production Hardening
 
-GeoLog is a release candidate for a single-team, single-host deployment. This
+Borelia is a release candidate for a single-team, single-host deployment. This
 page lists the controls to review before putting it behind a real user
 population, and the remaining gaps for a multi-tenant/SLA deployment.
 
 ## 1. Identity provider and token lifecycle
 
-Set `GEOLOG_ENV=prod` and `AUTH_MODE=jwt`. The trusted-header mode is refused
+Set `BORELIA_ENV=prod` and `AUTH_MODE=jwt`. The trusted-header mode is refused
 outside dev/test/ci.
 
 Recommended: let an OIDC provider sign tokens and publish a JWKS endpoint.
@@ -14,7 +14,7 @@ Recommended: let an OIDC provider sign tokens and publish a JWKS endpoint.
 ```bash
 AUTH_MODE=jwt
 AUTH_JWT_ISSUER=https://idp.example.com/
-AUTH_JWT_AUDIENCE=geolog-api
+AUTH_JWT_AUDIENCE=borelia-api
 AUTH_JWT_JWKS_URL=https://idp.example.com/.well-known/jwks.json
 AUTH_JWT_ALGORITHMS=RS256
 AUTH_JWT_TTL_SECONDS=3600
@@ -33,10 +33,10 @@ AUTH_JWT_LEEWAY_SECONDS=30
 - Rotate secrets/keys through the secret manager, not a commit.
 - Locally managed user secrets are stored as PBKDF2-HMAC-SHA256 hashes. A
   plaintext row is upgraded and cleared on its first successful login. Tune the
-  cost with `GEOLOG_PBKDF2_ITERATIONS` (default 240000).
+  cost with `BORELIA_PBKDF2_ITERATIONS` (default 240000).
 - Login throttling defaults to 30 attempts per IP per 300s, then 5 failures per
-  account lock the account for 900s. Tune with `GEOLOG_AUTH_*`; if a trusted
-  reverse proxy is in front, set `GEOLOG_TRUST_PROXY=true` so limits use the
+  account lock the account for 900s. Tune with `BORELIA_AUTH_*`; if a trusted
+  reverse proxy is in front, set `BORELIA_TRUST_PROXY=true` so limits use the
   forwarded client address. Do not enable that on a directly reachable port.
 
 ## 2. Secrets
@@ -56,7 +56,7 @@ Example Docker Compose:
 
 ```yaml
 services:
-  geolog:
+  borelia:
     secrets:
       - auth_jwt_secret
     environment:
@@ -66,15 +66,15 @@ secrets:
     file: ./secrets/auth_jwt_secret
 ```
 
-Non-dev startup also requires `GEOLOG_SECRETS_SOURCE` (a label such as `vault`,
+Non-dev startup also requires `BORELIA_SECRETS_SOURCE` (a label such as `vault`,
 `aws-secrets-manager`, or `docker-secrets`) unless
-`GEOLOG_ENFORCE_SECRETS_SOURCE=false`.
+`BORELIA_ENFORCE_SECRETS_SOURCE=false`.
 
 ## 3. TLS and request limits
 
 Terminate TLS at a reverse proxy (Caddy, nginx, an ingress controller) and make
 sure the proxy forwards the original scheme. The application enforces
-`GEOLOG_MAX_UPLOAD_BYTES` (default 256 MiB) and `GEOLOG_MAX_BODY_BYTES`
+`BORELIA_MAX_UPLOAD_BYTES` (default 256 MiB) and `BORELIA_MAX_BODY_BYTES`
 (default 64 MiB), but the proxy should reject oversized bodies too:
 
 ```nginx
@@ -95,7 +95,7 @@ python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 \
   --proxy-headers --forwarded-allow-ips=127.0.0.1 --workers 2
 ```
 
-Set `GEOLOG_REQUIRE_HTTPS=true` to redirect plain HTTP with 308 and add HSTS on
+Set `BORELIA_REQUIRE_HTTPS=true` to redirect plain HTTP with 308 and add HSTS on
 HTTPS responses. `/api/health` is exempt so an internal container health check can
 use plain HTTP. The application sends `X-Content-Type-Options`, `X-Frame-Options`,
 `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Resource-Policy`,
@@ -106,26 +106,26 @@ the frontend uses delegated `data-action` handlers instead of inline events.
 ## 4. Persistence and workers
 
 - Run migrations as a deploy step, once:
-  `GEOLOG_ENV=prod python -m alembic upgrade head`. Production startup verifies
+  `BORELIA_ENV=prod python -m alembic upgrade head`. Production startup verifies
   the schema and fails fast instead of running DDL from every worker.
 - SQLite is a single-host database. Do not put it on NFS or share it between
   hosts. Multiple uvicorn workers on one host are fine.
-- For multiple hosts, use PostgreSQL plus `GEOLOG_STATE_BACKEND=database`.
+- For multiple hosts, use PostgreSQL plus `BORELIA_STATE_BACKEND=database`.
   Rate limits, metrics, jobs, locks and snapshots then share the database, and
   the audit chain uses a PostgreSQL advisory lock. Put binary assets and
   security evidence on a shared volume or object store.
-- Set `GEOLOG_DB_PATH` and `GEOLOG_ARTIFACT_DIR` to mounted persistent volumes.
+- Set `BORELIA_DB_PATH` and `BORELIA_ARTIFACT_DIR` to mounted persistent volumes.
 - The audit chain, metrics, jobs, well locks and snapshots use a cross-process
   file lock. The volumes must support file locking.
-- Back up the database and `GEOLOG_ARTIFACT_DIR` together. `artifacts/` contains
+- Back up the database and `BORELIA_ARTIFACT_DIR` together. `artifacts/` contains
   snapshots, locks, metrics, jobs and security evidence.
 
 ## 5. Backup and restore drill
 
 ```bash
-bash scripts/backup_restore_drill.sh "$GEOLOG_DB_PATH" "$GEOLOG_ARTIFACT_DIR"
+bash scripts/backup_restore_drill.sh "$BORELIA_DB_PATH" "$BORELIA_ARTIFACT_DIR"
 python scripts/security_evidence_attest.py \
-  --base-url https://geolog.example.com \
+  --base-url https://borelia.example.com \
   --artifact-dir artifacts/backup-drill
 ```
 
@@ -147,10 +147,10 @@ Prometheus can scrape:
 
 ```yaml
 scrape_configs:
-  - job_name: geolog
+  - job_name: borelia
     metrics_path: /api/ops/metrics/prometheus
     static_configs:
-      - targets: ["geolog.internal:8000"]
+      - targets: ["borelia.internal:8000"]
 ```
 
 Useful endpoints:
@@ -169,18 +169,18 @@ collector:
 
 ```bash
 pip install -r requirements-observability.txt
-export GEOLOG_OTEL_ENABLED=true
-export GEOLOG_OTEL_ENDPOINT=http://otel-collector:4318/v1/traces
-export GEOLOG_OTEL_SERVICE_NAME=geolog
+export BORELIA_OTEL_ENABLED=true
+export BORELIA_OTEL_ENDPOINT=http://otel-collector:4318/v1/traces
+export BORELIA_OTEL_SERVICE_NAME=borelia
 ```
 
 Without those packages, enabling the flag logs one warning and leaves the app
 running. Health and metrics endpoints are excluded by default.
 
-For an external error stream, set `GEOLOG_ERROR_WEBHOOK_URL`. Unhandled 5xx
+For an external error stream, set `BORELIA_ERROR_WEBHOOK_URL`. Unhandled 5xx
 errors are sent as JSON with request ID, trace ID, role, path and exception
 type/message; query strings, bodies, tokens and subjects are excluded.
-`GEOLOG_ERROR_WEBHOOK_INCLUDE_TRACE=true` adds a truncated traceback. A local
+`BORELIA_ERROR_WEBHOOK_INCLUDE_TRACE=true` adds a truncated traceback. A local
 rate limit suppresses duplicate reports.
 
 ## 7. Project membership
@@ -210,13 +210,13 @@ PY
 
 - [ ] `AUTH_MODE=jwt`, issuer/audience/JWKS configured, header mode off.
 - [ ] `AUTH_JWT_TTL_SECONDS` and leeway set for the IdP.
-- [ ] `GEOLOG_TRUST_PROXY=true` only when the proxy is the only reachable path.
+- [ ] `BORELIA_TRUST_PROXY=true` only when the proxy is the only reachable path.
 - [ ] Login rate limits and upload/body caps reviewed for the expected file sizes.
 - [ ] Secrets mounted as files; no secrets in the image or Compose file.
-- [ ] TLS terminates at the proxy; `GEOLOG_REQUIRE_HTTPS=true`.
-- [ ] Interactive API docs are disabled (`GEOLOG_ENABLE_DOCS` unset in prod) or
+- [ ] TLS terminates at the proxy; `BORELIA_REQUIRE_HTTPS=true`.
+- [ ] Interactive API docs are disabled (`BORELIA_ENABLE_DOCS` unset in prod) or
       protected by the proxy.
-- [ ] `GEOLOG_DB_PATH` and `GEOLOG_ARTIFACT_DIR` on persistent volumes.
+- [ ] `BORELIA_DB_PATH` and `BORELIA_ARTIFACT_DIR` on persistent volumes.
 - [ ] `alembic upgrade head` runs once as a deploy step, before workers start.
 - [ ] Every project or well that must be restricted has at least one member row.
 - [ ] Backup/restore drill passes with the artifact directory and evidence is signed.

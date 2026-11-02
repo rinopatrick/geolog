@@ -3,7 +3,7 @@
 ## Upload
 
 `POST /api/projects/{pid}/seismic` accepts a SEG-Y file and stores it under
-`GEOLOG_ARTIFACT_DIR/seismic`. The reader supports:
+`BORELIA_ARTIFACT_DIR/seismic`. The reader supports:
 
 - IBM 4-byte float (SEG-Y format code 1)
 - IEEE 4-byte float (format code 5)
@@ -22,7 +22,7 @@ only the traces they need, so a 3D volume does not need to fit in memory.
 The sequential section endpoint decimates the whole indexed line to at most
 1,500 × 1,500 samples; the UI requests 600 × 600. It reports `line_trace_count`
 and `sampled` so a large line can show its original size. The upload body is capped by
-`GEOLOG_MAX_UPLOAD_BYTES` (default 512 MiB).
+`BORELIA_MAX_UPLOAD_BYTES` (default 512 MiB).
 
 ## 3D volume sections
 
@@ -179,4 +179,4 @@ Honest limits, enforced by tests:
 - Amplitudes are not gain-corrected, filtered, or interpreted.
 - Fault linkage samples at most 64 inline sections per run and decimates each
   section to 600 × 600 for detection.
-- Large files are capped by `GEOLOG_MAX_UPLOAD_BYTES`; raise it for 3D volumes.
+- Large files are capped by `BORELIA_MAX_UPLOAD_BYTES`; raise it for 3D volumes.

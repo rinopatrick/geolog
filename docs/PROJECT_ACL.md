@@ -1,6 +1,6 @@
 # Project access control
 
-GeoLog roles (`viewer`, `interpreter`, `admin`) are global. Project membership
+Borelia roles (`viewer`, `interpreter`, `admin`) are global. Project membership
 adds a second, narrower layer without changing those roles.
 
 ## Contract
@@ -53,7 +53,7 @@ is no identity, so every request uses the subject `local`.
 The layer is enabled by default. To disable it during a migration window:
 
 ```bash
-GEOLOG_ENFORCE_PROJECT_ACL=false
+BORELIA_ENFORCE_PROJECT_ACL=false
 ```
 
 Do not leave it disabled for a multi-user deployment. Disabling it restores the

@@ -1,15 +1,15 @@
 # Petrophysics workbench UI
 
-Three dense, data-first panels were added to the existing GeoLog shell:
+Three dense, data-first panels were added to the existing Borelia shell:
 
 - **Core / SCAL** (`data-view="corescal"`)
 - **Geomechanics** (`data-view="geomechanics"`)
 - **Image Log** (`data-view="imagelog"`, rebuilt from the earlier synthetic view)
 
 The visual direction came from OpenDesign's `tech-utility` direction (Datadog /
-GitHub density) and was constrained to GeoLog's existing tokens: crude-navy
+GitHub density) and was constrained to Borelia's existing tokens: crude-navy
 surfaces, amber accent, Geologica UI text and JetBrains Mono numerics. The
-reference artifact is [`prototypes/geolog-workbench.html`](../prototypes/geolog-workbench.html).
+reference artifact is [`prototypes/borelia-workbench.html`](../prototypes/borelia-workbench.html).
 No marketing hero, glassmorphism, oversized type or generic card grid is used.
 
 ## Core / SCAL

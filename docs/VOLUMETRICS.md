@@ -98,7 +98,7 @@ not an error. Default `correlation: "none"` draws cells independently.
 With `correlation: "lateral"` (plus `correlation_range_cells`, default 8),
 each iteration shares one Gaussian NTG-multiplier field (exponential
 covariance, mean-preserving): neighbouring cells move together, matching
-the screening geology better than iid noise. Lateral mode costs one field
+the screening boreliay better than iid noise. Lateral mode costs one field
 synthesis per iteration and counts the same toward the SLO cap.
 
 **SLO:** cells × iterations is capped at 2,000,000 draws (≈1–2 s worst

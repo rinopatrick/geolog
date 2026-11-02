@@ -13,7 +13,7 @@ automatic dip picking, aperture analysis or full coverage QC.
 - `borehole_radius` (required for trace-based dip fitting)
 - `image_type`, `source`, optional `log_run_id`
 
-Files are stored under `GEOLOG_ARTIFACT_DIR/images/<well_id>/<uuid>.<ext>`.
+Files are stored under `BORELIA_ARTIFACT_DIR/images/<well_id>/<uuid>.<ext>`.
 The response includes width/height (PNG) and a file endpoint:
 
 ```text

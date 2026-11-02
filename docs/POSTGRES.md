@@ -3,18 +3,18 @@
 SQLite remains the default. PostgreSQL is enabled with:
 
 ```bash
-export GEOLOG_DATABASE_URL='postgresql+psycopg://geolog:secret@db:5432/geolog'
-export GEOLOG_DB_POOL_SIZE=5
-export GEOLOG_DB_MAX_OVERFLOW=10
+export BORELIA_DATABASE_URL='postgresql+psycopg://borelia:secret@db:5432/borelia'
+export BORELIA_DB_POOL_SIZE=5
+export BORELIA_DB_MAX_OVERFLOW=10
 ```
 
-`GEOLOG_DATABASE_URL` wins over `GEOLOG_DB_PATH`. Use the `+psycopg` driver.
+`BORELIA_DATABASE_URL` wins over `BORELIA_DB_PATH`. Use the `+psycopg` driver.
 
-For more than one app host, also set `GEOLOG_STATE_BACKEND=database`. Rate-limit
+For more than one app host, also set `BORELIA_STATE_BACKEND=database`. Rate-limit
 counters, metrics, job records, well locks, template locks and snapshots then
 live in PostgreSQL, and the audit chain uses a transaction-scoped advisory lock.
 Image/core assets and security-evidence files still live under
-`GEOLOG_ARTIFACT_DIR`, so a multi-host deployment needs a shared volume or object
+`BORELIA_ARTIFACT_DIR`, so a multi-host deployment needs a shared volume or object
 store for those files.
 
 ## Schema
@@ -37,8 +37,8 @@ if verification fails. PostgreSQL identity sequences are advanced afterwards.
 
 ```bash
 python -m backend.pg_tools copy \
-  --source "sqlite:///backend/geolog.db" \
-  --target "postgresql+psycopg://geolog:secret@db:5432/geolog"
+  --source "sqlite:///backend/borelia.db" \
+  --target "postgresql+psycopg://borelia:secret@db:5432/borelia"
 
 python -m backend.pg_tools verify --source ... --target ...
 python -m backend.pg_tools rollback --target ... --confirm
@@ -46,7 +46,7 @@ python -m backend.pg_tools rollback --target ... --confirm
 
 After a successful copy, run `alembic stamp head` because the copy does not
 include Alembic's `alembic_version` table. `rollback` deletes every row in every
-GeoLog table in the target; it requires `--confirm`.
+Borelia table in the target; it requires `--confirm`.
 
 ## Multi-instance CI
 
@@ -57,7 +57,7 @@ one instance and observed on the other.
 
 ## Limits
 
-- Multi-host app state requires `GEOLOG_STATE_BACKEND=database` and a shared
+- Multi-host app state requires `BORELIA_STATE_BACKEND=database` and a shared
   artifact volume for binary assets.
 - No online replication or dual-write mode.
 - No automatic hash-chain audit triggers (deliberate; see above).

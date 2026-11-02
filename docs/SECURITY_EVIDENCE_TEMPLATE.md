@@ -17,13 +17,13 @@ Fill this after each security/deployment hardening cycle.
 - Evidence: (build log link / command output)
 
 ### 2) Secrets policy
-- `GEOLOG_SECRETS_SOURCE` configured: yes/no
-- `GEOLOG_ENFORCE_SECRETS_SOURCE` enabled: yes/no
+- `BORELIA_SECRETS_SOURCE` configured: yes/no
+- `BORELIA_ENFORCE_SECRETS_SOURCE` enabled: yes/no
 - Non-dev startup guard verified: yes/no
 - Evidence:
 
 ### 3) TLS policy
-- `GEOLOG_REQUIRE_TLS` value:
+- `BORELIA_REQUIRE_TLS` value:
 - TLS enforcement verified: yes/no
 - Evidence:
 
