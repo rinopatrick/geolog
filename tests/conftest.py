@@ -1,7 +1,7 @@
 """Test isolation.
 
 Every run gets its own throwaway SQLite file, seeded once per session. Without
-this the suite reads and writes backend/geolog.db, so results depend on whatever
+this the suite reads and writes backend/borelia.db, so results depend on whatever
 is already on disk and tests leak state into each other (one of them deletes
 project 1).
 """
@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # Must be set before backend.database / backend.main are imported.
-_TMP_DIR = tempfile.mkdtemp(prefix="geolog-test-")
+_TMP_DIR = tempfile.mkdtemp(prefix="borelia-test-")
 os.environ["BORELIA_DB_PATH"] = str(pathlib.Path(_TMP_DIR) / "test.db")
 # Snapshots/locks are files on disk, not rows: without this the suite leaves a
 # well locked for the next run.
