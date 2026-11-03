@@ -1211,7 +1211,7 @@ def compute_saturation(wid: int, data: dict, db: Session = Depends(get_db)):
     valid_phie = phie_arr[~np.isnan(phie_arr)]
     valid_vsh = vsh_arr[~np.isnan(vsh_arr)]
 
-    return {
+    result = {
         "depth": dept.tolist(),
         "sw": [None if np.isnan(v) else round(float(v), 4) for v in sw],
         "vsh": [None if np.isnan(v) else round(float(v), 4) for v in vsh_arr],
@@ -1232,6 +1232,30 @@ def compute_saturation(wid: int, data: dict, db: Session = Depends(get_db)):
             "n_points": len(valid_sw),
         }
     }
+
+    if data.get("save"):
+        saved = []
+        for mnemonic, values in (("SW", sw), ("PHIE", phie_arr),
+                                 ("VSH", vsh_arr)):
+            arr = np.asarray(values, dtype=np.float64)
+            db.query(CurveData).filter(
+                CurveData.log_run_id == lr.id,
+                CurveData.mnemonic == mnemonic).delete()
+            valid = arr[~np.isnan(arr)]
+            db.add(CurveData(
+                log_run_id=lr.id, mnemonic=mnemonic,
+                unit="v/v",
+                description=f"computed {model} ({vsh_method})",
+                num_points=len(arr),
+                min_value=float(np.min(valid)) if len(valid) else None,
+                max_value=float(np.max(valid)) if len(valid) else None,
+                data_binary=np.where(np.isnan(arr), np.nan, arr).tobytes(),
+            ))
+            saved.append(mnemonic)
+        db.commit()
+        result["saved"] = {"log_run_id": lr.id, "mnemonics": saved}
+
+    return result
 
 
 @router.post("/{wid}/multimineral")
