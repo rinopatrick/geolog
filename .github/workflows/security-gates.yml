@@ -70,9 +70,9 @@ jobs:
       # Names must match _resolve_audit_export_signing_key() in backend/main.py.
       AUDIT_EXPORT_HMAC_KEYS_JSON: '{"ci-audit-signing-kid":"ci-audit-signing-key"}'
       AUDIT_EXPORT_HMAC_ACTIVE_KID: ci-audit-signing-kid
-      GEOLOG_ENV: ci
-      GEOLOG_ENFORCE_SECRETS_SOURCE: "false"
-      GEOLOG_ENABLE_DEMO_SEED: "true"
+      BORELIA_ENV: ci
+      BORELIA_ENFORCE_SECRETS_SOURCE: "false"
+      BORELIA_ENABLE_DEMO_SEED: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -92,8 +92,8 @@ jobs:
       - name: Start API server
         run: |
           set -euo pipefail
-          nohup python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 > /tmp/geolog-api.log 2>&1 &
-          echo $! > /tmp/geolog-api.pid
+          nohup python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 > /tmp/borelia-api.log 2>&1 &
+          echo $! > /tmp/borelia-api.pid
           for i in {1..40}; do
             if curl -sf http://127.0.0.1:8000/api/health >/dev/null; then
               echo "API ready"
@@ -102,11 +102,11 @@ jobs:
             sleep 1
           done
           echo "API failed to start"
-          cat /tmp/geolog-api.log || true
+          cat /tmp/borelia-api.log || true
           exit 1
 
       - name: Backup/restore drill smoke (database + artifacts)
-        run: bash scripts/backup_restore_drill.sh backend/geolog.db backend/artifacts
+        run: bash scripts/backup_restore_drill.sh backend/borelia.db backend/artifacts
 
       - name: API attestation gate
         run: python scripts/security_evidence_attest.py --base-url http://127.0.0.1:8000 --artifact-dir artifacts/backup-drill
@@ -126,7 +126,7 @@ jobs:
       - name: Stop API server
         if: always()
         run: |
-          if [ -f /tmp/geolog-api.pid ]; then
-            kill "$(cat /tmp/geolog-api.pid)" || true
+          if [ -f /tmp/borelia-api.pid ]; then
+            kill "$(cat /tmp/borelia-api.pid)" || true
           fi
-          cat /tmp/geolog-api.log || true
+          cat /tmp/borelia-api.log || true

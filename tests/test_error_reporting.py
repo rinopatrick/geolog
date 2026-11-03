@@ -23,8 +23,8 @@ class FakeRequest:
 @pytest.fixture(autouse=True)
 def clear_state(monkeypatch):
     error_reporting._RECENT.clear()
-    monkeypatch.delenv("GEOLOG_ERROR_WEBHOOK_URL", raising=False)
-    monkeypatch.delenv("GEOLOG_ERROR_WEBHOOK_INCLUDE_TRACE", raising=False)
+    monkeypatch.delenv("BORELIA_ERROR_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("BORELIA_ERROR_WEBHOOK_INCLUDE_TRACE", raising=False)
 
 
 def test_disabled_without_url(monkeypatch):
@@ -35,7 +35,7 @@ def test_disabled_without_url(monkeypatch):
 
 
 def test_payload_is_redacted_and_queued(monkeypatch):
-    monkeypatch.setenv("GEOLOG_ERROR_WEBHOOK_URL", "https://errors.example.test/hook")
+    monkeypatch.setenv("BORELIA_ERROR_WEBHOOK_URL", "https://errors.example.test/hook")
     sent = []
     monkeypatch.setattr(error_reporting, "_dispatch", lambda url, payload: sent.append((url, payload)))
 
@@ -55,8 +55,8 @@ def test_payload_is_redacted_and_queued(monkeypatch):
 
 
 def test_traceback_is_opt_in(monkeypatch):
-    monkeypatch.setenv("GEOLOG_ERROR_WEBHOOK_URL", "https://errors.example.test/hook")
-    monkeypatch.setenv("GEOLOG_ERROR_WEBHOOK_INCLUDE_TRACE", "true")
+    monkeypatch.setenv("BORELIA_ERROR_WEBHOOK_URL", "https://errors.example.test/hook")
+    monkeypatch.setenv("BORELIA_ERROR_WEBHOOK_INCLUDE_TRACE", "true")
     sent = []
     monkeypatch.setattr(error_reporting, "_dispatch", lambda url, payload: sent.append(payload))
     try:
@@ -67,7 +67,7 @@ def test_traceback_is_opt_in(monkeypatch):
 
 
 def test_duplicate_errors_are_throttled(monkeypatch):
-    monkeypatch.setenv("GEOLOG_ERROR_WEBHOOK_URL", "https://errors.example.test/hook")
+    monkeypatch.setenv("BORELIA_ERROR_WEBHOOK_URL", "https://errors.example.test/hook")
     sent = []
     monkeypatch.setattr(error_reporting, "_dispatch", lambda url, payload: sent.append(payload))
 

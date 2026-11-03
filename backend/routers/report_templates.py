@@ -42,7 +42,7 @@ def _config(data: dict) -> dict:
         "description": str(data.get("description") or ""),
         "sections": cleaned,
         "include_curves": bool(data.get("include_curves", "curves" in cleaned)),
-        "title": str(data.get("title") or "GeoLog Well Report"),
+        "title": str(data.get("title") or "Borelia Well Report"),
     }
 
 

@@ -144,32 +144,32 @@ def test_jwt_mode_enforces_role_from_signed_token():
 def test_secrets_source_policy_allows_dev_without_source(monkeypatch):
     from backend import main as main_mod
 
-    monkeypatch.setenv("GEOLOG_ENV", "dev")
-    monkeypatch.delenv("GEOLOG_SECRETS_SOURCE", raising=False)
-    monkeypatch.setenv("GEOLOG_ENFORCE_SECRETS_SOURCE", "true")
+    monkeypatch.setenv("BORELIA_ENV", "dev")
+    monkeypatch.delenv("BORELIA_SECRETS_SOURCE", raising=False)
+    monkeypatch.setenv("BORELIA_ENFORCE_SECRETS_SOURCE", "true")
     main_mod._enforce_secrets_source_policy()
 
 
 def test_secrets_source_policy_blocks_prod_without_source(monkeypatch):
     from backend import main as main_mod
 
-    monkeypatch.setenv("GEOLOG_ENV", "prod")
-    monkeypatch.delenv("GEOLOG_SECRETS_SOURCE", raising=False)
-    monkeypatch.setenv("GEOLOG_ENFORCE_SECRETS_SOURCE", "true")
+    monkeypatch.setenv("BORELIA_ENV", "prod")
+    monkeypatch.delenv("BORELIA_SECRETS_SOURCE", raising=False)
+    monkeypatch.setenv("BORELIA_ENFORCE_SECRETS_SOURCE", "true")
 
     try:
         main_mod._enforce_secrets_source_policy()
         assert False, "expected RuntimeError"
     except RuntimeError as e:
-        assert "GEOLOG_SECRETS_SOURCE" in str(e)
+        assert "BORELIA_SECRETS_SOURCE" in str(e)
 
 
 def test_secrets_source_policy_allows_prod_with_source(monkeypatch):
     from backend import main as main_mod
 
-    monkeypatch.setenv("GEOLOG_ENV", "prod")
-    monkeypatch.setenv("GEOLOG_SECRETS_SOURCE", "vault")
-    monkeypatch.setenv("GEOLOG_ENFORCE_SECRETS_SOURCE", "true")
+    monkeypatch.setenv("BORELIA_ENV", "prod")
+    monkeypatch.setenv("BORELIA_SECRETS_SOURCE", "vault")
+    monkeypatch.setenv("BORELIA_ENFORCE_SECRETS_SOURCE", "true")
     main_mod._enforce_secrets_source_policy()
 
 
@@ -266,11 +266,11 @@ def test_jwt_mode_enforces_issuer_and_audience_valid():
     main_mod.AUTH_CONFIG.mode = "jwt"
     main_mod.AUTH_CONFIG.jwt_secret = "test-secret"
     main_mod.AUTH_CONFIG.jwt_algorithms = ("HS256",)
-    main_mod.AUTH_CONFIG.jwt_issuer = "geolog-auth"
-    main_mod.AUTH_CONFIG.jwt_audience = "geolog-api"
+    main_mod.AUTH_CONFIG.jwt_issuer = "borelia-auth"
+    main_mod.AUTH_CONFIG.jwt_audience = "borelia-api"
 
     token = jwt.encode(
-        {"sub": "u3", "role": "viewer", "iss": "geolog-auth", "aud": "geolog-api"},
+        {"sub": "u3", "role": "viewer", "iss": "borelia-auth", "aud": "borelia-api"},
         "test-secret",
         algorithm="HS256",
     )
@@ -1077,11 +1077,11 @@ def test_ops_metrics_prometheus_exposition_shape():
     r = client.get("/api/ops/metrics/prometheus", headers=_h("viewer"))
     assert r.status_code == 200
     text = r.text
-    assert "# HELP geolog_requests_total" in text
-    assert "# TYPE geolog_requests_total counter" in text
-    assert "geolog_requests_total" in text
-    assert "geolog_request_latency_ms_sum" in text
-    assert "geolog_request_latency_ms_count" in text
+    assert "# HELP borelia_requests_total" in text
+    assert "# TYPE borelia_requests_total counter" in text
+    assert "borelia_requests_total" in text
+    assert "borelia_requests_latency_ms_sum" in text
+    assert "borelia_requests_latency_ms_count" in text
 
 
 def test_ops_health_shape_and_access():
@@ -1124,8 +1124,8 @@ def test_ops_otel_status_shape_and_env_signals():
     old_attrs = os.environ.get("OTEL_RESOURCE_ATTRIBUTES")
 
     os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://otel-collector:4318"
-    os.environ["OTEL_SERVICE_NAME"] = "geolog-api"
-    os.environ["OTEL_RESOURCE_ATTRIBUTES"] = "service.namespace=geolog,deployment.environment=dev"
+    os.environ["OTEL_SERVICE_NAME"] = "borelia-api"
+    os.environ["OTEL_RESOURCE_ATTRIBUTES"] = "service.namespace=borelia,deployment.environment=dev"
 
     try:
         r = client.get("/api/ops/otel-status", headers=_h("viewer"))
@@ -1134,7 +1134,7 @@ def test_ops_otel_status_shape_and_env_signals():
         assert data.get("ok") is True
         assert data.get("enabled") is True
         assert data.get("exporter_otlp_endpoint_set") is True
-        assert data.get("service_name") == "geolog-api"
+        assert data.get("service_name") == "borelia-api"
         assert data.get("resource_attributes_set") is True
         assert "timestamp" in data
     finally:
@@ -1158,7 +1158,7 @@ def test_ops_evidence_status_shape_and_acceptance_gate():
     keys = ["OPS_DASHBOARD_URL", "OPS_ALERT_TARGET", "OPS_TRACE_BACKEND_URL"]
     old = {k: os.environ.get(k) for k in keys}
 
-    os.environ["OPS_DASHBOARD_URL"] = "http://grafana.local/d/geolog"
+    os.environ["OPS_DASHBOARD_URL"] = "http://grafana.local/d/borelia"
     os.environ["OPS_ALERT_TARGET"] = "slack:#ops-alerts"
     os.environ["OPS_TRACE_BACKEND_URL"] = "http://jaeger.local:16686"
 
@@ -1174,7 +1174,7 @@ def test_ops_evidence_status_shape_and_acceptance_gate():
         assert data.get("probes_enabled") is False
         assert data.get("dashboard_reachable") is None
         assert data.get("trace_backend_reachable") is None
-        assert data.get("dashboard_url") == "http://grafana.local/d/geolog"
+        assert data.get("dashboard_url") == "http://grafana.local/d/borelia"
         assert data.get("alert_delivery_target") == "slack:#ops-alerts"
         assert data.get("trace_backend_url") == "http://jaeger.local:16686"
         assert "timestamp" in data
@@ -1206,11 +1206,11 @@ def test_ops_evidence_status_shape_and_acceptance_gate():
 def test_ops_security_posture_status_shape_and_env_signals():
     import os
 
-    old_source = os.environ.get("GEOLOG_SECRETS_SOURCE")
-    old_tls = os.environ.get("GEOLOG_REQUIRE_TLS")
+    old_source = os.environ.get("BORELIA_SECRETS_SOURCE")
+    old_tls = os.environ.get("BORELIA_REQUIRE_TLS")
 
-    os.environ["GEOLOG_SECRETS_SOURCE"] = "vault"
-    os.environ["GEOLOG_REQUIRE_TLS"] = "true"
+    os.environ["BORELIA_SECRETS_SOURCE"] = "vault"
+    os.environ["BORELIA_REQUIRE_TLS"] = "true"
 
     try:
         r = client.get("/api/ops/security-posture-status", headers=_h("viewer"))
@@ -1226,13 +1226,13 @@ def test_ops_security_posture_status_shape_and_env_signals():
         assert "timestamp" in data
     finally:
         if old_source is None:
-            os.environ.pop("GEOLOG_SECRETS_SOURCE", None)
+            os.environ.pop("BORELIA_SECRETS_SOURCE", None)
         else:
-            os.environ["GEOLOG_SECRETS_SOURCE"] = old_source
+            os.environ["BORELIA_SECRETS_SOURCE"] = old_source
         if old_tls is None:
-            os.environ.pop("GEOLOG_REQUIRE_TLS", None)
+            os.environ.pop("BORELIA_REQUIRE_TLS", None)
         else:
-            os.environ["GEOLOG_REQUIRE_TLS"] = old_tls
+            os.environ["BORELIA_REQUIRE_TLS"] = old_tls
 
 
 def test_ops_security_evidence_status_valid_signature_happy_path():
@@ -1242,7 +1242,7 @@ def test_ops_security_evidence_status_valid_signature_happy_path():
     import hashlib
     import tempfile
 
-    old_dir = os.environ.get("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR")
+    old_dir = os.environ.get("BORELIA_BACKUP_DRILL_ARTIFACT_DIR")
     old_key = os.environ.get("BACKUP_DRILL_SIGNING_KEY")
 
     with tempfile.TemporaryDirectory() as td:
@@ -1268,7 +1268,7 @@ def test_ops_security_evidence_status_valid_signature_happy_path():
                 f,
             )
 
-        os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = td
+        os.environ["BORELIA_BACKUP_DRILL_ARTIFACT_DIR"] = td
         os.environ["BACKUP_DRILL_SIGNING_KEY"] = key
 
         try:
@@ -1286,9 +1286,9 @@ def test_ops_security_evidence_status_valid_signature_happy_path():
             assert "timestamp" in data
         finally:
             if old_dir is None:
-                os.environ.pop("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR", None)
+                os.environ.pop("BORELIA_BACKUP_DRILL_ARTIFACT_DIR", None)
             else:
-                os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
+                os.environ["BORELIA_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
             if old_key is None:
                 os.environ.pop("BACKUP_DRILL_SIGNING_KEY", None)
             else:
@@ -1300,7 +1300,7 @@ def test_ops_security_evidence_status_detects_mismatch():
     import json
     import tempfile
 
-    old_dir = os.environ.get("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR")
+    old_dir = os.environ.get("BORELIA_BACKUP_DRILL_ARTIFACT_DIR")
 
     with tempfile.TemporaryDirectory() as td:
         with open(os.path.join(td, "report.json"), "w", encoding="utf-8") as f:
@@ -1315,7 +1315,7 @@ def test_ops_security_evidence_status_detects_mismatch():
                 f,
             )
 
-        os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = td
+        os.environ["BORELIA_BACKUP_DRILL_ARTIFACT_DIR"] = td
         os.environ.pop("BACKUP_DRILL_SIGNING_KEY", None)
 
         try:
@@ -1329,9 +1329,9 @@ def test_ops_security_evidence_status_detects_mismatch():
             assert data.get("hmac_signature_valid") is False
         finally:
             if old_dir is None:
-                os.environ.pop("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR", None)
+                os.environ.pop("BORELIA_BACKUP_DRILL_ARTIFACT_DIR", None)
             else:
-                os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
+                os.environ["BORELIA_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
 
 
 def test_ops_security_evidence_status_resolves_latest_nested_artifact_dir():
@@ -1342,7 +1342,7 @@ def test_ops_security_evidence_status_resolves_latest_nested_artifact_dir():
     import tempfile
     import pathlib
 
-    old_dir = os.environ.get("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR")
+    old_dir = os.environ.get("BORELIA_BACKUP_DRILL_ARTIFACT_DIR")
     old_key = os.environ.get("BACKUP_DRILL_SIGNING_KEY")
 
     with tempfile.TemporaryDirectory() as td:
@@ -1380,7 +1380,7 @@ def test_ops_security_evidence_status_resolves_latest_nested_artifact_dir():
             encoding="utf-8",
         )
 
-        os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = str(base)
+        os.environ["BORELIA_BACKUP_DRILL_ARTIFACT_DIR"] = str(base)
         os.environ["BACKUP_DRILL_SIGNING_KEY"] = key
 
         try:
@@ -1392,9 +1392,9 @@ def test_ops_security_evidence_status_resolves_latest_nested_artifact_dir():
             assert data.get("hmac_signature_valid") is True
         finally:
             if old_dir is None:
-                os.environ.pop("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR", None)
+                os.environ.pop("BORELIA_BACKUP_DRILL_ARTIFACT_DIR", None)
             else:
-                os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
+                os.environ["BORELIA_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
             if old_key is None:
                 os.environ.pop("BACKUP_DRILL_SIGNING_KEY", None)
             else:
@@ -1459,7 +1459,7 @@ def test_ops_security_evidence_attest_latest_happy_path():
     import hmac
     import time
 
-    old_dir = os.environ.get("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR")
+    old_dir = os.environ.get("BORELIA_BACKUP_DRILL_ARTIFACT_DIR")
     old_key = os.environ.get("BACKUP_DRILL_SIGNING_KEY")
 
     with tempfile.TemporaryDirectory() as td:
@@ -1486,7 +1486,7 @@ def test_ops_security_evidence_attest_latest_happy_path():
                 f,
             )
 
-        os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = td
+        os.environ["BORELIA_BACKUP_DRILL_ARTIFACT_DIR"] = td
         os.environ["BACKUP_DRILL_SIGNING_KEY"] = key
 
         try:
@@ -1641,9 +1641,9 @@ def test_ops_security_evidence_attest_latest_happy_path():
             assert check.get("freshness_reason_code") == "STALE"
         finally:
             if old_dir is None:
-                os.environ.pop("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR", None)
+                os.environ.pop("BORELIA_BACKUP_DRILL_ARTIFACT_DIR", None)
             else:
-                os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
+                os.environ["BORELIA_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
             if old_key is None:
                 os.environ.pop("BACKUP_DRILL_SIGNING_KEY", None)
             else:
@@ -1656,7 +1656,7 @@ def test_ops_security_evidence_manifest_sign_happy_path():
     import tempfile
     import hashlib
 
-    old_dir = os.environ.get("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR")
+    old_dir = os.environ.get("BORELIA_BACKUP_DRILL_ARTIFACT_DIR")
     old_ring = os.environ.get("AUDIT_EXPORT_HMAC_KEYS_JSON")
     old_active = os.environ.get("AUDIT_EXPORT_HMAC_ACTIVE_KID")
 
@@ -1669,7 +1669,7 @@ def test_ops_security_evidence_manifest_sign_happy_path():
         with open(sig_path, "w", encoding="utf-8") as f:
             json.dump({"report_sha256": hashlib.sha256(json.dumps(report).encode("utf-8")).hexdigest()}, f)
 
-        os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = td
+        os.environ["BORELIA_BACKUP_DRILL_ARTIFACT_DIR"] = td
         os.environ["AUDIT_EXPORT_HMAC_KEYS_JSON"] = '{"k1":"secret-one"}'
         os.environ["AUDIT_EXPORT_HMAC_ACTIVE_KID"] = "k1"
 
@@ -1701,9 +1701,9 @@ def test_ops_security_evidence_manifest_sign_happy_path():
             assert outp.get("reason_code") == "SIGNATURE_VALID"
         finally:
             if old_dir is None:
-                os.environ.pop("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR", None)
+                os.environ.pop("BORELIA_BACKUP_DRILL_ARTIFACT_DIR", None)
             else:
-                os.environ["GEOLOG_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
+                os.environ["BORELIA_BACKUP_DRILL_ARTIFACT_DIR"] = old_dir
             if old_ring is None:
                 os.environ.pop("AUDIT_EXPORT_HMAC_KEYS_JSON", None)
             else:
@@ -2266,7 +2266,7 @@ def test_refresh_and_revocation_helpers(monkeypatch):
     )
 
     monkeypatch.setenv("AUTH_MODE", "jwt")
-    monkeypatch.setenv("GEOLOG_ENV", "test")
+    monkeypatch.setenv("BORELIA_ENV", "test")
     monkeypatch.setenv("AUTH_JWT_SECRET", "x" * 32)
     monkeypatch.setenv("AUTH_JWT_REFRESH_TTL_SECONDS", "3600")
     cfg = AuthConfig.from_env()

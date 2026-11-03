@@ -94,9 +94,9 @@ def test_rotate_token_invalidates_old_secret(monkeypatch):
 
 def test_login_failure_lockout(monkeypatch):
     monkeypatch.setenv("AUTH_JWT_SECRET", "test-secret-for-lockout-123456")
-    monkeypatch.setenv("GEOLOG_AUTH_FAILURE_LIMIT", "2")
-    monkeypatch.setenv("GEOLOG_AUTH_LOCKOUT_SECONDS", "60")
-    monkeypatch.setenv("GEOLOG_AUTH_IP_LIMIT", "100")
+    monkeypatch.setenv("BORELIA_AUTH_FAILURE_LIMIT", "2")
+    monkeypatch.setenv("BORELIA_AUTH_LOCKOUT_SECONDS", "60")
+    monkeypatch.setenv("BORELIA_AUTH_IP_LIMIT", "100")
     name = "lockout_user"
     _user(name, role="viewer", token="correct-secret")
 
@@ -117,7 +117,7 @@ def test_login_failure_lockout(monkeypatch):
 
 
 def test_declared_oversized_upload_is_rejected_before_route(monkeypatch):
-    monkeypatch.setenv("GEOLOG_MAX_UPLOAD_BYTES", "1024")
+    monkeypatch.setenv("BORELIA_MAX_UPLOAD_BYTES", "1024")
     db = SessionLocal()
     try:
         wid = db.query(Well.id).order_by(Well.id.asc()).first()[0]
@@ -133,7 +133,7 @@ def test_declared_oversized_upload_is_rejected_before_route(monkeypatch):
 
 
 def test_declared_oversized_json_is_rejected(monkeypatch):
-    monkeypatch.setenv("GEOLOG_MAX_BODY_BYTES", "128")
+    monkeypatch.setenv("BORELIA_MAX_BODY_BYTES", "128")
     r = client.post(
         "/api/wells/1/sensitivity",
         content=b"{" + b'"padding":"' + b"x" * 256 + b'"}',

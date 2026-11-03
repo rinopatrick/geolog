@@ -1,19 +1,19 @@
-# GeoLog — Advanced Well Log Interpretation Platform
+# Borelia — Advanced Well Log Interpretation Platform
 
-Comprehensive, production-style subsurface interpretation platform for oil & gas workflows. GeoLog combines high-performance log visualization, petrophysical computation, correlation, zonation, quality control, and export/reporting in a FastAPI + SQLite + Canvas-based stack.
+Comprehensive, production-style subsurface interpretation platform for oil & gas workflows. Borelia combines high-performance log visualization, petrophysical computation, correlation, zonation, quality control, and export/reporting in a FastAPI + SQLite + Canvas-based stack.
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Framework-009688?style=flat-square&logo=fastapi&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)
 ![SQLite](https://img.shields.io/badge/SQLite-Database-003B57?style=flat-square&logo=sqlite&logoColor=white)
 
-![GeoLog Screenshot](screenshot.png)
+![Borelia Screenshot](screenshot.png)
 
 ---
 
 ## Features
 
-GeoLog currently includes **35+ analysis views/panels** and **100+ API capabilities** spanning ingestion, interpretation, QC, analytics, collaboration, and export.
+Borelia currently includes **35+ analysis views/panels** and **100+ API capabilities** spanning ingestion, interpretation, QC, analytics, collaboration, and export.
 
 ### 1) Data Ingest
 - LAS **2.0** parser with robust field-file handling (LAS 3.0 headers are read for `DLM`/`WRAP`, but 3.0 multi-section files are treated as 2.0)
@@ -163,7 +163,7 @@ deploy runbook: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 chmod +x run.sh
 ./run.sh
 ```
-- Starts GeoLog at: `http://localhost:8000`
+- Starts Borelia at: `http://localhost:8000`
 - Swagger: `http://localhost:8000/docs`
 
 ### Method 2 — Docker
@@ -289,7 +289,7 @@ curl -s -X POST "http://localhost:8000/api/audit-log/verify/signature" \
 ## Project Structure
 
 ```text
-geolog-app/
+borelia-app/
 ├── backend/
 │   ├── main.py            app assembly, middleware, health
 │   ├── database.py        engine and session factory
@@ -378,7 +378,7 @@ Phase 2 regression dataset evidence:
 
 ### Phase 3a security + backup gates
 ```bash
-bash scripts/backup_restore_drill.sh backend/data/geolog.db
+bash scripts/backup_restore_drill.sh backend/data/borelia.db
 ```
 
 Optional signing env for backup drill evidence:
@@ -425,37 +425,37 @@ Configuration reference:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `GEOLOG_ENV` | `dev` | `dev`/`local`/`test`/`ci` allow the trusted-header auth shim; anything else is treated as a real deployment |
-| `AUTH_MODE` | `header` in dev, `jwt` elsewhere | `header` trusts the `X-User-Role` request header. `jwt` requires a verified bearer token. `header` is refused when `GEOLOG_ENV` is non-dev |
+| `BORELIA_ENV` | `dev` | `dev`/`local`/`test`/`ci` allow the trusted-header auth shim; anything else is treated as a real deployment |
+| `AUTH_MODE` | `header` in dev, `jwt` elsewhere | `header` trusts the `X-User-Role` request header. `jwt` requires a verified bearer token. `header` is refused when `BORELIA_ENV` is non-dev |
 | `AUTH_JWT_SECRET` | — | HMAC secret for `AUTH_MODE=jwt` |
 | `AUTH_JWT_ISSUER` / `AUTH_JWT_AUDIENCE` | — | Optional JWT claim checks (OIDC-ready) |
 | `AUTH_JWT_ALGORITHMS` | `HS256` | Comma-separated allowed algorithms |
-| `GEOLOG_CORS_ORIGINS` | unset | Comma-separated allowed origins. Unset disables CORS entirely; the bundled frontend is same-origin and needs none |
-| `GEOLOG_DB_PATH` | `backend/geolog.db` | SQLite file location |
-| `GEOLOG_ARTIFACT_DIR` | `backend/artifacts` | File backend state, image/core assets and security evidence |
-| `GEOLOG_STATE_BACKEND` | `file` | `database` moves rate limits, metrics, jobs, locks and snapshots into the primary database; use PostgreSQL for multi-host |
-| `GEOLOG_JOB_STALE_SECONDS` | `900` | Reclaim a running job whose worker stopped heartbeating |
-| `GEOLOG_RUN_MIGRATIONS_ON_STARTUP` | `true` in dev/test, `false` elsewhere | Production must run `alembic upgrade head` as a deploy step |
-| `GEOLOG_FAIL_ON_SCHEMA_MISMATCH` | `true` outside dev | Refuse to start when the live schema differs from the models |
-| `GEOLOG_ENFORCE_PROJECT_ACL` | `true` | Project membership enforcement; see `docs/PROJECT_ACL.md` |
-| `GEOLOG_AUTH_IP_LIMIT` / `GEOLOG_AUTH_IP_WINDOW_SECONDS` | `30` / `300` | Login attempts per source IP |
-| `GEOLOG_AUTH_FAILURE_LIMIT` / `GEOLOG_AUTH_LOCKOUT_SECONDS` | `5` / `900` | Per-account failures before lockout and lockout duration |
-| `GEOLOG_MAX_UPLOAD_BYTES` | `268435456` (256 MiB) | Per-file upload cap; streamed, never read unbounded |
-| `GEOLOG_MAX_BODY_BYTES` | `67108864` (64 MiB) | Non-multipart request body cap |
-| `GEOLOG_PBKDF2_ITERATIONS` | `240000` | Local user-secret hash cost |
-| `GEOLOG_TRUST_PROXY` | `false` | Honour `X-Forwarded-For` for rate limiting; enable only behind a trusted proxy |
-| `GEOLOG_ENABLE_DEMO_SEED` | `false` | Seed demo wells on first startup |
-| `GEOLOG_ENFORCE_SECRETS_SOURCE` | `true` | Require `GEOLOG_SECRETS_SOURCE` in non-dev |
-| `GEOLOG_SECRETS_SOURCE` | — | Required when `GEOLOG_ENV` is non-dev |
-| `GEOLOG_ENABLE_DOCS` | `true` in dev/test, `false` elsewhere | Expose `/docs`, `/redoc` and `/openapi.json`; leave off in production unless the docs host is protected |
-| `GEOLOG_ERROR_WEBHOOK_URL` | unset | POST redacted 5xx exception payloads to an operator endpoint |
-| `GEOLOG_ERROR_WEBHOOK_INCLUDE_TRACE` | `false` | Include a truncated traceback in webhook payloads |
-| `GEOLOG_OTEL_ENABLED` | `false` | Enable OTLP/HTTP tracing when the optional observability packages are installed |
-| `GEOLOG_OTEL_ENDPOINT` | `http://localhost:4318/v1/traces` | OTLP/HTTP trace endpoint |
-| `GEOLOG_OTEL_SERVICE_NAME` | `geolog` | `service.name` resource attribute |
-| `GEOLOG_OTEL_SAMPLE_RATIO` | `1.0` | Trace sampler ratio, 0.0–1.0 |
-| `GEOLOG_OTEL_HEADERS` | unset | JSON object of exporter headers, for example auth |
-| `GEOLOG_OTEL_EXCLUDED_URLS` | health/metrics | Comma-separated paths excluded from instrumentation |
+| `BORELIA_CORS_ORIGINS` | unset | Comma-separated allowed origins. Unset disables CORS entirely; the bundled frontend is same-origin and needs none |
+| `BORELIA_DB_PATH` | `backend/borelia.db` | SQLite file location |
+| `BORELIA_ARTIFACT_DIR` | `backend/artifacts` | File backend state, image/core assets and security evidence |
+| `BORELIA_STATE_BACKEND` | `file` | `database` moves rate limits, metrics, jobs, locks and snapshots into the primary database; use PostgreSQL for multi-host |
+| `BORELIA_JOB_STALE_SECONDS` | `900` | Reclaim a running job whose worker stopped heartbeating |
+| `BORELIA_RUN_MIGRATIONS_ON_STARTUP` | `true` in dev/test, `false` elsewhere | Production must run `alembic upgrade head` as a deploy step |
+| `BORELIA_FAIL_ON_SCHEMA_MISMATCH` | `true` outside dev | Refuse to start when the live schema differs from the models |
+| `BORELIA_ENFORCE_PROJECT_ACL` | `true` | Project membership enforcement; see `docs/PROJECT_ACL.md` |
+| `BORELIA_AUTH_IP_LIMIT` / `BORELIA_AUTH_IP_WINDOW_SECONDS` | `30` / `300` | Login attempts per source IP |
+| `BORELIA_AUTH_FAILURE_LIMIT` / `BORELIA_AUTH_LOCKOUT_SECONDS` | `5` / `900` | Per-account failures before lockout and lockout duration |
+| `BORELIA_MAX_UPLOAD_BYTES` | `268435456` (256 MiB) | Per-file upload cap; streamed, never read unbounded |
+| `BORELIA_MAX_BODY_BYTES` | `67108864` (64 MiB) | Non-multipart request body cap |
+| `BORELIA_PBKDF2_ITERATIONS` | `240000` | Local user-secret hash cost |
+| `BORELIA_TRUST_PROXY` | `false` | Honour `X-Forwarded-For` for rate limiting; enable only behind a trusted proxy |
+| `BORELIA_ENABLE_DEMO_SEED` | `false` | Seed demo wells on first startup |
+| `BORELIA_ENFORCE_SECRETS_SOURCE` | `true` | Require `BORELIA_SECRETS_SOURCE` in non-dev |
+| `BORELIA_SECRETS_SOURCE` | — | Required when `BORELIA_ENV` is non-dev |
+| `BORELIA_ENABLE_DOCS` | `true` in dev/test, `false` elsewhere | Expose `/docs`, `/redoc` and `/openapi.json`; leave off in production unless the docs host is protected |
+| `BORELIA_ERROR_WEBHOOK_URL` | unset | POST redacted 5xx exception payloads to an operator endpoint |
+| `BORELIA_ERROR_WEBHOOK_INCLUDE_TRACE` | `false` | Include a truncated traceback in webhook payloads |
+| `BORELIA_OTEL_ENABLED` | `false` | Enable OTLP/HTTP tracing when the optional observability packages are installed |
+| `BORELIA_OTEL_ENDPOINT` | `http://localhost:4318/v1/traces` | OTLP/HTTP trace endpoint |
+| `BORELIA_OTEL_SERVICE_NAME` | `borelia` | `service.name` resource attribute |
+| `BORELIA_OTEL_SAMPLE_RATIO` | `1.0` | Trace sampler ratio, 0.0–1.0 |
+| `BORELIA_OTEL_HEADERS` | unset | JSON object of exporter headers, for example auth |
+| `BORELIA_OTEL_EXCLUDED_URLS` | health/metrics | Comma-separated paths excluded from instrumentation |
 | `AUDIT_EXPORT_HMAC_KEYS_JSON` / `AUDIT_EXPORT_HMAC_ACTIVE_KID` | — | Audit/evidence signing key rotation |
 | `AUDIT_EXPORT_HMAC_KEY` | — | Legacy single signing key (`kid='legacy'`) |
 
@@ -470,8 +470,8 @@ deploy step, then start every worker with the same revision. The app verifies
 the live schema and refuses to start if a table or column is missing.
 
 ```bash
-GEOLOG_ENV=prod python -m alembic upgrade head
-GEOLOG_ENV=prod python -m uvicorn backend.main:app --workers 2
+BORELIA_ENV=prod python -m alembic upgrade head
+BORELIA_ENV=prod python -m uvicorn backend.main:app --workers 2
 ```
 
 ```bash
@@ -497,7 +497,7 @@ one. Add a migration.
 
 Notes:
 - Parser tests run without server.
-- API tests in `test_parser.py` require GeoLog running at `http://localhost:8000`.
+- API tests in `test_parser.py` require Borelia running at `http://localhost:8000`.
 
 ---
 
@@ -554,7 +554,7 @@ Remaining before a multi-tenant/SLA deployment:
 2. Raise coverage on the petrophysics compute modules and add more real-world
    LAS/DLIS fixtures.
 3. For more than one host, use PostgreSQL with
-   `GEOLOG_STATE_BACKEND=database` and a shared volume/object store for binary
+   `BORELIA_STATE_BACKEND=database` and a shared volume/object store for binary
    assets and security evidence. See
    [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md).
 
@@ -591,8 +591,8 @@ skipped and uploads fall back to the heuristic scan with a warning.
 
 ### Real DLIS/LIS files (optional)
 ```bash
-GEOLOG_DLIS_SAMPLE=/path/file.dlis \
-GEOLOG_LIS_SAMPLE=/path/file.lis \
+BORELIA_DLIS_SAMPLE=/path/file.dlis \
+BORELIA_LIS_SAMPLE=/path/file.lis \
 python -m pytest tests/test_dlis_lis_real_samples.py -q
 ```
 Samples are not committed; see `tests/test_dlis_lis_real_samples.py` for the

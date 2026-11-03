@@ -14,8 +14,8 @@ jobs:
   slo-load-gate:
     runs-on: ubuntu-latest
     env:
-      GEOLOG_ENV: ci
-      GEOLOG_ENFORCE_SECRETS_SOURCE: "false"
+      BORELIA_ENV: ci
+      BORELIA_ENFORCE_SECRETS_SOURCE: "false"
       OPS_SLO_AVG_MS: "500"
       OPS_SLO_P95_MS: "800"
       OPS_SLO_ERROR_RATE: "0.01"
@@ -36,8 +36,8 @@ jobs:
       - name: Start API server
         run: |
           set -euo pipefail
-          nohup python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 > /tmp/geolog-api.log 2>&1 &
-          echo $! > /tmp/geolog-api.pid
+          nohup python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 > /tmp/borelia-api.log 2>&1 &
+          echo $! > /tmp/borelia-api.pid
           for i in {1..40}; do
             if curl -sf http://127.0.0.1:8000/docs >/dev/null; then
               echo "API ready"
@@ -46,8 +46,19 @@ jobs:
             sleep 1
           done
           echo "API failed to start"
-          cat /tmp/geolog-api.log || true
+          cat /tmp/borelia-api.log || true
           exit 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install JS dependencies
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
 
       - name: Run Phase-3 SLO load gate
         run: |
@@ -65,7 +76,7 @@ jobs:
       - name: Stop API server
         if: always()
         run: |
-          if [ -f /tmp/geolog-api.pid ]; then
-            kill "$(cat /tmp/geolog-api.pid)" || true
+          if [ -f /tmp/borelia-api.pid ]; then
+            kill "$(cat /tmp/borelia-api.pid)" || true
           fi
-          cat /tmp/geolog-api.log || true
+          cat /tmp/borelia-api.log || true

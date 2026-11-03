@@ -157,7 +157,7 @@ def seed(session=None) -> dict:
 
 
 def main() -> int:
-    print("Seeding GeoLog with demo data...")
+    print("Seeding Borelia with demo data...")
     ensure_schema()
 
     db = SessionLocal()

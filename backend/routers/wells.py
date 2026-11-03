@@ -1,4 +1,4 @@
-"""Well router for GeoLog.
+"""Well router for Borelia.
 
 The largest route group: ingest (LAS/DLIS/LIS/CSV), formation tops, zones, DST and
 RFT, completion and production data, petrophysics, curve editing, deviation,

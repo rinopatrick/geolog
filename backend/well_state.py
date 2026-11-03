@@ -1,6 +1,6 @@
 """Well interpretation state: locks, snapshots and template signatures.
 
-These live on disk rather than in the database, and GEOLOG_ARTIFACT_DIR redirects
+These live on disk rather than in the database, and BORELIA_ARTIFACT_DIR redirects
 them so tests can point at a temporary directory instead of leaving a well locked
 for the running app.
 
@@ -54,7 +54,7 @@ except ImportError:
 
 
 # Snapshots and locks live on disk, not in the database.
-ARTIFACT_DIR = os.environ.get("GEOLOG_ARTIFACT_DIR") or os.path.join(
+ARTIFACT_DIR = os.environ.get("BORELIA_ARTIFACT_DIR") or os.path.join(
     os.path.dirname(__file__), "artifacts"
 )
 SNAPSHOT_DIR = os.path.join(ARTIFACT_DIR, "snapshots")

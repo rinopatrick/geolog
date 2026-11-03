@@ -1,10 +1,10 @@
-# GeoLog production reverse proxy. Replace geolog.example.com with the
+# Borelia production reverse proxy. Replace borelia.example.com with the
 # real hostname. Caddy obtains and renews the certificate automatically.
 {
 	auto_https off
 }
 
-geolog.example.com {
+borelia.example.com {
 	tls {
 		# Use `tls internal` only for a staging host without public DNS.
 	}
@@ -14,8 +14,8 @@ geolog.example.com {
 		max_size 256MB
 	}
 
-	reverse_proxy geolog:8000 {
-		# Preserve client address for rate limiting (needs GEOLOG_TRUST_PROXY=true).
+	reverse_proxy borelia:8000 {
+		# Preserve client address for rate limiting (needs BORELIA_TRUST_PROXY=true).
 		header_up X-Forwarded-For {http.request.header.X-Forwarded-For}
 		header_up X-Forwarded-Proto {scheme}
 		header_up Host {host}

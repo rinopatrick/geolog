@@ -6,24 +6,24 @@ the database or returned by the API.
 ## Configuration
 
 ```bash
-GEOLOG_WITSML_URL=https://witsml.example/Store/Store.asmx
-GEOLOG_WITSML_USER=...
-GEOLOG_WITSML_PASSWORD=...
+BORELIA_WITSML_URL=https://witsml.example/Store/Store.asmx
+BORELIA_WITSML_USER=...
+BORELIA_WITSML_PASSWORD=...
 # or
-GEOLOG_WITSML_TOKEN=...
-GEOLOG_WITSML_TIMEOUT=30
-GEOLOG_INTEROP_INSECURE_TLS=0   # 1 only for a controlled test endpoint
+BORELIA_WITSML_TOKEN=...
+BORELIA_WITSML_TIMEOUT=30
+BORELIA_INTEROP_INSECURE_TLS=0   # 1 only for a controlled test endpoint
 
-GEOLOG_OSDU_URL=https://osdu.example
-GEOLOG_OSDU_TOKEN=...
-GEOLOG_OSDU_PARTITION=...
-GEOLOG_OSDU_WELLBORES_PATH=/api/wellbore/v1/wellbores
+BORELIA_OSDU_URL=https://osdu.example
+BORELIA_OSDU_TOKEN=...
+BORELIA_OSDU_PARTITION=...
+BORELIA_OSDU_WELLBORES_PATH=/api/wellbore/v1/wellbores
 ```
 
 ## WITSML 1.4.1.1
 
 `WMLS_GetFromStore` over SOAP is implemented for `well` and `log` objects.
-`pull` imports wells into one GeoLog project and can import log curves:
+`pull` imports wells into one Borelia project and can import log curves:
 
 ```text
 POST /api/interop/witsml/test
@@ -46,7 +46,7 @@ OSDU pulls `results` from the Wellbore DDMS collection and upserts wells by UWI
 or name. Push sends a `master-data--Wellbore:1.0.0` record to the configured
 collection. `pull-logs` reads Wellbore DDMS log records and imports `Curves` + `LogData`
 when the provider returns them; metadata-only records are reported. Override the
-collection path with `GEOLOG_OSDU_WELLLOGS_PATH`. Log push is not implemented.
+collection path with `BORELIA_OSDU_WELLLOGS_PATH`. Log push is not implemented.
 
 ## Limits
 
@@ -54,4 +54,4 @@ collection path with `GEOLOG_OSDU_WELLLOGS_PATH`. Log push is not implemented.
 - No background sync, conflict resolution or incremental cursors.
 - OSDU push does not allocate legal tags, ACLs or parents.
 - The adapters use `urllib`; no vendor SDK is required.
-- TLS verification is on unless `GEOLOG_INTEROP_INSECURE_TLS=1`.
+- TLS verification is on unless `BORELIA_INTEROP_INSECURE_TLS=1`.

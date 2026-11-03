@@ -2,7 +2,7 @@
  * Saved report templates and custom PDF generation.
  * Loaded after app.js and before bootstrap.js.
  */
-Object.assign(GeoLogApp.prototype, {
+Object.assign(BoreliaApp.prototype, {
     _reportSections() {
         const mapping = [
             ['rbSectionRock', 'rock_source'],
@@ -40,7 +40,7 @@ Object.assign(GeoLogApp.prototype, {
         const config = template.config || {};
         const title = document.getElementById('reportTemplateTitle');
         const name = document.getElementById('reportTemplateName');
-        if (title) title.value = config.title || 'GeoLog Well Report';
+        if (title) title.value = config.title || 'Borelia Well Report';
         if (name) name.value = template.name || '';
         const selected = new Set(config.sections || []);
         const mapping = {
@@ -66,7 +66,7 @@ Object.assign(GeoLogApp.prototype, {
                 method: 'POST',
                 body: JSON.stringify({
                     name,
-                    title: document.getElementById('reportTemplateTitle')?.value || 'GeoLog Well Report',
+                    title: document.getElementById('reportTemplateTitle')?.value || 'Borelia Well Report',
                     sections,
                 }),
             });
@@ -87,7 +87,7 @@ Object.assign(GeoLogApp.prototype, {
             const blob = await this._apiBlob(`/wells/${this.currentWell.id}/report/custom.pdf`, {
                 method: 'POST',
                 body: JSON.stringify({
-                    title: document.getElementById('reportTemplateTitle')?.value || 'GeoLog Well Report',
+                    title: document.getElementById('reportTemplateTitle')?.value || 'Borelia Well Report',
                     sections,
                 }),
             });

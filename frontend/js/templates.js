@@ -1,5 +1,5 @@
 /**
- * Template Workflow Panel — standalone module for GeoLog.
+ * Template Workflow Panel — standalone module for Borelia.
  * Template cards, one-click apply, preview comparison.
  */
 /* exported TemplateWorkflowPanel */
@@ -28,7 +28,7 @@ class TemplateWorkflowPanel {
     async _loadTemplates() {
         try {
             const resp = await fetch(`${this.apiBase}/templates`, {
-                headers: window.geologAuthHeaders(),
+                headers: window.boreliaAuthHeaders(),
             });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();
@@ -81,7 +81,7 @@ class TemplateWorkflowPanel {
         try {
             const resp = await fetch(`${this.apiBase}/wells/${this.wellId}/template-preview`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...window.geologAuthHeaders() },
+                headers: { 'Content-Type': 'application/json', ...window.boreliaAuthHeaders() },
                 body: JSON.stringify({ template_name: name }),
             });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -131,7 +131,7 @@ class TemplateWorkflowPanel {
         try {
             const resp = await fetch(`${this.apiBase}/wells/${this.wellId}/apply-template`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...window.geologAuthHeaders() },
+                headers: { 'Content-Type': 'application/json', ...window.boreliaAuthHeaders() },
                 body: JSON.stringify({ template_name: name }),
             });
             if (!resp.ok) {
@@ -150,7 +150,7 @@ class TemplateWorkflowPanel {
     async _loadComparison() {
         try {
             const resp = await fetch(`${this.apiBase}/wells/${this.wellId}/template-comparison`, {
-                headers: window.geologAuthHeaders(),
+                headers: window.boreliaAuthHeaders(),
             });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const result = await resp.json();

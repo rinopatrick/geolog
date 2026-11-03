@@ -1,4 +1,4 @@
-"""GeoLog — Oil & Gas Well Log Viewer."""
+"""Borelia — Oil & Gas Well Log Viewer."""
 import hashlib
 import json
 import logging
@@ -198,7 +198,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-logger = logging.getLogger("geolog")
+logger = logging.getLogger("borelia")
 
 
 
@@ -218,11 +218,11 @@ bootstrap_schema()
 
 _env = current_env()
 _docs_enabled = _env in {"dev", "local", "test", "ci"} or (
-    (os.getenv("GEOLOG_ENABLE_DOCS") or "").strip().lower() in {"1", "true", "yes", "on"}
+    (os.getenv("BORELIA_ENABLE_DOCS") or "").strip().lower() in {"1", "true", "yes", "on"}
 )
 
 app = FastAPI(
-    title="GeoLog",
+    title="Borelia",
     description="Oil & Gas Well Log Viewer",
     version=__version__,
     docs_url="/docs" if _docs_enabled else None,
@@ -286,7 +286,7 @@ app.include_router(velocity_router)
 AUTH_CONFIG = AuthConfig.from_env()
 if AUTH_CONFIG.mode == "header":
     logger.warning(
-        "AUTH_MODE=header (trusted client header, GEOLOG_ENV=%s). "
+        "AUTH_MODE=header (trusted client header, BORELIA_ENV=%s). "
         "Use AUTH_MODE=jwt for any shared or public deployment.",
         current_env(),
     )
@@ -298,7 +298,7 @@ _require_role = require_role
 # CORS is opt-in. The bundled frontend is served from this same origin, so it
 # needs none. A wildcard origin combined with credentials would let any site a
 # logged-in user visits read the whole database.
-_cors_origins = [o.strip() for o in (os.getenv("GEOLOG_CORS_ORIGINS") or "").split(",") if o.strip()]
+_cors_origins = [o.strip() for o in (os.getenv("BORELIA_CORS_ORIGINS") or "").split(",") if o.strip()]
 if _cors_origins:
     app.add_middleware(
         CORSMiddleware,
@@ -386,7 +386,7 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
 
 
 def _https_required() -> bool:
-    return (os.getenv("GEOLOG_REQUIRE_HTTPS", "false") or "false").strip().lower() in {"1", "true", "yes", "on"}
+    return (os.getenv("BORELIA_REQUIRE_HTTPS", "false") or "false").strip().lower() in {"1", "true", "yes", "on"}
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Optional HTTPS redirect plus baseline response hardening headers."""
@@ -637,15 +637,15 @@ setup_tracing(app)
 
 def _enforce_secrets_source_policy() -> None:
     """Fail fast in non-dev environments when secrets source is not configured."""
-    env = (os.getenv("GEOLOG_ENV") or os.getenv("ENV") or "dev").strip().lower()
-    secrets_source = (os.getenv("GEOLOG_SECRETS_SOURCE") or "").strip()
-    strict = (os.getenv("GEOLOG_ENFORCE_SECRETS_SOURCE", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
+    env = (os.getenv("BORELIA_ENV") or os.getenv("ENV") or "dev").strip().lower()
+    secrets_source = (os.getenv("BORELIA_SECRETS_SOURCE") or "").strip()
+    strict = (os.getenv("BORELIA_ENFORCE_SECRETS_SOURCE", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
     if not strict:
         return
     if env in {"dev", "local", "test"}:
         return
     if not secrets_source:
-        raise RuntimeError("GEOLOG_SECRETS_SOURCE is required for non-dev environments")
+        raise RuntimeError("BORELIA_SECRETS_SOURCE is required for non-dev environments")
 
 
 @app.on_event("shutdown")
@@ -692,7 +692,7 @@ def seed_demo_data(db: Session = None) -> bool:
         las = LASParser.parse_file(demo_las)
         fname = os.path.basename(demo_las)
 
-        proj = Project(name="Demo Field Study", field_name="Demo Field", operator="GeoLog Demo", country="US")
+        proj = Project(name="Demo Field Study", field_name="Demo Field", operator="Borelia Demo", country="US")
         db.add(proj)
         db.flush()
 
@@ -747,11 +747,11 @@ def seed_demo_data(db: Session = None) -> bool:
         w1, nc1, np1, nt1 = _seed_well(
             name=las.well.well_name or "DEMO-01",
             uwi=las.well.uwi or "00-000-00000",
-            operator=las.well.operator or "GeoLog Demo",
+            operator=las.well.operator or "Borelia Demo",
         )
         # Well 2: offset well (25 ft structural dip, for correlation demo)
         w2, nc2, np2, nt2 = _seed_well(
-            name="DEMO-02", uwi="00-000-00001", operator="GeoLog Demo",
+            name="DEMO-02", uwi="00-000-00001", operator="Borelia Demo",
             depth_offset=25.0, tops_offset=12.0,
         )
 
@@ -772,8 +772,8 @@ def seed_demo_data(db: Session = None) -> bool:
 
 @app.on_event("startup")
 def _auto_seed():
-    """Seed demo data if database is empty. Gate behind GEOLOG_ENABLE_DEMO_SEED=true."""
-    if os.environ.get("GEOLOG_ENABLE_DEMO_SEED", "false").lower() != "true":
+    """Seed demo data if database is empty. Gate behind BORELIA_ENABLE_DEMO_SEED=true."""
+    if os.environ.get("BORELIA_ENABLE_DEMO_SEED", "false").lower() != "true":
         return
     seed_demo_data()
 
@@ -781,13 +781,13 @@ def _auto_seed():
 # ─── Health ───────────────────────────────────────────────────
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "app": "GeoLog", "version": __version__}
+    return {"status": "ok", "app": "Borelia", "version": __version__}
 
 
 @app.get("/api/version")
 def api_version(request: Request):
     return {
-        "app": "GeoLog",
+        "app": "Borelia",
         "version": __version__,
         "api_version": getattr(request.state, "api_version", "v0"),
     }

@@ -44,30 +44,30 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 def witsml_config() -> dict[str, Any]:
-    url = (os.environ.get("GEOLOG_WITSML_URL") or "").strip()
+    url = (os.environ.get("BORELIA_WITSML_URL") or "").strip()
     if not url:
-        raise RuntimeError("GEOLOG_WITSML_URL is not configured")
+        raise RuntimeError("BORELIA_WITSML_URL is not configured")
     return {
         "url": url,
-        "user": os.environ.get("GEOLOG_WITSML_USER", ""),
-        "password": os.environ.get("GEOLOG_WITSML_PASSWORD", ""),
-        "token": os.environ.get("GEOLOG_WITSML_TOKEN", ""),
-        "timeout": float(os.environ.get("GEOLOG_WITSML_TIMEOUT", "30") or 30),
-        "verify_tls": not _bool_env("GEOLOG_INTEROP_INSECURE_TLS", False),
+        "user": os.environ.get("BORELIA_WITSML_USER", ""),
+        "password": os.environ.get("BORELIA_WITSML_PASSWORD", ""),
+        "token": os.environ.get("BORELIA_WITSML_TOKEN", ""),
+        "timeout": float(os.environ.get("BORELIA_WITSML_TIMEOUT", "30") or 30),
+        "verify_tls": not _bool_env("BORELIA_INTEROP_INSECURE_TLS", False),
     }
 
 def osdu_config() -> dict[str, Any]:
-    url = (os.environ.get("GEOLOG_OSDU_URL") or "").strip()
+    url = (os.environ.get("BORELIA_OSDU_URL") or "").strip()
     if not url:
-        raise RuntimeError("GEOLOG_OSDU_URL is not configured")
+        raise RuntimeError("BORELIA_OSDU_URL is not configured")
     return {
         "url": url.rstrip("/"),
-        "token": os.environ.get("GEOLOG_OSDU_TOKEN", ""),
-        "partition": os.environ.get("GEOLOG_OSDU_PARTITION", ""),
-        "timeout": float(os.environ.get("GEOLOG_OSDU_TIMEOUT", "30") or 30),
-        "verify_tls": not _bool_env("GEOLOG_INTEROP_INSECURE_TLS", False),
-        "wellbores_path": os.environ.get("GEOLOG_OSDU_WELLBORES_PATH", "/api/wellbore/v1/wellbores"),
-        "welllogs_path": os.environ.get("GEOLOG_OSDU_WELLLOGS_PATH", "/api/wellbore/v1/wellbores/{wellbore_id}/welllogs"),
+        "token": os.environ.get("BORELIA_OSDU_TOKEN", ""),
+        "partition": os.environ.get("BORELIA_OSDU_PARTITION", ""),
+        "timeout": float(os.environ.get("BORELIA_OSDU_TIMEOUT", "30") or 30),
+        "verify_tls": not _bool_env("BORELIA_INTEROP_INSECURE_TLS", False),
+        "wellbores_path": os.environ.get("BORELIA_OSDU_WELLBORES_PATH", "/api/wellbore/v1/wellbores"),
+        "welllogs_path": os.environ.get("BORELIA_OSDU_WELLLOGS_PATH", "/api/wellbore/v1/wellbores/{wellbore_id}/welllogs"),
     }
 
 def http_request(method: str, url: str, body: bytes | None, headers: dict[str, str],

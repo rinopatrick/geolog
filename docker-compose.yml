@@ -1,19 +1,19 @@
 services:
-  geolog:
+  borelia:
     build: .
     ports:
       - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
       # Trusted-header auth: fine for a local/demo container. Before exposing this
-      # on a network set GEOLOG_ENV=prod, AUTH_MODE=jwt and AUTH_JWT_SECRET.
-      - GEOLOG_ENV=dev
-      - GEOLOG_ENABLE_DEMO_SEED=true
+      # on a network set BORELIA_ENV=prod, AUTH_MODE=jwt and AUTH_JWT_SECRET.
+      - BORELIA_ENV=dev
+      - BORELIA_ENABLE_DEMO_SEED=true
       # Keep the database and interpretation snapshots on the mounted volume.
-      - GEOLOG_DB_PATH=/app/backend/data/geolog.db
-      - GEOLOG_ARTIFACT_DIR=/app/backend/data/artifacts
+      - BORELIA_DB_PATH=/app/backend/data/borelia.db
+      - BORELIA_ARTIFACT_DIR=/app/backend/data/artifacts
     volumes:
-      - geolog-data:/app/backend/data
+      - borelia-data:/app/backend/data
     restart: unless-stopped
     healthcheck:
       # python:3.11-slim has no curl; match the Dockerfile's urllib probe.
@@ -23,4 +23,4 @@ services:
       retries: 3
 
 volumes:
-  geolog-data:
+  borelia-data:

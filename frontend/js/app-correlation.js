@@ -1,8 +1,8 @@
 /**
- * Correlation, tops-tie and marker-picking methods for GeoLogApp.
+ * Correlation, tops-tie and marker-picking methods for BoreliaApp.
  * Loaded after app.js and before bootstrap.js.
  */
-Object.assign(GeoLogApp.prototype, {
+Object.assign(BoreliaApp.prototype, {
     async _loadCorrelationProfile() {
         const { wellAId, wellBId } = this._currentCorrPair();
         if (!wellAId || !wellBId) return;
@@ -18,7 +18,8 @@ Object.assign(GeoLogApp.prototype, {
         } catch (e) {
             console.error('Failed to load correlation profile:', e);
         }
-    },
+    }
+,
 
     async _saveCorrelationProfile() {
         const { wellAId, wellBId } = this._currentCorrPair();
@@ -31,7 +32,8 @@ Object.assign(GeoLogApp.prototype, {
             method: 'POST',
             body: JSON.stringify({ well_a_id: wellAId, well_b_id: wellBId, curve, depth_shift: shift, stretch, snap_to_tops: snap }),
         });
-    },
+    }
+,
 
     _populateCorrelationWellSelectors() {
         const a = document.getElementById('corrWellA');
@@ -43,13 +45,15 @@ Object.assign(GeoLogApp.prototype, {
         if (this.wells.length > 0) a.value = String(this.wells[0].id);
         if (this.wells.length > 1) b.value = String(this.wells[1].id);
         else if (this.wells.length > 0) b.value = String(this.wells[0].id);
-    },
+    }
+,
 
     _currentCorrPair() {
         const wellAId = parseInt(document.getElementById('corrWellA')?.value || '0');
         const wellBId = parseInt(document.getElementById('corrWellB')?.value || '0');
         return { wellAId, wellBId };
-    },
+    }
+,
 
     async _loadCorrelationMarkers() {
         const { wellAId, wellBId } = this._currentCorrPair();
@@ -59,7 +63,8 @@ Object.assign(GeoLogApp.prototype, {
         } catch {
             this.corrMarkers = [];
         }
-    },
+    }
+,
 
     async _saveCorrelationMarkers() {
         const { wellAId, wellBId } = this._currentCorrPair();
@@ -68,7 +73,8 @@ Object.assign(GeoLogApp.prototype, {
             method: 'POST',
             body: JSON.stringify({ well_a_id: wellAId, well_b_id: wellBId, markers: this.corrMarkers || [] }),
         });
-    },
+    }
+,
 
     _curveFamilyLabel(mnemonic) {
         const m = (mnemonic || '').toUpperCase();
@@ -79,7 +85,8 @@ Object.assign(GeoLogApp.prototype, {
         if (['DT','DTC','DTP','DTS'].includes(m)) return 'DT-family';
         if (['CAL','CALI','HCAL'].includes(m)) return 'CAL-family';
         return 'OTHER';
-    },
+    }
+,
 
     _corrTopQualityColor(top) {
         const q = String(top?.quality ?? top?.confidence ?? top?.rank ?? '').toLowerCase().trim();
@@ -87,11 +94,13 @@ Object.assign(GeoLogApp.prototype, {
         if (q === 'fair' || q === 'medium' || q === 'b') return '#d29922';
         if (q === 'poor' || q === 'low' || q === 'c') return '#f85149';
         return top?.color || '#8b949e';
-    },
+    }
+,
 
     _corrNormalizeTopName(name) {
         return String(name || '').trim().toLowerCase();
-    },
+    }
+,
 
     async _loadCorrelationTops(wellAId, wellBId) {
         try {
@@ -128,7 +137,8 @@ Object.assign(GeoLogApp.prototype, {
             this._corrTopOverlay = { a: [], b: [] };
             this._corrTopCache = { a: [], b: [] };
         }
-    },
+    }
+,
 
     toggleCorrelationTops() {
         this.corrShowTops = !this.corrShowTops;
@@ -138,7 +148,8 @@ Object.assign(GeoLogApp.prototype, {
             btn.setAttribute('aria-pressed', this.corrShowTops ? 'true' : 'false');
         }
         this.renderCorrelation();
-    },
+    }
+,
 
     async renderCorrelation() {
         const canvas = document.getElementById('correlationCanvas');
@@ -320,7 +331,8 @@ Object.assign(GeoLogApp.prototype, {
 
         this.corrLastRender.markerHitZones = markerHitZones;
         this._renderCorrelationMarkerTable();
-    },
+    }
+,
 
     async autoTieShift() {
         const wellAId = parseInt(document.getElementById('corrWellA')?.value || '0');
@@ -418,7 +430,8 @@ Object.assign(GeoLogApp.prototype, {
             }
         }
         await this.renderCorrelation();
-    },
+    }
+,
 
     _applyTopSnapDepths(depthB, topsA, topsB, shift) {
         if (!depthB.length || !topsA.length || !topsB.length) return depthB;
@@ -435,7 +448,8 @@ Object.assign(GeoLogApp.prototype, {
         if (!n) return depthB;
         const bias = biasSum / n;
         return depthB.map(d => d + bias);
-    },
+    }
+,
 
     applyTopSnap() {
         const info = document.getElementById('corrInfo');
@@ -459,7 +473,8 @@ Object.assign(GeoLogApp.prototype, {
         if (shiftInput) shiftInput.value = (shift + extraShift).toFixed(1);
         if (info) info.textContent = `Top Snap applied from ${n} top pairs: Δshift ${extraShift.toFixed(1)} ft`;
         this.renderCorrelation();
-    },
+    }
+,
 
     _normalizeTopName(name) {
         const raw = (name || '').toLowerCase();
@@ -479,11 +494,13 @@ Object.assign(GeoLogApp.prototype, {
         let n = raw;
         synonyms.forEach(([re, rep]) => { n = n.replace(re, rep); });
         return n.replace(/[^a-z0-9]+/g, ' ').trim();
-    },
+    }
+,
 
     _tokenSet(s) {
         return new Set((s || '').split(' ').filter(Boolean));
-    },
+    }
+,
 
     _jaccard(a, b) {
         const sa = this._tokenSet(a);
@@ -493,7 +510,8 @@ Object.assign(GeoLogApp.prototype, {
         sa.forEach(t => { if (sb.has(t)) inter += 1; });
         const uni = new Set([...sa, ...sb]).size;
         return uni ? inter / uni : 0;
-    },
+    }
+,
 
     _bestTopMatch(nameA, topsB) {
         let best = null;
@@ -506,7 +524,8 @@ Object.assign(GeoLogApp.prototype, {
             }
         }
         return bestScore >= 0.5 ? { ...best, score: bestScore } : null;
-    },
+    }
+,
 
     applyTopNameTie() {
         const info = document.getElementById('corrInfo');
@@ -549,19 +568,22 @@ Object.assign(GeoLogApp.prototype, {
         }).catch(err => {
             if (info) info.textContent = `Name Tie error: ${err.message || err}`;
         });
-    },
+    }
+,
 
     async saveCorrelationSettings() {
         await this._saveCorrelationProfile();
         GeoToast.success('Correlation profile saved');
-    },
+    }
+,
 
     startMarkerPick() {
         this.corrPickMode = true;
         this._corrPickTemp = null;
         const info = document.getElementById('corrInfo');
         if (info) info.textContent = 'Pick mode: click depth for Well A, then click depth for Well B';
-    },
+    }
+,
 
     async clearMarkers() {
         this.corrMarkers = [];
@@ -570,7 +592,8 @@ Object.assign(GeoLogApp.prototype, {
         this._renderCorrelationMarkerTable();
         await this._saveCorrelationMarkers();
         this.renderCorrelation();
-    },
+    }
+,
 
     _calcMarkerShift(method = 'median') {
         if (!this.corrMarkers.length) return null;
@@ -580,7 +603,8 @@ Object.assign(GeoLogApp.prototype, {
         }
         const mid = Math.floor(deltas.length / 2);
         return deltas.length % 2 ? deltas[mid] : (deltas[mid - 1] + deltas[mid]) / 2;
-    },
+    }
+,
 
     applyMarkerShift(method = 'median') {
         const shift = this._calcMarkerShift(method);
@@ -593,7 +617,8 @@ Object.assign(GeoLogApp.prototype, {
         if (shiftInput) shiftInput.value = shift.toFixed(1);
         if (info) info.textContent = `Applied ${method} marker shift: ${shift.toFixed(1)} ft`;
         this.renderCorrelation();
-    },
+    }
+,
 
     _renderCorrelationMarkerTable() {
         const el = document.getElementById('corrMarkerTable');
@@ -617,7 +642,8 @@ Object.assign(GeoLogApp.prototype, {
                 <div class="stats-row"><strong>Mean Δ</strong><strong>${mean.toFixed(1)} ft</strong></div>
             </div>
         `;
-    },
+    }
+,
 
     _onCorrelationCanvasClick(ev) {
         if (this._corrDragMoved) {
@@ -665,7 +691,8 @@ Object.assign(GeoLogApp.prototype, {
             this._saveCorrelationMarkers().catch(() => {});
             this.renderCorrelation();
         }
-    },
+    }
+,
 
     _nearestCorrTopDepth(wellKey, depth) {
         const arr = (wellKey === 'a' ? this._corrTopOverlay?.a : this._corrTopOverlay?.b) || [];
@@ -680,7 +707,8 @@ Object.assign(GeoLogApp.prototype, {
         }
         // snap threshold 6 ft
         return minD <= 6 ? best : depth;
-    },
+    }
+,
 
     _onCorrelationCanvasMouseDown(ev) {
         if (!this.corrLastRender || !this.corrLastRender.markerHitZones?.length) return;
@@ -700,7 +728,8 @@ Object.assign(GeoLogApp.prototype, {
                 return;
             }
         }
-    },
+    }
+,
 
     _onCorrelationCanvasMouseMove(ev) {
         const cv = document.getElementById('correlationCanvas');
@@ -738,7 +767,8 @@ Object.assign(GeoLogApp.prototype, {
             mk.bDepth = bDepth;
         }
         this.renderCorrelation();
-    },
+    }
+,
 
     _onCorrelationCanvasMouseUp(ev) {
         const cv = document.getElementById('correlationCanvas');
@@ -748,7 +778,8 @@ Object.assign(GeoLogApp.prototype, {
         this._saveCorrelationMarkers().catch(() => {});
         const info = document.getElementById('corrInfo');
         if (info) info.textContent = 'Marker moved and saved';
-    },
+    }
+,
 
     _renderWellHeader(well) {
         document.getElementById('wellName').textContent = well.name || 'Unknown Well';
@@ -772,7 +803,8 @@ Object.assign(GeoLogApp.prototype, {
             const versionBadge = versionLabel ? ` <span class="${versionClass}">${versionLabel}</span>` : '';
             statsEl.innerHTML = `Run ${runNo} • ${escapeHtml(file)} • ${this.currentLogRun.num_points} pts • ${depthText} ${escapeHtml(well.depth_unit)} • step ${stepAbs}${versionBadge}`;
         }
-    },
+    }
+,
 
     _renderCurvePanel(curves) {
         const panel = document.getElementById('curvePanel');
@@ -792,7 +824,8 @@ Object.assign(GeoLogApp.prototype, {
                 </div>
             `;
         }).join('');
-    },
+    }
+,
 
     _renderTopsList() {
         const panel = document.getElementById('topsPanel');
@@ -813,5 +846,6 @@ Object.assign(GeoLogApp.prototype, {
             </div>
         `).join('');
         if (typeof lucide !== 'undefined') lucide.createIcons();
-    },
+    }
+,
 });

@@ -144,16 +144,16 @@ def run_drill(db_path: Path, artifact_dir: Path | None) -> dict[str, Any]:
     out_dir = Path("artifacts") / "backup-drill" / stamp
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    backup_db = out_dir / "geolog.db.backup"
+    backup_db = out_dir / "borelia.db.backup"
     backup_artifacts = out_dir / "artifacts.backup"
     restore_dir = out_dir / "restore"
-    restore_db = restore_dir / "geolog.db"
+    restore_db = restore_dir / "borelia.db"
     restore_artifacts = restore_dir / "artifacts"
 
     backup_sqlite(db_path, backup_db)
     artifact_files = copy_tree(artifact_dir, backup_artifacts) if artifact_dir else []
 
-    manifest_entries: dict[str, Path] = {"geolog.db": backup_db}
+    manifest_entries: dict[str, Path] = {"borelia.db": backup_db}
     if artifact_dir:
         for rel in artifact_files:
             manifest_entries[f"artifacts/{rel.as_posix()}"] = backup_artifacts / rel
@@ -214,7 +214,7 @@ def run_drill(db_path: Path, artifact_dir: Path | None) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("db_path", nargs="?", default="backend/data/geolog.db")
+    parser.add_argument("db_path", nargs="?", default="backend/data/borelia.db")
     parser.add_argument("artifact_dir", nargs="?", default="")
     args = parser.parse_args()
     db_path = Path(args.db_path)

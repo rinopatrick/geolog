@@ -1,12 +1,12 @@
-"""Copy/verify/rollback GeoLog data between databases.
+"""Copy/verify/rollback Borelia data between databases.
 
 The target must be empty. Copy creates the schema, inserts rows in FK order,
 verifies row counts and content hashes, and deletes the copied rows if
 verification fails. On PostgreSQL, identity sequences are advanced afterwards.
 
 Usage:
-  python -m backend.pg_tools copy --source sqlite:///backend/geolog.db \
-      --target postgresql+psycopg://user:pass@host/geolog
+  python -m backend.pg_tools copy --source sqlite:///backend/borelia.db \
+      --target postgresql+psycopg://user:pass@host/borelia
   python -m backend.pg_tools verify --source ... --target ...
   python -m backend.pg_tools rollback --target ... --confirm
 """
@@ -148,7 +148,7 @@ def rollback(target_url: str, confirm: bool = False) -> dict:
     return {"ok": True, "action": "deleted all rows", "dialect": eng.dialect.name}
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(description="GeoLog database copy/verify/rollback")
+    p = argparse.ArgumentParser(description="Borelia database copy/verify/rollback")
     sub = p.add_subparsers(dest="command", required=True)
     for name in ("copy", "verify"):
         q = sub.add_parser(name)

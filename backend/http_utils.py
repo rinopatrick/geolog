@@ -17,7 +17,7 @@ def trust_proxy_headers() -> bool:
     Trusting the header by default lets any direct client forge its source IP,
     which would defeat per-IP rate limiting.
     """
-    return _truthy(os.getenv("GEOLOG_TRUST_PROXY"))
+    return _truthy(os.getenv("BORELIA_TRUST_PROXY"))
 
 
 def client_ip(request: Request) -> str:

@@ -45,7 +45,7 @@ function buildVolume() {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
-  const base = process.env.GEOLOG_BASE_URL || 'http://127.0.0.1:8010';
+  const base = process.env.BORELIA_BASE_URL || 'http://127.0.0.1:8010';
   await page.goto(base, { waitUntil: 'domcontentloaded' });
   const encoded = buildVolume().toString('base64');
   const result = await page.evaluate(async (base64) => {

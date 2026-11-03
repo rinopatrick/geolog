@@ -114,7 +114,7 @@ def test_security_headers_and_hsts():
     assert r.headers["strict-transport-security"].startswith("max-age=")
 
 def test_require_https_redirects_api_but_not_health(monkeypatch):
-    monkeypatch.setenv("GEOLOG_REQUIRE_HTTPS", "true")
+    monkeypatch.setenv("BORELIA_REQUIRE_HTTPS", "true")
     client = TestClient(app)
     r = client.get("/api/wells", follow_redirects=False)
     assert r.status_code == 308

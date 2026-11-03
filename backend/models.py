@@ -677,7 +677,7 @@ class RevokedToken(Base):
     revoked_at = Column(DateTime, default=utcnow)
 
 class SharedRateBucket(Base):
-    """Fixed-window counter used when GEOLOG_STATE_BACKEND=database."""
+    """Fixed-window counter used when BORELIA_STATE_BACKEND=database."""
 
     __tablename__ = "shared_rate_buckets"
 

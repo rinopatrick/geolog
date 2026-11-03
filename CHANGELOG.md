@@ -1,12 +1,21 @@
 # Changelog
 
-All notable changes to GeoLog are recorded here.
+All notable changes to Borelia are recorded here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, the API is not yet stable.
 
 ## [Unreleased]
+
+### Changed (BREAKING)
+
+- **Renamed GeoLog to Borelia** (trademark clearance). Migration for operators:
+  1. env: rename every `GEOLOG_*` to `BORELIA_*` (no backward-compat alias);
+  2. DB file: copy/rename `geolog.db` to `borelia.db` (or point `BORELIA_DB_PATH` at the old file);
+  3. compose: volume `geolog-data` is now `borelia-data`.
+  Prometheus metric names changed `geolog_*` to `borelia_*`; JWT example issuer/audience
+  changed to `borelia-auth`/`borelia-api`; health field `app` is now `"Borelia"`.
 
 ## [0.28.0] - 2026-10-31
 
@@ -283,7 +292,7 @@ While the major version is `0`, the API is not yet stable.
 ### Added
 
 - **Login throttling.** Per-IP attempt limits and per-account failure lockout,
-  shared across workers via file-backed state. Configurable with `GEOLOG_AUTH_*`.
+  shared across workers via file-backed state. Configurable with `BORELIA_AUTH_*`.
 - **Upload and body caps.** All upload routes stream through a bounded reader;
   a middleware rejects declared oversized bodies before authentication work.
 - **Hashed user secrets.** PBKDF2-HMAC-SHA256 hashes, legacy plaintext upgrade on
@@ -327,7 +336,7 @@ While the major version is `0`, the API is not yet stable.
   rewriting one locked `metrics.json` on every request.
 - User listing is admin-only; user secrets are no longer stored in plaintext.
 - Audit middleware no longer buffers multipart or large write bodies.
-- Docker image no longer ships tests and defaults to `GEOLOG_ENV=prod` with two
+- Docker image no longer ships tests and defaults to `BORELIA_ENV=prod` with two
   uvicorn workers; Compose still opts into dev/demo settings.
 
 ### Security
@@ -382,7 +391,7 @@ While the major version is `0`, the API is not yet stable.
 
 ### Added
 
-- **PostgreSQL opt-in.** `GEOLOG_DATABASE_URL` with SQLite default, dialect-aware
+- **PostgreSQL opt-in.** `BORELIA_DATABASE_URL` with SQLite default, dialect-aware
   Alembic batching, `psycopg` dependency, and `backend.pg_tools`
   copy/verify/rollback with content hashes and sequence advancement
   (`docs/POSTGRES.md`). File-backed state and the app-level audit chain remain
@@ -428,12 +437,12 @@ While the major version is `0`, the API is not yet stable.
   endpoint reports `expires_in`.
 - **Secrets from files.** Every supported secret can use the `<NAME>_FILE`
   convention for Docker/Kubernetes secret mounts.
-- **TLS and response headers.** `GEOLOG_REQUIRE_HTTPS=true` redirects with 308,
+- **TLS and response headers.** `BORELIA_REQUIRE_HTTPS=true` redirects with 308,
   HTTPS responses get HSTS, and all responses carry baseline hardening headers.
 - **Deployment guide.** `docs/PRODUCTION_HARDENING.md` covers IdP, secrets, TLS,
   persistence, backup drills, monitoring and a release checklist.
-- **Real DLIS/LIS checks.** Opt-in tests accept `GEOLOG_DLIS_SAMPLE` and
-  `GEOLOG_LIS_SAMPLE`; no third-party binary fixtures are committed.
+- **Real DLIS/LIS checks.** Opt-in tests accept `BORELIA_DLIS_SAMPLE` and
+  `BORELIA_LIS_SAMPLE`; no third-party binary fixtures are committed.
 
 ## [0.2.0] - 2026-10-21
 
@@ -504,7 +513,7 @@ and the schema may change between 0.x versions.
   Fixed, and `tests/test_route_inventory.py` now fails on any duplicate
   registration. (The earlier duplicate, `GET /api/templates`, was found the same
   way.)
-- **`routers/templates.py` ignored `GEOLOG_ARTIFACT_DIR`.** It built its own lock
+- **`routers/templates.py` ignored `BORELIA_ARTIFACT_DIR`.** It built its own lock
   path from `os.path.dirname(__file__)`, so a deployment that redirected the
   artifact directory had `template-lock` write one file and `apply-template` read
   another, and the lock appeared not to work. It now delegates to
@@ -585,7 +594,7 @@ and the schema may change between 0.x versions.
   environments now default to `jwt` and refuse header mode outright.
 - **CORS used `allow_origins=["*"]` with credentials enabled**, reflecting any
   origin, so any page a logged-in user visited could read the whole database. It
-  is now opt-in via `GEOLOG_CORS_ORIGINS`.
+  is now opt-in via `BORELIA_CORS_ORIGINS`.
 - Dependency pins for `pyjwt`, `python-multipart` and `starlette` carried known
   vulnerabilities and now resolve clean under `pip-audit`.
 - A SHA1 use in the ETag helper is marked `usedforsecurity=False`; it is
@@ -606,7 +615,7 @@ and the schema may change between 0.x versions.
 - **`scripts/audit_stored_curves.py`**, which finds stored wells whose curve
   values are physically impossible and therefore came from the parser bug. The
   raw upload is not retained, so affected wells must be re-uploaded.
-- **`GEOLOG_DB_PATH` and `GEOLOG_ARTIFACT_DIR`** so the database and the
+- **`BORELIA_DB_PATH` and `BORELIA_ARTIFACT_DIR`** so the database and the
   interpretation snapshot/lock files can be redirected. Without the latter, the
   test suite left wells locked for the running app.
 - Golden-value tests for the petrophysics compute path, hand-computed from the
@@ -620,7 +629,7 @@ and the schema may change between 0.x versions.
 ### Changed
 
 - Test suite is isolated per run and order-independent, and no longer writes to
-  `backend/geolog.db`.
+  `backend/borelia.db`.
 - `requirements.txt` includes `backend/requirements.txt` as a single source, with
   a separate `requirements-dev.txt`.
 - `AUTH_MODE=header` is a development convenience and is refused outside
@@ -650,9 +659,9 @@ and the schema may change between 0.x versions.
   interpreter, so an interpreter can sign off a template that only an admin can
   reopen. Deliberate, but worth confirming it matches your process.
 
-[Unreleased]: https://github.com/rinopatrick/geolog/compare/v0.8.1...HEAD
-[0.8.1]: https://github.com/rinopatrick/geolog/compare/v0.8.0...v0.8.1
-[0.8.0]: https://github.com/rinopatrick/geolog/compare/v0.7.0...v0.8.0
-[0.7.0]: https://github.com/rinopatrick/geolog/compare/v0.6.0...v0.7.0
-[0.6.0]: https://github.com/rinopatrick/geolog/compare/v0.2.0...v0.6.0
-[0.1.0]: https://github.com/rinopatrick/geolog/releases/tag/v0.1.0
+[Unreleased]: https://github.com/rinopatrick/borelia/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/rinopatrick/borelia/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/rinopatrick/borelia/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/rinopatrick/borelia/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/rinopatrick/borelia/compare/v0.2.0...v0.6.0
+[0.1.0]: https://github.com/rinopatrick/borelia/releases/tag/v0.1.0

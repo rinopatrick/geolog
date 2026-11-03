@@ -216,7 +216,7 @@ def record_request(
 
 def _flush_loop() -> None:
     try:
-        interval = float(os.getenv("GEOLOG_METRICS_FLUSH_SECONDS", "5") or 5)
+        interval = float(os.getenv("BORELIA_METRICS_FLUSH_SECONDS", "5") or 5)
     except ValueError:
         interval = 5.0
     interval = max(1.0, interval)
@@ -229,4 +229,4 @@ def _flush_loop() -> None:
 
 
 atexit.register(flush_metrics)
-threading.Thread(target=_flush_loop, name="geolog-metrics-flush", daemon=True).start()
+threading.Thread(target=_flush_loop, name="borelia-metrics-flush", daemon=True).start()

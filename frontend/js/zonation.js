@@ -1,5 +1,5 @@
 /**
- * Zonation + Net Pay Report Panel — standalone module for GeoLog.
+ * Zonation + Net Pay Report Panel — standalone module for Borelia.
  * Provides auto-zone computation, zone table rendering, and CSV/PDF export.
  */
 /* exported ZoneReportPanel */
@@ -61,7 +61,7 @@ class ZoneReportPanel {
 
             const resp = await fetch(`${this.apiBase}/${this.wellId}/auto-zone`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...window.geologAuthHeaders() },
+                headers: { 'Content-Type': 'application/json', ...window.boreliaAuthHeaders() },
                 body: JSON.stringify({ vsh_max, phie_min, sw_max, gap_merge_ft }),
             });
             if (!resp.ok) {
@@ -156,7 +156,7 @@ class ZoneReportPanel {
 
     async _downloadPDF() {
         const resp = await fetch(`${this.apiBase}/${this.wellId}/zone-report/pdf`, {
-            headers: window.geologAuthHeaders(),
+            headers: window.boreliaAuthHeaders(),
         });
         if (!resp.ok) {
             if (window.GeoToast) GeoToast.error(`PDF export failed: ${resp.status}`);

@@ -1,5 +1,5 @@
 /**
- * GeoLog — Oil & Gas Well Log Viewer Application
+ * Borelia — Oil & Gas Well Log Viewer Application
  */
 
 // ─── UI Utilities ────────────────────────────────────────────
@@ -12,9 +12,9 @@ window.escapeHtml = escapeHtml;
 
 // Shared by the standalone modules (qc.js, templates.js, units.js, ...).
 // They load before app.js, so call this at request time, not at load time.
-window.geologAuthHeaders = function () {
+window.boreliaAuthHeaders = function () {
     const headers = { 'X-User-Role': (window.app?.currentRole || 'viewer') };
-    const token = window.app?.authToken || localStorage.getItem('geolog_auth_token') || '';
+    const token = window.app?.authToken || localStorage.getItem('borelia_auth_token') || '';
     if (token) headers['Authorization'] = `Bearer ${token}`;
     return headers;
 };

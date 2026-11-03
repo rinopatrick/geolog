@@ -1,4 +1,4 @@
-"""Well router for GeoLog.
+"""Well router for Borelia.
 
 The largest route group: ingest (LAS/DLIS/LIS/CSV), formation tops, zones, DST and
 RFT, completion and production data, petrophysics, curve editing, deviation,
@@ -327,7 +327,7 @@ def export_las(wid: int, db: Session = Depends(get_db)):
     las += f"UWI.                  {well.uwi or 'N/A'}:    Unique Well Identifier\n"
     las += f"COMP.                 {well.operator or 'N/A'}:    Company\n"
     las += f"FLD.                  {well.field_name or 'N/A'}:    Field\n"
-    las += "SRVC.                 GeoLog:    Service Company\n"
+    las += "SRVC.                 Borelia:    Service Company\n"
     las += f"DATE.                 {datetime.datetime.now().strftime('%Y-%m-%d')}:    Date\n"
     las += f"STRT.{well.depth_unit or 'FT'}         {lr.start_depth or 0:.4f}                  START DEPTH\n"
     las += f"STOP.{well.depth_unit or 'FT'}         {lr.stop_depth or 0:.4f}                  STOP DEPTH\n"
@@ -395,7 +395,7 @@ def export_client_bundle(wid: int, db: Session = Depends(get_db)):
                 f"STOP. {float(lr.stop_depth or 0):>10.2f} {getattr(lr, 'depth_unit', 'FT')}:   Stop Depth",
                 f"STEP. {float(lr.step or 1):>10.4f} {getattr(lr, 'depth_unit', 'FT')}:   Step",
                 "NULL.              -999.25:   Null Value",
-                "COMP.                  GeoLog:   Company",
+                "COMP.                  Borelia:   Company",
                 f"DATE.          {__import__('datetime').date.today()}:   Date",
                 "~Curve Information",
             ]
@@ -447,7 +447,7 @@ def export_client_bundle(wid: int, db: Session = Depends(get_db)):
             zf.writestr("petro_params.json", json.dumps(p, indent=2))
 
         # 5. Summary report
-        report = f"# GeoLog Export Report\nWell: {well.name}\nDate: {__import__('datetime').datetime.now().isoformat()}\n\n"
+        report = f"# Borelia Export Report\nWell: {well.name}\nDate: {__import__('datetime').datetime.now().isoformat()}\n\n"
         report += f"## Log Runs\n- Depth range: {lr.start_depth} - {lr.stop_depth} ft\n- Points: {lr.num_points}\n\n" if lr else ""
         report += f"## Formation Tops ({len(tops)} entries)\n"
         for t in tops:

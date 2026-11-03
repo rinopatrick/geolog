@@ -1,7 +1,7 @@
-"""Alembic environment for GeoLog.
+"""Alembic environment for Borelia.
 
 The database URL comes from backend.database so the app and the migrations can
-never disagree about which file they are operating on (GEOLOG_DB_PATH, or the
+never disagree about which file they are operating on (BORELIA_DB_PATH, or the
 app default).
 
 `render_as_batch=True` is required for SQLite: without it, autogenerate cannot

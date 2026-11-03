@@ -1,4 +1,4 @@
-"""Operations router for GeoLog.
+"""Operations router for Borelia.
 
 Metrics, SLO status, alerts, health, observability, and the security-evidence
 gate family (manifest, attestation, freshness, gate/enforce/assert/check).
@@ -914,7 +914,7 @@ def ops_alert_rules(_role: str = Depends(require_viewer)):
             "description": "Prometheus text exposition format",
             "content": {
                 "text/plain": {
-                    "example": "# HELP geolog_requests_total Total HTTP requests observed\n# TYPE geolog_requests_total counter\ngeolog_requests_total 123"
+                    "example": "# HELP borelia_requests_total Total HTTP requests observed\n# TYPE borelia_requests_total counter\nborelia_requests_total 123"
                 }
             },
         }
@@ -931,29 +931,29 @@ def ops_metrics_prometheus(_role: str = Depends(require_viewer)):
         lat_count = int(OBS_METRICS.get("latency_ms_count", 0))
 
     lines = [
-        "# HELP geolog_requests_total Total HTTP requests observed",
-        "# TYPE geolog_requests_total counter",
-        f"geolog_requests_total {total}",
-        "# HELP geolog_requests_by_method_total HTTP requests by method",
-        "# TYPE geolog_requests_by_method_total counter",
+        "# HELP borelia_requests_total Total HTTP requests observed",
+        "# TYPE borelia_requests_total counter",
+        f"borelia_requests_total {total}",
+        "# HELP borelia_requests_by_method_total HTTP requests by method",
+        "# TYPE borelia_requests_by_method_total counter",
     ]
     for method, count in sorted(by_method.items()):
-        lines.append(f'geolog_requests_by_method_total{{method="{method}"}} {int(count)}')
+        lines.append(f'borelia_requests_by_method_total{{method="{method}"}} {int(count)}')
 
     lines += [
-        "# HELP geolog_requests_by_status_total HTTP requests by response status",
-        "# TYPE geolog_requests_by_status_total counter",
+        "# HELP borelia_requests_by_status_total HTTP requests by response status",
+        "# TYPE borelia_requests_by_status_total counter",
     ]
     for status, count in sorted(by_status.items()):
-        lines.append(f'geolog_requests_by_status_total{{status="{status}"}} {int(count)}')
+        lines.append(f'borelia_requests_by_status_total{{status="{status}"}} {int(count)}')
 
     lines += [
-        "# HELP geolog_request_latency_ms_sum Sum of request latency in milliseconds",
-        "# TYPE geolog_request_latency_ms_sum counter",
-        f"geolog_request_latency_ms_sum {lat_sum}",
-        "# HELP geolog_request_latency_ms_count Count of request latency samples",
-        "# TYPE geolog_request_latency_ms_count counter",
-        f"geolog_request_latency_ms_count {lat_count}",
+        "# HELP borelia_requests_latency_ms_sum Sum of request latency in milliseconds",
+        "# TYPE borelia_requests_latency_ms_sum counter",
+        f"borelia_requests_latency_ms_sum {lat_sum}",
+        "# HELP borelia_requests_latency_ms_count Count of request latency samples",
+        "# TYPE borelia_requests_latency_ms_count counter",
+        f"borelia_requests_latency_ms_count {lat_count}",
         "",
     ]
     return StreamingResponse(iter(["\n".join(lines)]), media_type="text/plain; version=0.0.4")
@@ -1024,7 +1024,7 @@ def ops_observability_status(_role: str = Depends(require_viewer)):
 @router.get("/otel-status", response_model=OpsOtelStatusResponse)
 def ops_otel_status(_role: str = Depends(require_viewer)):
     endpoint = (os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or "").strip()
-    service_name = (os.getenv("OTEL_SERVICE_NAME") or "geolog-app").strip() or "geolog-app"
+    service_name = (os.getenv("OTEL_SERVICE_NAME") or "borelia-app").strip() or "borelia-app"
     resource_attrs = (os.getenv("OTEL_RESOURCE_ATTRIBUTES") or "").strip()
     enabled = bool(endpoint)
     return {
@@ -1093,8 +1093,8 @@ def ops_evidence_status(
 
 @router.get("/security-posture-status", response_model=OpsSecurityPostureStatusResponse)
 def ops_security_posture_status(_role: str = Depends(require_viewer)):
-    secrets_source = (os.getenv("GEOLOG_SECRETS_SOURCE") or "").strip()
-    tls_required = (os.getenv("GEOLOG_REQUIRE_TLS", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
+    secrets_source = (os.getenv("BORELIA_SECRETS_SOURCE") or "").strip()
+    tls_required = (os.getenv("BORELIA_REQUIRE_TLS", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
     ci_security_gates_enabled = os.path.exists(".github/workflows/security-gates.yml")
     backup_drill_script_present = os.path.exists("scripts/backup_restore_drill.sh")
     branch_protection_checklist_present = os.path.exists("docs/BRANCH_PROTECTION_CHECKLIST.md")
@@ -1126,7 +1126,7 @@ def ops_security_posture_status(_role: str = Depends(require_viewer)):
 
 @router.get("/security-evidence-status", response_model=OpsSecurityEvidenceStatusResponse)
 def ops_security_evidence_status(_role: str = Depends(require_viewer)):
-    artifact_dir = (os.getenv("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
+    artifact_dir = (os.getenv("BORELIA_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
 
     def _resolve_paths(base_dir: str):
         root_report = os.path.join(base_dir, "report.json")
@@ -1219,7 +1219,7 @@ def ops_security_evidence_status(_role: str = Depends(require_viewer)):
 
 @router.get("/security-evidence/manifest", response_model=OpsSecurityEvidenceManifestResponse)
 def ops_security_evidence_manifest(sign: bool = False, kid: str | None = None, _role: str = Depends(require_viewer)):
-    artifact_dir = (os.getenv("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
+    artifact_dir = (os.getenv("BORELIA_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
 
     report_path = os.path.join(artifact_dir, "report.json")
     sig_path = os.path.join(artifact_dir, "report.signature.json")
@@ -1538,7 +1538,7 @@ def ops_security_evidence_attest(
     response_model=OpsSecurityEvidenceAttestResponse,
 )
 def ops_security_evidence_attest_latest(_role: str = Depends(require_viewer)):
-    artifact_dir = (os.getenv("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
+    artifact_dir = (os.getenv("BORELIA_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
     report_path = os.path.join(artifact_dir, "report.json")
     sig_path = os.path.join(artifact_dir, "report.signature.json")
 
@@ -1581,7 +1581,7 @@ def ops_security_evidence_attest_latest(_role: str = Depends(require_viewer)):
 )
 def ops_security_evidence_freshness(max_age_seconds: int = 86400, _role: str = Depends(require_viewer)):
     max_age_seconds = max(60, int(max_age_seconds))
-    artifact_dir = (os.getenv("GEOLOG_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
+    artifact_dir = (os.getenv("BORELIA_BACKUP_DRILL_ARTIFACT_DIR") or "artifacts/backup-drill").strip() or "artifacts/backup-drill"
     report_path = os.path.join(artifact_dir, "report.json")
     sig_path = os.path.join(artifact_dir, "report.signature.json")
 

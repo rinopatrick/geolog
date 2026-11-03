@@ -8,9 +8,9 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     env:
-      GEOLOG_ENV: ci
-      GEOLOG_ENFORCE_SECRETS_SOURCE: "false"
-      GEOLOG_ENABLE_DEMO_SEED: "true"
+      BORELIA_ENV: ci
+      BORELIA_ENFORCE_SECRETS_SOURCE: "false"
+      BORELIA_ENABLE_DEMO_SEED: "true"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

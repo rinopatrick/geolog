@@ -18,22 +18,22 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: geolog
-          POSTGRES_PASSWORD: geolog
-          POSTGRES_DB: geolog
+          POSTGRES_USER: borelia
+          POSTGRES_PASSWORD: borelia
+          POSTGRES_DB: borelia
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U geolog"
+          --health-cmd "pg_isready -U borelia"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
     env:
-      GEOLOG_ENV: ci
-      GEOLOG_ENFORCE_SECRETS_SOURCE: "false"
-      GEOLOG_ENABLE_DEMO_SEED: "false"
-      GEOLOG_DATABASE_URL: postgresql+psycopg://geolog:geolog@127.0.0.1:5432/geolog
-      GEOLOG_STATE_BACKEND: database
+      BORELIA_ENV: ci
+      BORELIA_ENFORCE_SECRETS_SOURCE: "false"
+      BORELIA_ENABLE_DEMO_SEED: "false"
+      BORELIA_DATABASE_URL: postgresql+psycopg://borelia:borelia@127.0.0.1:5432/borelia
+      BORELIA_STATE_BACKEND: database
       AUTH_MODE: jwt
       AUTH_JWT_SECRET: multi-instance-secret-0123456789-abcdef
       AUTH_JWT_ALGORITHMS: HS256
@@ -70,11 +70,11 @@ jobs:
         run: |
           set -euo pipefail
           nohup python -m uvicorn backend.main:app --host 127.0.0.1 --port 8001 \
-            > /tmp/geolog-a.log 2>&1 &
-          echo $! > /tmp/geolog-a.pid
+            > /tmp/borelia-a.log 2>&1 &
+          echo $! > /tmp/borelia-a.pid
           nohup python -m uvicorn backend.main:app --host 127.0.0.1 --port 8002 \
-            > /tmp/geolog-b.log 2>&1 &
-          echo $! > /tmp/geolog-b.pid
+            > /tmp/borelia-b.log 2>&1 &
+          echo $! > /tmp/borelia-b.pid
           for port in 8001 8002; do
             for i in {1..60}; do
               if curl -sf "http://127.0.0.1:${port}/api/health" >/dev/null; then
@@ -84,7 +84,7 @@ jobs:
               sleep 1
               if [ "$i" = "60" ]; then
                 echo "instance ${port} failed to start"
-                cat /tmp/geolog-a.log /tmp/geolog-b.log || true
+                cat /tmp/borelia-a.log /tmp/borelia-b.log || true
                 exit 1
               fi
             done
@@ -96,10 +96,10 @@ jobs:
       - name: Stop instances and show logs
         if: always()
         run: |
-          for pidfile in /tmp/geolog-a.pid /tmp/geolog-b.pid; do
+          for pidfile in /tmp/borelia-a.pid /tmp/borelia-b.pid; do
             if [ -f "$pidfile" ]; then kill "$(cat "$pidfile")" || true; fi
           done
           echo '--- instance A ---'
-          cat /tmp/geolog-a.log || true
+          cat /tmp/borelia-a.log || true
           echo '--- instance B ---'
-          cat /tmp/geolog-b.log || true
+          cat /tmp/borelia-b.log || true

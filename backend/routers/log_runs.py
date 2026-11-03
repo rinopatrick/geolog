@@ -1,4 +1,4 @@
-"""Log-run router for GeoLog.
+"""Log-run router for Borelia.
 
 Covers per-run curve access, depth shifting, filtering, editing and decimation.
 Extracted from backend/main.py; the helpers below were used only by these routes.

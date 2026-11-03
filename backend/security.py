@@ -6,7 +6,7 @@ Modes:
 
 Header mode takes the caller's role from a request header, so it is only safe
 where the network boundary is trusted. It is refused outside dev environments
-unless AUTH_MODE is set explicitly and GEOLOG_ENV says otherwise.
+unless AUTH_MODE is set explicitly and BORELIA_ENV says otherwise.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ DEV_ENVIRONMENTS = {"dev", "local", "test", "ci"}
 
 
 def current_env() -> str:
-    return (os.getenv("GEOLOG_ENV") or os.getenv("ENV") or "dev").strip().lower()
+    return (os.getenv("BORELIA_ENV") or os.getenv("ENV") or "dev").strip().lower()
 
 
 @dataclass
@@ -60,7 +60,7 @@ class AuthConfig:
         if mode == "header" and env not in DEV_ENVIRONMENTS:
             raise RuntimeError(
                 f"AUTH_MODE=header trusts a client-supplied role header, which is not "
-                f"allowed with GEOLOG_ENV={env!r}. Set AUTH_MODE=jwt."
+                f"allowed with BORELIA_ENV={env!r}. Set AUTH_MODE=jwt."
             )
         jwks_url = read_secret("AUTH_JWT_JWKS_URL") or None
         public_key = read_secret("AUTH_JWT_PUBLIC_KEY") or None

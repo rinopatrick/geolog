@@ -1,4 +1,4 @@
-"""Zonation + Net Pay Report router for GeoLog."""
+"""Zonation + Net Pay Report router for Borelia."""
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session

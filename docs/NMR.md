@@ -1,6 +1,6 @@
 # NMR T2
 
-GeoLog supports two NMR workflows:
+Borelia supports two NMR workflows:
 
 1. **Vendor T2 bins** — interpret existing bin curves synchronously.
 2. **Raw CPMG echoes** — regularized NNLS inversion as a background job.

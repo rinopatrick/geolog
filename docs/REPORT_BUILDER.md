@@ -5,7 +5,7 @@ Templates store a name, title and selected sections:
 ```json
 {
   "name": "Field review",
-  "title": "GeoLog Well Report",
+  "title": "Borelia Well Report",
   "sections": ["rock_source", "zonation", "production", "qc", "curves"]
 }
 ```

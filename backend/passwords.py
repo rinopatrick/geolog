@@ -20,7 +20,7 @@ SALT_BYTES = 16
 
 def _iterations() -> int:
     try:
-        value = int(os.getenv("GEOLOG_PBKDF2_ITERATIONS", str(DEFAULT_ITERATIONS)) or DEFAULT_ITERATIONS)
+        value = int(os.getenv("BORELIA_PBKDF2_ITERATIONS", str(DEFAULT_ITERATIONS)) or DEFAULT_ITERATIONS)
     except ValueError:
         return DEFAULT_ITERATIONS
     return value if value >= 50_000 else DEFAULT_ITERATIONS

@@ -1,4 +1,4 @@
-# GeoLog installation guide (operator)
+# Borelia installation guide (operator)
 
 Three paths, pick one. Developers wanting the fast loop should use Path A;
 a shared team deployment wants Path C.
@@ -40,8 +40,8 @@ docker compose up -d --build
 curl -sf http://localhost:8000/api/health
 ```
 
-Same as Path A but containerised. Data persists in the `geolog-data`
-volume. **Do not expose this to a network**: it runs `GEOLOG_ENV=dev`
+Same as Path A but containerised. Data persists in the `borelia-data`
+volume. **Do not expose this to a network**: it runs `BORELIA_ENV=dev`
 with trusted-header auth. For anything beyond localhost, use Path C.
 
 ## Path C — production single host
@@ -60,9 +60,9 @@ files, nightly backup cron). Minimum checklist before going live:
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `AUTH_MODE=header ... not allowed with GEOLOG_ENV=prod` | Header auth blocked outside dev | Set `AUTH_MODE=jwt` + IdP vars |
-| Alembic `FAILED: version ... is not a valid revision` | Stale `backend/geolog.db` from an older checkout | Delete the DB file (dev only) or restore a matching backup |
-| `port 8000 already in use` | Old server still running | Stop it, or use `--port 8001` and set `GEOLOG_BASE_URL` for e2e scripts |
+| `AUTH_MODE=header ... not allowed with BORELIA_ENV=prod` | Header auth blocked outside dev | Set `AUTH_MODE=jwt` + IdP vars |
+| Alembic `FAILED: version ... is not a valid revision` | Stale `backend/borelia.db` from an older checkout | Delete the DB file (dev only) or restore a matching backup |
+| `port 8000 already in use` | Old server still running | Stop it, or use `--port 8001` and set `BORELIA_BASE_URL` for e2e scripts |
 | Playwright `ERR_CONNECTION_REFUSED` | API not up before browser tests | Wait for `/api/health` first; CI does this in the Start API step |
 | `dlisio` import error on Python < 3.10 | Optional dep version guard | Use Python 3.11 (matches Docker) |
 | Slow `prospect-maps` (> seconds) | Too many cells × iterations | Reduce grid resolution or iterations; the endpoint caps at 2M draws |

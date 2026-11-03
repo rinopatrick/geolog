@@ -34,14 +34,14 @@ try:
 except ImportError:
     from backend.well_state import ARTIFACT_DIR
 
-JOB_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="geolog-job")
+JOB_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="borelia-job")
 JOBS_FILE = os.path.join(ARTIFACT_DIR, "jobs.json")
 JOBS_LOCK = threading.Lock()
 JOBS: dict[str, dict] = {}
 HANDLERS: dict[str, Callable[[dict[str, Any], str], Any]] = {}
 HANDLERS_LOCK = threading.Lock()
 WORKER_ID = f"{os.getpid()}:{uuid.uuid4().hex[:8]}"
-STALE_SECONDS = int(os.getenv("GEOLOG_JOB_STALE_SECONDS", "900") or 900)
+STALE_SECONDS = int(os.getenv("BORELIA_JOB_STALE_SECONDS", "900") or 900)
 
 
 def _db_enabled() -> bool:
@@ -302,4 +302,4 @@ def _reaper_loop() -> None:
             pass
 
 
-threading.Thread(target=_reaper_loop, name="geolog-job-reaper", daemon=True).start()
+threading.Thread(target=_reaper_loop, name="borelia-job-reaper", daemon=True).start()
