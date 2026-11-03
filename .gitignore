@@ -58,3 +58,7 @@ artifacts/
 __pycache__/
 
 .tmp-ui/
+
+# Local AI agent config (private, never pushed)
+/CLAUDE.md
+/docs/agents/
