@@ -49,6 +49,17 @@ jobs:
           cat /tmp/borelia-api.log || true
           exit 1
 
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install JS dependencies
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
       - name: Run Phase-3 SLO load gate
         run: |
           python scripts/slo_load_gate.py \
