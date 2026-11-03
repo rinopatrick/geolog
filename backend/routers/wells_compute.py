@@ -584,7 +584,7 @@ def compute_permeability(wid: int, data: dict, db: Session = Depends(get_db)):
     primary = selected_models[0]
     primary_valid = available[primary]["k_md"][np.isfinite(available[primary]["k_md"]) & (available[primary]["k_md"] > 0)]
 
-    return {
+    result = {
         "well_id": wid,
         "log_run_id": lr.id,
         "model": model,
@@ -611,6 +611,30 @@ def compute_permeability(wid: int, data: dict, db: Session = Depends(get_db)):
             "nmr_t2_curve": t2_cd.mnemonic if t2_cd else None,
         },
     }
+
+    if data.get("save"):
+        saved = []
+        for m in selected_models:
+            arr = np.asarray(available[m]["k_md"], dtype=np.float64)
+            mnemonic = f"PERM_{m.upper()}"
+            db.query(CurveData).filter(
+                CurveData.log_run_id == lr.id,
+                CurveData.mnemonic == mnemonic).delete()
+            valid = arr[np.isfinite(arr) & (arr > 0)]
+            db.add(CurveData(
+                log_run_id=lr.id, mnemonic=mnemonic,
+                unit="mD",
+                description=f"permeability {m}",
+                num_points=len(arr),
+                min_value=float(np.min(valid)) if len(valid) else None,
+                max_value=float(np.max(valid)) if len(valid) else None,
+                data_binary=np.where(np.isfinite(arr), arr, np.nan).tobytes(),
+            ))
+            saved.append(mnemonic)
+        db.commit()
+        result["saved"] = {"log_run_id": lr.id, "mnemonics": saved}
+
+    return result
 
 
 
