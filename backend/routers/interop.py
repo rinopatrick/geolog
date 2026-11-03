@@ -18,6 +18,13 @@ except ImportError:
 
 router = APIRouter(prefix="/api/interop", tags=["interop"])
 
+def _config_or_transport_error(exc: RuntimeError, db: Session) -> HTTPException:
+    """Missing server config is a 400. A live transport failure is a 502."""
+    db.rollback()
+    if "not configured" in str(exc):
+        return HTTPException(400, str(exc))
+    return HTTPException(502, str(exc))
+
 def _config_summary() -> dict:
     try:
         w = interop.witsml_config()
@@ -87,11 +94,13 @@ def witsml_pull(
                 report["logs"].extend(interop.import_witsml_logs(db, well, [log], import_curves))
             db.commit()
     except RuntimeError as exc:
-        db.rollback()
-        raise HTTPException(502, str(exc))
+        raise _config_or_transport_error(exc, db)
     except ValueError as exc:
         db.rollback()
         raise HTTPException(400, str(exc))
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(502, f"WITSML pull failed: {exc}")
     return report
 
 @router.post("/osdu/test")
@@ -110,8 +119,7 @@ def osdu_pull(request: Request, project_id: int = Query(...), limit: int = Query
     try:
         return interop.osdu_pull_wells(db, project_id, limit)
     except RuntimeError as exc:
-        db.rollback()
-        raise HTTPException(502, str(exc))
+        raise _config_or_transport_error(exc, db)
     except ValueError as exc:
         db.rollback()
         raise HTTPException(400, str(exc))
@@ -131,8 +139,7 @@ def osdu_pull_logs(request: Request, well_id: int = Query(...), wellbore_id: str
     try:
         return interop.osdu_pull_logs(db, well, ident, limit)
     except RuntimeError as exc:
-        db.rollback()
-        raise HTTPException(502, str(exc))
+        raise _config_or_transport_error(exc, db)
     except ValueError as exc:
         db.rollback()
         raise HTTPException(400, str(exc))
