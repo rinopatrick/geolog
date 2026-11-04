@@ -1,4 +1,4 @@
-# Contributing to GeoLog
+# Contributing to Borelia
 
 ## Setup
 
@@ -15,8 +15,8 @@ npm ci
 Useful environment for local work:
 
 ```bash
-export GEOLOG_ENV=dev
-export GEOLOG_ENABLE_DEMO_SEED=true
+export BORELIA_ENV=dev
+export BORELIA_ENABLE_DEMO_SEED=true
 export AUTH_JWT_SECRET=dev-only-secret-change-me
 ```
 
@@ -40,7 +40,7 @@ for f in frontend/js/*.js scripts/*.js; do node --check "$f"; done
 Browser smoke needs a running API:
 
 ```bash
-GEOLOG_ENV=dev GEOLOG_ENABLE_DEMO_SEED=true \
+BORELIA_ENV=dev BORELIA_ENABLE_DEMO_SEED=true \
   python -m uvicorn backend.main:app --port 8000
 npm run e2e
 ```

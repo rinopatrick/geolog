@@ -635,6 +635,15 @@ app.add_middleware(APIVersionAliasMiddleware)
 setup_tracing(app)
 
 
+def _enforce_rename_policy() -> None:
+    """Fail fast when stale GEOLOG_ env vars are present (breaking 1.0 rename)."""
+    stale = sorted(k for k in os.environ if k.startswith("GEOLOG_"))
+    if stale:
+        raise RuntimeError(
+            "Stale GEOLOG_ env vars present (%s); rename every GEOLOG_* to BORELIA_* "
+            "per docs/UPGRADE_1_0.md" % ", ".join(stale)
+        )
+
 def _enforce_secrets_source_policy() -> None:
     """Fail fast in non-dev environments when secrets source is not configured."""
     env = (os.getenv("BORELIA_ENV") or os.getenv("ENV") or "dev").strip().lower()
@@ -655,6 +664,7 @@ def _shutdown_security_guards():
 
 @app.on_event("startup")
 def _startup_security_guards():
+    _enforce_rename_policy()
     _enforce_secrets_source_policy()
     try:
         recovered = _recover_jobs()
