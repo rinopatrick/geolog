@@ -1,6 +1,6 @@
 {
   "name": "borelia-app",
-  "version": "0.19.0",
+  "version": "0.30.0",
   "private": true,
   "scripts": {
     "e2e:smoke": "node scripts/e2e_panel_smoke.js",
