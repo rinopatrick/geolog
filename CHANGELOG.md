@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, the API is not yet stable.
 
+## [0.30.0] - 2026-11-04
+
+### Added
+
+- **1.0 hardening gate.** Startup aborts on stale `GEOLOG_*` env vars with a
+  pointer to `docs/UPGRADE_1_0.md`. New `docs/UPGRADE_1_0.md` covers the
+  three line operator upgrade (env prefix, `borelia.db`, `borelia-data`
+  volume). New `docs/PANEL_INVENTORY_1_0.md` records nav 46 equals dispatch
+  46 with per-panel load behavior; the runtime empty/loading/error pass is
+  the bounded 1.0 UI work.
+
 ## [0.29.0] - 2026-11-03
 
 ### Changed (BREAKING)

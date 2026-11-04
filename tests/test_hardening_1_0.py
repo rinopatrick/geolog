@@ -49,3 +49,11 @@ def test_postgres_doc_states_offline_copy_and_stamp():
     text = (ROOT / "docs" / "POSTGRES.md").read_text(encoding="utf-8")
     assert "offline" in text.lower()
     assert "alembic stamp head" in text
+
+def test_panel_inventory_artifact_exists():
+    """Panel inventory must record nav/dispatch parity for the 1.0 UI bound."""
+    doc = ROOT / "docs" / "PANEL_INVENTORY_1_0.md"
+    assert doc.is_file(), "docs/PANEL_INVENTORY_1_0.md must exist"
+    text = doc.read_text(encoding="utf-8")
+    assert "46" in text
+    assert "No orphan" in text or "no orphan" in text.lower()
