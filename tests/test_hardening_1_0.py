@@ -57,3 +57,14 @@ def test_panel_inventory_artifact_exists():
     text = doc.read_text(encoding="utf-8")
     assert "46" in text
     assert "No orphan" in text or "no orphan" in text.lower()
+
+def test_js_rendered_result_panels_have_empty_guidance():
+    """Every JS-filled result div must show guidance before first run."""
+    import re
+    html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+    bare = []
+    for m in re.finditer(r'<div id="([A-Za-z]+Results)"([^>]*)>', html):
+        attrs = m.group(2)
+        if "empty-state" not in attrs and "data-empty" not in attrs:
+            bare.append(m.group(1))
+    assert bare == [], f"result divs without empty guidance: {bare}"
