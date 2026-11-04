@@ -455,7 +455,7 @@
                     <div class="form-row"><label>Baseline TOC (wt%)</label><input type="number" id="sourceRockTocBase" value="0" step="0.1"></div>
                     <div style="margin-top:8px"><button class="btn-sm" data-action="app.runSourceRock"><i data-lucide="microscope"></i> Compute TOC</button></div>
                     <div style="margin-top:8px"><button class="btn-sm" data-action="app.downloadRockSourceReport"><i data-lucide="file-down"></i> Rock/TOC PDF</button></div>
-                    <div id="sourceRockResults" style="font-size:12px;color:#8b949e;margin-top:8px"></div>
+                    <div id="sourceRockResults" data-empty="true" style="font-size:12px;color:#8b949e;margin-top:8px"><p>Select a method and run Compute TOC to see source rock results.</p></div>
                     <h3 style="margin-top:10px">Workflow Templates</h3>
                     <div id="templatePreview" style="font-size:12px;color:#8b949e;margin:6px 0 10px 0">Select a template to preview changes.</div>
                     <div id="templateCards" style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:10px"></div>
@@ -480,7 +480,7 @@
                         <button class="btn-sm" data-action="app.exportZonationReport"><i data-lucide="file-text"></i> Zonation CSV</button>
                     </div>
                 </div>
-                <div id="petroResults" class="petro-results">
+                <div id="petroResults" data-empty="true" class="petro-results">
                     <p style="color:#8b949e">Click Calculate to compute Sw, Vsh, and PHIE from loaded curves.</p>
                 </div>
             </div>
@@ -549,7 +549,7 @@
                     <input type="file" id="calibrationFileInput" accept=".csv" style="display:none">
                     <span id="calibrationStatus" class="toolbar-hint"></span>
                 </div>
-                <div id="sensResults" class="petro-results">
+                <div id="sensResults" data-empty="true" class="petro-results">
                     <p style="color:#8b949e">Set parameters in Petrophysics tab, then run sensitivity analysis.</p>
                 </div>
             </div>
@@ -599,7 +599,7 @@
                     <button class="btn-primary" data-action="app.runElectrofacies"><i data-lucide="play"></i> Classify</button>
                     <button class="btn-sm" data-action="app.runElectrofaciesAsync"><i data-lucide="timer"></i> Queue</button>
                 </div>
-                <div id="faciesResults" class="petro-results">
+                <div id="faciesResults" data-empty="true" class="petro-results">
                     <p style="color:#8b949e">Select curves and run K-means clustering to identify electrofacies.</p>
                 </div>
             </div>
@@ -667,7 +667,7 @@
                         <button class="btn-primary" data-action="app.runRwEstimation"><i data-lucide="play"></i> Estimate Rw</button>
                         <button class="btn-sm" data-action="app.applyRecommendedRw"><i data-lucide="check-circle"></i> Use this Rw</button>
                     </div>
-                    <div id="rwResults" style="margin-top:10px;font-size:12px;color:#8b949e"></div>
+                    <div id="rwResults" data-empty="true" style="margin-top:10px;font-size:12px;color:#8b949e"><p>Run the Rw workflow to see apparent water resistivity results.</p></div>
                     <div style="margin-top:10px"><canvas id="rwHingleCanvas" style="width:100%;height:220px;background:#0d1117;border-radius:8px"></canvas></div>
                 </div>
 
@@ -796,7 +796,7 @@
                         <select id="permApplyModel" class="depth-select" style="max-width:130px"></select>
                         <button class="btn-sm" data-action="app.applyPermeabilityToViewer"><i data-lucide="layers"></i> Overlay PERM</button>
                     </div>
-                    <div id="permResults" style="margin-top:10px;font-size:12px;color:#8b949e"></div>
+                    <div id="permResults" data-empty="true" style="margin-top:10px;font-size:12px;color:#8b949e"><p>Calibrate core data to compute permeability transforms.</p></div>
                     <div style="margin-top:10px"><canvas id="permCurveCanvas" style="width:100%;height:280px;background:#0d1117;border-radius:8px"></canvas></div>
                     <div style="margin-top:10px"><canvas id="permCrossplotCanvas" style="width:100%;height:280px;background:#0d1117;border-radius:8px"></canvas></div>
                     <div style="margin-top:10px"><canvas id="permFziCanvas" style="width:100%;height:200px;background:#0d1117;border-radius:8px"></canvas></div>
@@ -809,7 +809,7 @@
                     <div class="form-row"><label>Sensitivity</label><input type="number" id="autoPickThreshold" value="2.0" step="0.5"></div>
                     <div class="form-row"><label>Min gap (ft)</label><input type="number" id="autoPickGap" value="50" step="10"></div>
                     <button class="btn-primary" data-action="app.runAutoPickTops">Auto-Pick</button>
-                    <div id="autoPickResults" style="margin-top:8px;font-size:12px;color:#8b949e"></div>
+                    <div id="autoPickResults" data-empty="true" style="margin-top:8px;font-size:12px;color:#8b949e"><p>Run Auto-Pick to see candidate tops here.</p></div>
                 </div>
 
                 <div class="petro-summary" style="border:1px solid #30363d;border-radius:10px;padding:16px">
@@ -888,7 +888,7 @@
                         <label>Iterations<input id="econIterations" type="number" value="500" step="50"></label>
                     </div>
                     <div style="margin-top:8px"><button class="btn-primary" data-action="app.runProductionEconomics"><i data-lucide="calculator"></i> Run Economics</button></div>
-                    <div id="productionEconomicsResults" style="margin-top:10px;font-size:12px;color:#c9d1d9"></div>
+                    <div id="productionEconomicsResults" data-empty="true" style="margin-top:10px;font-size:12px;color:#c9d1d9"><p>Run Economics to see EUR, NPV, and payout here.</p></div>
                     <canvas id="productionEconomicsCanvas" width="1000" height="260" style="margin-top:8px"></canvas>
                 </div>
                 <div id="productionTable" class="stats-container"></div>
@@ -911,7 +911,7 @@
                 <button class="btn-primary" data-action="app.runProbabilityPlot"><i data-lucide="play"></i> Plot</button>
             </div>
             <div class="crossplot-container"><canvas id="probabilityCanvas"></canvas></div>
-            <div id="probResults" class="stats-container" style="margin-top:10px"></div>
+            <div id="probResults" data-empty="true" class="stats-container" style="margin-top:10px"><p style="color:#8b949e">Run the probability plot to see P90/P50/P10 bands here.</p></div>
         </div>
 
         <div id="moveablePanel" class="panel" style="display:none">
@@ -922,7 +922,7 @@
                 <button class="btn-primary" data-action="app.runMoveableOil"><i data-lucide="play"></i> Analyze</button>
             </div>
             <div class="crossplot-container"><canvas id="moveableCanvas"></canvas></div>
-            <div id="moiResults" class="stats-container" style="margin-top:10px"></div>
+            <div id="moiResults" data-empty="true" class="stats-container" style="margin-top:10px"><p style="color:#8b949e">Run the moveable oil analysis to see Rwa comparison here.</p></div>
         </div>
 
         <div id="dipplotPanel" class="panel" style="display:none">
@@ -931,7 +931,7 @@
                 <button class="btn-primary" data-action="app.runDipPlot"><i data-lucide="play"></i> Plot</button>
             </div>
             <div class="crossplot-container"><canvas id="dipCanvas"></canvas></div>
-            <div id="dipResults" class="stats-container" style="margin-top:10px"></div>
+            <div id="dipResults" data-empty="true" class="stats-container" style="margin-top:10px"><p style="color:#8b949e">Run the dip plot to see dip statistics here.</p></div>
         </div>
 
         <div id="bucklesPanel" class="panel" style="display:none">
@@ -941,7 +941,7 @@
                 <button class="btn-primary" data-action="app.runBuckles"><i data-lucide="play"></i> Plot</button>
             </div>
             <div class="crossplot-container"><canvas id="bucklesCanvas"></canvas></div>
-            <div id="buckResults" class="stats-container" style="margin-top:10px"></div>
+            <div id="buckResults" data-empty="true" class="stats-container" style="margin-top:10px"><p style="color:#8b949e">Run the Buckles plot to see bulk volume water here.</p></div>
         </div>
 
         <div id="hinglePanel" class="panel" style="display:none">
@@ -952,7 +952,7 @@
                 <button class="btn-primary" data-action="app.runHingle"><i data-lucide="play"></i> Plot</button>
             </div>
             <div class="crossplot-container"><canvas id="hingleCanvas"></canvas></div>
-            <div id="hingleResults" class="stats-container" style="margin-top:10px"></div>
+            <div id="hingleResults" data-empty="true" class="stats-container" style="margin-top:10px"><p style="color:#8b949e">Run the Hingle plot to see Rw lines here.</p></div>
         </div>
 
         <div id="calculatorPanel" class="panel" style="display:none">
@@ -966,7 +966,7 @@
                     <strong>Examples:</strong> (GR-20)/(150-20) → VSH_GR &nbsp;|&nbsp; sqrt(RT/NPHI) → RT_NPHI_RATIO &nbsp;|&nbsp; where(GR<50, 1, 0) → SAND_FLAG &nbsp;|&nbsp; log10(RT) → LOG_RT
                 </div>
                 <button class="btn-primary" data-action="app.runCurveCalc"><i data-lucide="play"></i> Calculate & Save</button>
-                <div id="calcResults" style="margin-top:12px;font-size:13px;color:#8b949e"></div>
+                <div id="calcResults" data-empty="true" style="margin-top:12px;font-size:13px;color:#8b949e"><p>Enter an expression and run Calculate to see results here.</p></div>
             </div>
         </div>
 
@@ -1036,7 +1036,7 @@
                 </div>
                 <button class="btn-primary" data-action="app.runBatchPetro"><i data-lucide="play"></i> Apply to All Wells</button>
                 <button class="btn-sm" data-action="app.runBatchPetroAsync"><i data-lucide="timer"></i> Queue Batch</button>
-                <div id="batchResults" style="margin-top:12px;font-size:13px;color:#8b949e"></div>
+                <div id="batchResults" data-empty="true" style="margin-top:12px;font-size:13px;color:#8b949e"><p>Queue a batch job to see progress and results here.</p></div>
             </div>
         </div>
 
@@ -1050,7 +1050,7 @@
                 </div>
             </div>
             <div class="crossplot-container"><canvas id="mapCanvas"></canvas></div>
-            <div id="mapResults" class="stats-container" style="margin-top:10px"></div>
+            <div id="mapResults" data-empty="true" class="stats-container" style="margin-top:10px"><p style="color:#8b949e">Load the map to see wells, ties, and prospects here.</p></div>
         </div>
 
         <div id="dashboardPanel" class="panel" style="display:none">
@@ -1622,7 +1622,7 @@
                 </div>
             </div>
             <div style="padding:20px">
-                <div id="usersResults">
+                <div id="usersResults" data-empty="true">
                     <p style="color:var(--text-muted)">Loading users...</p>
                 </div>
             </div>
