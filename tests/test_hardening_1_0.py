@@ -68,3 +68,21 @@ def test_js_rendered_result_panels_have_empty_guidance():
         if "empty-state" not in attrs and "data-empty" not in attrs:
             bare.append(m.group(1))
     assert bare == [], f"result divs without empty guidance: {bare}"
+
+def test_slow_view_loaders_show_loading_state():
+    """Dashboard, data table, users, seismic line loads must show loading."""
+    loaders = {
+        "frontend/js/app-reports.js": ["async loadDashboard", "async loadUsers"],
+        "frontend/js/app-data.js": ["async loadDataTable"],
+        "frontend/js/app-segy.js": ["async loadSeismicLines"],
+    }
+    missing = []
+    for path, names in loaders.items():
+        text = (ROOT / path).read_text(encoding="utf-8")
+        for name in names:
+            start = text.find(name)
+            assert start != -1, f"{name} missing in {path}"
+            body = text[start:start + 1500]
+            if "GeoLoading.show" not in body:
+                missing.append(f"{path}:{name}")
+    assert missing == [], f"loaders without loading state: {missing}"
