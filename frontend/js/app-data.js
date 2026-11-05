@@ -489,7 +489,7 @@ Object.assign(BoreliaApp.prototype, {
                 <button class="btn-icon-sm" data-action="app.mergeZone" data-args='[${i}]' title="Merge Next">
                     <i data-lucide="merge"></i>
                 </button>
-                <button class="btn-icon-sm" data-action="app.removeZone" data-args='[${i}]' title="Remove">
+                <button class="btn-icon-sm" data-action="app.removeZone" data-args='[${i}]' title="Delete zone">
                     <i data-lucide="x"></i>
                 </button>
             </div>
@@ -1394,6 +1394,7 @@ Object.assign(BoreliaApp.prototype, {
         const from = document.getElementById('dtFrom').value || '';
         const to = document.getElementById('dtTo').value || '';
         const limit = document.getElementById('dtLimit').value || 200;
+        GeoLoading.show('Loading data table...');
         try {
             let url = `/wells/${this.currentWell.id}/data-table?limit=${limit}`;
             if (from) url += `&from_depth=${from}`;
@@ -1416,7 +1417,7 @@ Object.assign(BoreliaApp.prototype, {
             }
             html += '</tbody></table></div>';
             document.getElementById('dataTableContent').innerHTML = html;
-        } catch (e) { GeoToast.error(e.message); }
+        } catch (e) { GeoToast.error(e.message); } finally { GeoLoading.hide(); }
     }
 ,
 

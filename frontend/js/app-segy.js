@@ -39,6 +39,7 @@ Object.assign(BoreliaApp.prototype, {
         const projectId = this._segyProjectId();
         const select = document.getElementById('segyLineSelect');
         if (!projectId || !select) return;
+        GeoLoading.show('Loading seismic lines...');
         try {
             const lines = await this._api(`/projects/${projectId}/seismic`);
             select.innerHTML = lines.map(line =>
@@ -52,7 +53,7 @@ Object.assign(BoreliaApp.prototype, {
             }
         } catch (e) {
             GeoToast.error('SEG-Y list failed: ' + e.message);
-        }
+        } finally { GeoLoading.hide(); }
     },
 
     async loadSeismicLine(lineId) {

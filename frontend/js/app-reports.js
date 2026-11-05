@@ -357,6 +357,7 @@ Object.assign(BoreliaApp.prototype, {
 
     async loadDashboard() {
         if (!this.projects?.[0]) return;
+        GeoLoading.show('Loading dashboard...');
         try {
             const data = await this._api(`/projects/${this.projects[0].id}/summary`);
             let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">';
@@ -404,7 +405,7 @@ Object.assign(BoreliaApp.prototype, {
                 html += '</div>';
             }
             document.getElementById('dashboardContent').innerHTML = html;
-        } catch (e) { GeoToast.error(e.message); }
+        } catch (e) { GeoToast.error(e.message); } finally { GeoLoading.hide(); }
     }
 ,
 
@@ -731,10 +732,11 @@ Object.assign(BoreliaApp.prototype, {
 ,
 
     async loadUsers() {
+        GeoLoading.show('Loading users...');
         try {
             const users = await this._api('/users');
             this._renderUsers(users || []);
-        } catch { }
+        } catch { } finally { GeoLoading.hide(); }
     }
 ,
 
